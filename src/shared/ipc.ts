@@ -32,6 +32,14 @@ export const IPC = {
  */
 export const DELEGATED_AUTH_METHOD_ID = 'browser-auth-delegated'
 
+/**
+ * The `authMethods` id for Vibe's agent-driven (blocking) browser sign-in
+ * (acp-capture §8) — the ADR-0003 fallback used when the delegated method is
+ * not advertised. A single `authenticate({methodId})` call; the agent opens the
+ * browser and blocks until the user finishes.
+ */
+export const BLOCKING_AUTH_METHOD_ID = 'browser-auth'
+
 export interface VibeDetectResult {
   vibeFound: boolean
   vibeAcpFound: boolean

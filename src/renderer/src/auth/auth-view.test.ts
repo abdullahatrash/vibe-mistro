@@ -103,6 +103,14 @@ describe('selectAuthView', () => {
     })
   })
 
+  it('falls back to browser-auth when the delegated method is not advertised (#17)', () => {
+    // Older vibe-acp doesn't honor the delegated opt-in, so only the blocking
+    // `browser-auth` method is advertised. The selector must pick it — that id
+    // is what flows to main's `signIn`, driving the blocking fallback.
+    const view = selectAuthView(initialAuthViewState([BROWSER_AUTH]))
+    expect(view).toMatchObject({ kind: 'sign-in', methodId: 'browser-auth' })
+  })
+
   it('shows a signing-in view during the browser step', () => {
     const state = authReducer(initialAuthViewState([DELEGATED]), { type: 'sign-in-start' })
     expect(selectAuthView(state)).toEqual({ kind: 'signing-in' })

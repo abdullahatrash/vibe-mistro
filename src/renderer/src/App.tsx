@@ -157,10 +157,12 @@ function SignInPanel({
   onSignedIn: () => void
 }): JSX.Element {
   const [state, dispatch] = useReducer(authReducer, authMethods, initialAuthViewState)
-  // Generation counter: bumped on every attempt start and on cancel. The
-  // delegated `complete` long-poll can't be aborted over ACP, so a cancelled (or
-  // superseded) attempt's eventual result must be ignored rather than clobber
-  // the panel — we only apply a result whose generation is still current.
+  // Generation counter: bumped on every attempt start and on cancel. Neither the
+  // delegated `complete` long-poll nor the blocking `browser-auth` call can be
+  // aborted over ACP, so a cancelled (or superseded) attempt's eventual result
+  // must be ignored rather than clobber the panel — we only apply a result whose
+  // generation is still current. (This guard is method-agnostic: it covers both
+  // the delegated primary and the blocking fallback.)
   const attemptRef = useRef(0)
   const view = selectAuthView(state)
 

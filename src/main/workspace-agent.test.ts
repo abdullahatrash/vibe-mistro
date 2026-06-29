@@ -377,15 +377,104 @@ describe('WorkspaceAgent — sign in (browser-auth-delegated)', () => {
     expect(opened).toEqual([])
   })
 
-  it('rejects a non-delegated methodId with a clear message (no requests sent)', async () => {
+  it('rejects an unsupported methodId with a clear message (no requests sent)', async () => {
     const fake = makeCapturingFake()
     const agent = await connectSignedOut(fake, () => {})
 
-    const err = await agent.signIn('browser-auth').catch((e: unknown) => e)
+    // Neither captured method (browser-auth-delegated / browser-auth): refused
+    // up front so we never send a request the agent can't service.
+    const err = await agent.signIn('api-key').catch((e: unknown) => e)
     expect(err).toBeInstanceOf(WorkspaceAgentError)
-    expect((err as WorkspaceAgentError).message).toMatch(/delegated/i)
-    // It never round-trips delegated-shaped requests to the blocking method.
+    expect((err as WorkspaceAgentError).message).toMatch(/not supported/i)
     expect(authSent(fake)).toEqual([])
+  })
+})
+
+// --- #17: browser-auth blocking fallback ------------------------------------
+
+const BLOCKING = 'browser-auth'
+
+/** The blocking `browser-auth` success response (acp-capture §8) — verbatim. */
+function blockingResult(): unknown {
+  return { _meta: { [BLOCKING]: { persistResult: 'completed', status: 'completed' } } }
+}
+
+describe('WorkspaceAgent — sign in (browser-auth blocking fallback)', () => {
+  it('sends a single blocking authenticate({methodId:"browser-auth"}) then re-queries status → signed-in', async () => {
+    const fake = makeCapturingFake()
+    const opened: string[] = []
+    const agent = await connectSignedOut(fake, (url) => opened.push(url))
+
+    const signingIn = agent.signIn(BLOCKING)
+
+    // A single blocking authenticate is sent immediately; the AGENT opens the
+    // browser and blocks until the user finishes.
+    await new Promise((r) => setTimeout(r, 0))
+    const authReqs = authSent(fake)
+    expect(authReqs).toHaveLength(1)
+    // ONLY the methodId crosses the wire — no delegated-shaped action/attemptId.
+    expect(authReqs[0]?.params).toEqual({ methodId: BLOCKING })
+    expect(authReqs[0]?.params?.action).toBeUndefined()
+    expect(authReqs[0]?.params?.attemptId).toBeUndefined()
+    // The agent drives its own browser — the client never opens a URL here.
+    expect(opened).toEqual([])
+
+    // The agent unblocks with the captured success meta (we discard it — ADR-0003).
+    fake.feed(JSON.stringify({ jsonrpc: '2.0', id: authReqs[0]?.id, result: blockingResult() }) + '\n')
+
+    // It then re-queries _auth/status to confirm signed-in.
+    await new Promise((r) => setTimeout(r, 0))
+    const statusReqs = sent(fake).filter((m) => m.method === '_auth/status')
+    fake.feed(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: statusReqs[statusReqs.length - 1]?.id,
+        result: { authenticated: true, authState: 'os_keyring', signOutAvailable: true },
+      }) + '\n',
+    )
+
+    await expect(signingIn).resolves.toBe('signed-in')
+    expect(agent.authState).toBe('signed-in')
+  })
+
+  it('rejects (recoverably) when the blocking authenticate fails — no wedge', async () => {
+    const fake = makeCapturingFake()
+    const agent = await connectSignedOut(fake, () => {})
+
+    const signingIn = agent.signIn(BLOCKING)
+    signingIn.catch(() => {}) // avoid an unhandled rejection before we assert
+
+    await new Promise((r) => setTimeout(r, 0))
+    const authReq = authSent(fake)[0]
+    fake.feed(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: authReq?.id,
+        error: { code: -32603, message: 'browser flow failed' },
+      }) + '\n',
+    )
+
+    await expect(signingIn).rejects.toBeInstanceOf(WorkspaceAgentError)
+    // The failure leaves auth state untouched (still signed-out) — never wedged,
+    // and it never re-queries status after the failed authenticate.
+    expect(agent.authState).toBe('not-signed-in')
+    expect(sent(fake).some((m) => m.method === '_auth/status' && m.id! > authReq!.id!)).toBe(false)
+  })
+
+  it('rejects when the process exits while the blocking authenticate is in flight (no wedge)', async () => {
+    const fake = makeCapturingFake()
+    const agent = await connectSignedOut(fake, () => {})
+
+    const signingIn = agent.signIn(BLOCKING)
+    signingIn.catch(() => {})
+
+    // The blocking call can't be cancelled over ACP; its no-wedge property
+    // relies on AcpClient.rejectAllPending firing on `exit`. Die mid-flight.
+    await new Promise((r) => setTimeout(r, 0))
+    expect(authSent(fake)).toHaveLength(1)
+    fake.emitExit(1)
+
+    await expect(signingIn).rejects.toBeInstanceOf(WorkspaceAgentError)
   })
 })
 

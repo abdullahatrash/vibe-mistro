@@ -3,7 +3,7 @@ import { AcpClient, type SpawnFn } from './acp/client'
 import { handleFsReadTextFile, type ReadTextFn } from './acp/fs-read'
 import { handleFsWriteTextFile, type WriteTextFn } from './acp/fs-write'
 import { classifyAuthError, classifyAuthStatus, extractSignOutAvailable } from './auth/auth-state'
-import { DELEGATED_AUTH_METHOD_ID } from '../shared/ipc'
+import { BLOCKING_AUTH_METHOD_ID, DELEGATED_AUTH_METHOD_ID } from '../shared/ipc'
 import type {
   AuthMethod,
   AuthState,
@@ -221,52 +221,82 @@ export class WorkspaceAgent extends EventEmitter {
   }
 
   /**
-   * Drive Vibe's client-driven browser sign-in (`browser-auth-delegated`, the
-   * ADR-0003 primary path; acp-capture §8). Non-blocking `start` mints a
-   * `signInUrl` we open in the system browser; the long-poll `complete` awaits
-   * the user finishing in the browser and persists the key to Vibe's keyring;
-   * we then re-query `_auth/status` to confirm. We never see or store the
-   * credential. Returns the post-sign-in `AuthState` (`signed-in` on success);
-   * rejects (without wedging) on failure, cancel, an expired/unknown attempt
-   * (-32602), or early process exit.
+   * Drive Vibe's browser sign-in, dispatching on the advertised `methodId`
+   * (acp-capture §8). Two captured modes (ADR-0003):
+   *   - `browser-auth-delegated` (primary): the client-driven two-step
+   *     `start`/`complete`, where WE open the `signInUrl` (see `signInDelegated`).
+   *   - `browser-auth` (fallback): a single agent-driven blocking call, where the
+   *     AGENT opens the browser (see `signInBlocking`).
+   * Any other id is refused up front — we never send an unknown/delegated-shaped
+   * request to a method that can't handle it. Both modes re-query `_auth/status`
+   * and return the post-sign-in `AuthState` (`signed-in` on success); both reject
+   * (without wedging) on failure, cancel, or early process exit. We never see or
+   * store the credential.
    */
   async signIn(methodId: string): Promise<AuthState> {
     if (!this.initialized) {
       throw new WorkspaceAgentError('Agent is not initialized; call start() first.')
     }
-    // We only drive the delegated two-step. Sending `action:start/complete` to
-    // the blocking `browser-auth` method would fail silently, so reject any
-    // other method up front. (The blocking fallback is a separate slice.)
-    if (methodId !== DELEGATED_AUTH_METHOD_ID) {
-      throw new WorkspaceAgentError(
-        'Delegated browser sign-in is unavailable for this agent.',
-        AUTH_HINT,
-      )
-    }
-    // Unlike start(), this does NOT race `earlyFailure`; its no-wedge property
-    // relies on AcpClient.rejectAllPending firing on `exit`/`stop`, which rejects
-    // any in-flight authenticate/_auth/status request. Keep that on refactor.
     try {
-      const started = await this.client.request('authenticate', { methodId, action: 'start' })
-      const meta = extractDelegatedMeta(started, methodId)
-      // Fail fast before opening the browser or sending a doomed `complete`
-      // (which would surface a raw -32602) if `start` returned no attempt.
-      if (!meta?.attemptId) {
-        throw new WorkspaceAgentError('Sign-in could not start — Vibe returned no attempt.', AUTH_HINT)
-      }
-      if (meta.signInUrl) this.openUrl?.(meta.signInUrl)
-
-      await this.client.request('authenticate', {
-        methodId,
-        action: 'complete',
-        attemptId: meta.attemptId,
-      })
-
-      const status = await this.client.request('_auth/status')
-      return this.applyAuthStatus(status)
+      if (methodId === DELEGATED_AUTH_METHOD_ID) return await this.signInDelegated(methodId)
+      if (methodId === BLOCKING_AUTH_METHOD_ID) return await this.signInBlocking(methodId)
+      // Neither captured method: refuse rather than send a request the agent
+      // can't service (which would surface a raw -32601/-32602).
+      throw new WorkspaceAgentError(`Sign-in method '${methodId}' is not supported.`, AUTH_HINT)
     } catch (err) {
       throw this.toSignInError(err)
     }
+  }
+
+  /**
+   * The client-driven delegated two-step (`browser-auth-delegated`, ADR-0003
+   * primary; acp-capture §8). Non-blocking `start` mints a `signInUrl` we open in
+   * the system browser; the long-poll `complete` awaits the user finishing and
+   * persists the key to Vibe's keyring; we then re-query `_auth/status` to
+   * confirm. Rejects (recoverably) on an expired/unknown attempt (-32602).
+   *
+   * Unlike start(), this does NOT race `earlyFailure`; its no-wedge property
+   * relies on AcpClient.rejectAllPending firing on `exit`/`stop`, which rejects
+   * any in-flight authenticate/_auth/status request. Keep that on refactor.
+   */
+  private async signInDelegated(methodId: string): Promise<AuthState> {
+    const started = await this.client.request('authenticate', { methodId, action: 'start' })
+    const meta = extractDelegatedMeta(started, methodId)
+    // Fail fast before opening the browser or sending a doomed `complete`
+    // (which would surface a raw -32602) if `start` returned no attempt.
+    if (!meta?.attemptId) {
+      throw new WorkspaceAgentError('Sign-in could not start — Vibe returned no attempt.', AUTH_HINT)
+    }
+    if (meta.signInUrl) this.openUrl?.(meta.signInUrl)
+
+    await this.client.request('authenticate', {
+      methodId,
+      action: 'complete',
+      attemptId: meta.attemptId,
+    })
+
+    const status = await this.client.request('_auth/status')
+    return this.applyAuthStatus(status)
+  }
+
+  /**
+   * The agent-driven blocking fallback (`browser-auth`, ADR-0003 fallback;
+   * acp-capture §8) — used when the delegated method is not advertised. A SINGLE
+   * `authenticate({methodId})` with NO `action`/`attemptId`: the AGENT opens the
+   * browser and the call BLOCKS until the user finishes, then persists the key to
+   * Vibe's keyring. We open no URL (the agent does) and discard the response —
+   * `persistResult` is a credential signal we never read (ADR-0003) — then
+   * re-query `_auth/status` to confirm.
+   *
+   * Like `signInDelegated`'s `complete`, this blocking call cannot be cancelled
+   * over ACP; its no-wedge property relies on AcpClient.rejectAllPending firing on
+   * `exit`/`stop` (plus the renderer's attempt-generation guard + Cancel button).
+   * Keep that on refactor.
+   */
+  private async signInBlocking(methodId: string): Promise<AuthState> {
+    await this.client.request('authenticate', { methodId })
+    const status = await this.client.request('_auth/status')
+    return this.applyAuthStatus(status)
   }
 
   /**
