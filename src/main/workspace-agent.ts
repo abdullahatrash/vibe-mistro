@@ -16,8 +16,10 @@ import type { ThreadInfo, ThreadModes, ThreadModels } from '../shared/ipc'
 const PROTOCOL_VERSION = 1
 const CLIENT_INFO = { name: 'vibe-monitor', version: '0.0.1' } as const
 
-const AUTH_HINT = 'Run `vibe` to sign in, or `vibe --setup` to configure your Mistral Vibe account.'
-const SPAWN_HINT = 'Install Mistral Vibe and ensure `vibe-acp` is on your PATH, then run `vibe` to sign in.'
+export const AUTH_HINT =
+  'Run `vibe` to sign in, or `vibe --setup` to configure your Mistral Vibe account.'
+export const SPAWN_HINT =
+  'Install Mistral Vibe and ensure `vibe-acp` is on your PATH, then run `vibe` to sign in.'
 
 /** A failure surfaced to the renderer, optionally with an actionable hint. */
 export class WorkspaceAgentError extends Error {
@@ -148,6 +150,8 @@ export class WorkspaceAgent extends EventEmitter {
 
     const thread: ThreadInfo = {
       sessionId: result.sessionId,
+      // `session/new` returns no title in the capture — the Thread title arrives
+      // later via the `session_info_update` notification (TB2). This is defensive.
       title: result.title ?? null,
       modes: result.modes ?? null,
       models: result.models ?? null,
@@ -187,15 +191,18 @@ export class WorkspaceAgent extends EventEmitter {
     const rpc = err as { code?: number; message?: string; data?: unknown }
     const message = rpc?.message ?? (err instanceof Error ? err.message : String(err))
 
-    if (this.isUnauthenticated(rpc, message)) {
+    if (this.isUnauthenticated(message)) {
       return new WorkspaceAgentError(`Not signed in to Mistral Vibe: ${message}`, AUTH_HINT)
     }
     return new WorkspaceAgentError(message)
   }
 
-  private isUnauthenticated(rpc: { code?: number }, message: string): boolean {
-    // vibe-acp reports an UnauthenticatedError when no Studio session exists.
-    if (rpc?.code === -32000) return true
+  private isUnauthenticated(message: string): boolean {
+    // The real UnauthenticatedError code is unconfirmed — we never captured one.
+    // We deliberately do NOT key on the JSON-RPC code (`-32000` is the generic
+    // server-error code, so trusting it misclassifies generic/internal errors
+    // as "Not signed in"). Match on the message only. Verify the actual auth
+    // error shape against the live binary and tighten this later.
     return /unauthenticated|not authenticated|authentication required|requires authentication|sign[- ]?in/i.test(
       message,
     )

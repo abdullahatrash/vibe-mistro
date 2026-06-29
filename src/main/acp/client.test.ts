@@ -153,6 +153,26 @@ describe('AcpClient transport (Seam B)', () => {
     expect(init.protocolVersion).toBe(1)
   })
 
+  it('rejects an in-flight request when an {id,error} response arrives', async () => {
+    const { fake, client } = setup()
+    const promise = client.request('session/new', { cwd: '/abs', mcpServers: [] })
+
+    fake.feed(
+      JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32603, message: 'boom' } }) + '\n',
+    )
+
+    await expect(promise).rejects.toMatchObject({ code: -32603, message: 'boom' })
+  })
+
+  it('rejects pending requests when the child exits (race-against-early-exit)', async () => {
+    const { fake, client } = setup()
+    const promise = client.request('initialize', {})
+
+    fake.emitExit(1)
+
+    await expect(promise).rejects.toThrow(/exited/)
+  })
+
   it('emits session/update notifications on the notification event', () => {
     const { fake, client } = setup()
     const received: RpcLine[] = []

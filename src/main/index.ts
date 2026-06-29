@@ -96,6 +96,8 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
+  // The agents Map is process-global, which is fine for single-window TB1.
+  // A future multi-window slice should track + dispose agents per window.
   for (const agent of agents.values()) agent.stop()
   agents.clear()
   if (process.platform !== 'darwin') app.quit()
