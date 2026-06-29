@@ -24,7 +24,10 @@ import { groupThreadsByWorkspace, MetadataStore } from './persistence/metadata-s
 import {
   acpEventEntry,
   resolvePermissionEntry,
+  sessionIdFromPayload,
   TranscriptStore,
+  turnCompleteEntry,
+  turnErrorEntry,
   userPromptEntry,
   type TranscriptEntry,
 } from './persistence/transcript'
@@ -48,19 +51,25 @@ let metadataStore: MetadataStore | null = null
 let transcriptStore: TranscriptStore | null = null
 
 /**
- * Bridge the ACP-keyed event flow to the JSONL key. Streamed events + permission
- * replies cross main keyed by `agentId` (the chokepoints carry no `sessionId`),
- * but the transcript is keyed by the minted Thread `id` (TB1). We populate this
- * `agentId -> threadId` index when a Thread is recorded; the store's
- * `findThreadIdBySessionId` is the secondary path (e.g. `sendPrompt`, which does
- * carry a `sessionId`). A miss skips the tee — never breaking the live flow.
+ * Bridge the ACP-keyed event flow to the JSONL key (the minted Thread `id`, TB1).
+ * The PRIMARY route is the event's own ACP `sessionId` (via the store) so each
+ * event/prompt lands in ITS Thread even when one agent has opened several Threads
+ * in sequence — the `agentId -> threadId` map below is last-write-wins, so a late
+ * event from a prior session would misroute under it. The map is the FALLBACK,
+ * for chokepoints with no sessionId in hand (e.g. `respondPermission`).
+ *
+ * Residual (documented): both routes miss during the brief window after
+ * `session/new` returns but before `recordThread` persists the sessionId +
+ * seeds the map — a `session/update` streamed THEN (notably the immediate
+ * `available_commands_update`, not rendered this slice) is dropped from replay.
+ * The Thread title is unaffected — it's also persisted in the metadata record.
  */
 const transcriptThreads = new Map<string, string>()
 
-/** Resolve the active Thread id for a chokepoint, or null to skip the tee. */
+/** Resolve the Thread id for a chokepoint, or null to skip the tee (best-effort). */
 function threadIdForTee(agentId: string, sessionId?: string | null): string | null {
   return (
-    transcriptThreads.get(agentId) ?? metadataStore?.findThreadIdBySessionId(sessionId ?? null) ?? null
+    metadataStore?.findThreadIdBySessionId(sessionId ?? null) ?? transcriptThreads.get(agentId) ?? null
   )
 }
 
@@ -215,9 +224,10 @@ function registerIpc(): void {
     })
 
     agent.on('event', (payload: unknown) => {
-      // Tee each streamed payload to the active Thread's transcript (ADR-0005)
-      // before forwarding it — best-effort, never gating the live forward.
-      teeTranscript(threadIdForTee(agentId), acpEventEntry(payload))
+      // Tee each streamed payload to its Thread's transcript (ADR-0005), routed
+      // by the event's OWN sessionId, before forwarding it — best-effort, never
+      // gating the live forward.
+      teeTranscript(threadIdForTee(agentId, sessionIdFromPayload(payload)), acpEventEntry(payload))
       if (!event.sender.isDestroyed()) {
         event.sender.send(IPC.acpEvent, { agentId, payload })
       }
@@ -268,17 +278,27 @@ function registerIpc(): void {
       // Tee the user's prompt (the conversation INPUT) before sending it, so it
       // precedes the streamed events it triggers. Main has no renderer item id,
       // so we mint one — it's an opaque replay key, never matched against.
-      teeTranscript(threadIdForTee(args.agentId, args.sessionId), userPromptEntry(randomUUID(), args.text))
+      const threadId = threadIdForTee(args.agentId, args.sessionId)
+      teeTranscript(threadId, userPromptEntry(randomUUID(), args.text))
       try {
         const result = await agent.prompt(args.sessionId, args.text)
+        // Tee the clean turn end: this signal lives ONLY in this IPC response
+        // (never an `acp:event`), so without it a replay leaves `isProcessing`
+        // stuck true. Serialized after the turn's events (TranscriptStore chain).
+        teeTranscript(threadId, turnCompleteEntry())
         return { ok: true, result }
       } catch (err) {
         // Mid-session expiry (-32000): keep the agent alive so the renderer can
-        // re-auth in place on the same agent; don't stop it.
+        // re-auth in place on the same agent; don't stop it. This is a re-auth
+        // flow, NOT a conversation error — tee `turn-complete` (the renderer
+        // synthesizes no ErrorItem here either), so replay isn't left processing.
         if (err instanceof WorkspaceAgentError && err.authState === 'not-signed-in') {
+          teeTranscript(threadId, turnCompleteEntry())
           return { ok: false, kind: 'not-signed-in', agentId: args.agentId, authMethods: agent.authMethods }
         }
-        return { ok: false, kind: 'error', error: err instanceof Error ? err.message : String(err) }
+        const message = err instanceof Error ? err.message : String(err)
+        teeTranscript(threadId, turnErrorEntry(message))
+        return { ok: false, kind: 'error', error: message }
       }
     },
   )

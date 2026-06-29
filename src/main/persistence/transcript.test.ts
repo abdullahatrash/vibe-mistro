@@ -6,7 +6,10 @@ import {
   acpEventEntry,
   parseTranscript,
   resolvePermissionEntry,
+  sessionIdFromPayload,
   TranscriptStore,
+  turnCompleteEntry,
+  turnErrorEntry,
   userPromptEntry,
   type TranscriptEntry,
 } from './transcript'
@@ -145,5 +148,86 @@ describe('entry constructors mirror the reducer inputs', () => {
       optionId: 'deny',
       name: null,
     })
+  })
+})
+
+describe('TranscriptStore serializes concurrent appends (M1)', () => {
+  it('preserves CALL order for fire-and-forget appends even when the writer reorders by timing', async () => {
+    const written: string[] = []
+    let call = 0
+    // A writer whose completion delay DECREASES with call order (first call is
+    // slowest). Without the per-Thread chain these un-awaited writes would land
+    // out of order; serialization forces strict call order.
+    const append = (_path: string, line: string): Promise<void> => {
+      const delay = (10 - call++) * 4
+      return new Promise((resolve) =>
+        setTimeout(() => {
+          written.push(line)
+          resolve()
+        }, delay),
+      )
+    }
+    const store = new TranscriptStore({ dir, append })
+
+    let tail: Promise<void> = Promise.resolve()
+    for (let i = 0; i < 10; i++) {
+      // Fire-and-forget exactly like the production tee — do NOT await each.
+      tail = store.append('thread-serial', { t: 'user-prompt', id: `u${i}`, text: String(i) })
+    }
+    await tail
+
+    expect(written.map((l) => (JSON.parse(l) as { text: string }).text)).toEqual(
+      Array.from({ length: 10 }, (_, i) => String(i)),
+    )
+  })
+
+  it('preserves order with the real fs writer over a temp dir (mirrors production concurrency)', async () => {
+    const store = storeAt()
+    const id = 'thread-serial-fs'
+
+    let tail: Promise<void> = Promise.resolve()
+    for (let i = 0; i < 20; i++) {
+      tail = store.append(id, { t: 'user-prompt', id: `u${i}`, text: String(i) })
+    }
+    await tail
+
+    const texts = (await store.read(id)).map((e) => (e as { text: string }).text)
+    expect(texts).toEqual(Array.from({ length: 20 }, (_, i) => String(i)))
+  })
+})
+
+describe('turn-outcome entries (S2)', () => {
+  it('constructs turn-complete / turn-error entries mirroring the reducer actions', () => {
+    expect(turnCompleteEntry()).toEqual({ t: 'turn-complete' })
+    expect(turnErrorEntry('boom')).toEqual({ t: 'turn-error', message: 'boom' })
+  })
+
+  it('survives a write+read round-trip (recognized by the reader)', async () => {
+    const store = storeAt()
+    const id = 'thread-outcome'
+    await store.append(id, turnCompleteEntry())
+    await store.append(id, turnErrorEntry('explode'))
+    expect(await store.read(id)).toEqual([{ t: 'turn-complete' }, { t: 'turn-error', message: 'explode' }])
+  })
+  // The fold of these entries through conversationReducer is asserted renderer-side
+  // (src/renderer/src/conversation/reducer.test.ts, "transcript replay contract")
+  // — a main-project test can't import the reducer across the composite boundary.
+})
+
+describe('sessionIdFromPayload (S3 routing)', () => {
+  it('extracts the sessionId from session/update and session/request_permission payloads', () => {
+    expect(
+      sessionIdFromPayload({ method: 'session/update', params: { sessionId: 's1', update: {} } }),
+    ).toBe('s1')
+    expect(
+      sessionIdFromPayload({ id: 1, method: 'session/request_permission', params: { sessionId: 's2' } }),
+    ).toBe('s2')
+  })
+
+  it('returns null when no string sessionId is present (lifecycle / garbage)', () => {
+    expect(sessionIdFromPayload({ type: 'exit', info: { code: 0 } })).toBeNull()
+    expect(sessionIdFromPayload({ params: { sessionId: 5 } })).toBeNull()
+    expect(sessionIdFromPayload(null)).toBeNull()
+    expect(sessionIdFromPayload('nope')).toBeNull()
   })
 })

@@ -329,3 +329,33 @@ describe('conversationReducer — hung-turn recovery (TB3)', () => {
     expect(err?.message).toBe('boom')
   })
 })
+
+/**
+ * Transcript replay contract (TB2 #31, S2). The main process tees the turn
+ * OUTCOME — which lives only in the `sendPrompt` IPC response, never an
+ * `acp:event` — as `{t:'turn-complete'}` / `{t:'turn-error',message}` entries
+ * (src/main/persistence/transcript.ts). This pins the renderer side of the
+ * contract TB3 will exercise on reopen: those captured entries map 1:1 to the
+ * `turn-complete` / `turn-error` actions and fold to the right state. The entry
+ * shapes are declared as literals here — the composite project boundary blocks
+ * importing the main-process constructors into a renderer test.
+ */
+describe('transcript replay contract: turn-outcome entries (TB2 S2)', () => {
+  // The 1:1 entry -> action map TB3 replays the captured turn outcome through.
+  type TurnOutcomeEntry = { t: 'turn-complete' } | { t: 'turn-error'; message: string }
+  const asAction = (e: TurnOutcomeEntry) =>
+    e.t === 'turn-complete' ? ({ type: 'turn-complete' } as const) : ({ type: 'turn-error', message: e.message } as const)
+
+  it('a captured turn-complete entry replays to isProcessing=false (no stuck spinner)', () => {
+    const entry: TurnOutcomeEntry = { t: 'turn-complete' }
+    const next = conversationReducer({ ...initialConversationState, isProcessing: true }, asAction(entry))
+    expect(next.isProcessing).toBe(false)
+  })
+
+  it('a captured turn-error entry replays to an ErrorItem and clears processing', () => {
+    const entry: TurnOutcomeEntry = { t: 'turn-error', message: 'kaboom' }
+    const next = conversationReducer({ ...initialConversationState, isProcessing: true }, asAction(entry))
+    expect(next.isProcessing).toBe(false)
+    expect(next.items.some((i): i is ErrorItem => i.kind === 'error' && i.message === 'kaboom')).toBe(true)
+  })
+})
