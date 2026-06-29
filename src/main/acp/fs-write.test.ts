@@ -1,5 +1,6 @@
 import { describe, it, expect, afterAll } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+import { open } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { handleFsWriteTextFile, isPathWithin, secureWriteWithinRoot, type WriteTextFn } from './fs-write'
@@ -278,6 +279,48 @@ describe('secureWriteWithinRoot (#21)', () => {
     expect(readFileSync(join(ws, 'a', 'b', 'new.txt'), 'utf8')).toBe('second')
 
     rmSync(ws, { recursive: true, force: true })
+  })
+
+  it('KNOWN RESIDUAL (accepted per ADR-0004): a live mid-walk swap of an intermediate dir to a symlink still escapes — needs openat to close', async () => {
+    // This test ENCODES the known limitation honestly. Opens are by absolute
+    // PATH (not openat relative to a held fd), so O_NOFOLLOW guards only each
+    // path's FINAL component; a verified intermediate is re-traversed as a
+    // non-final component on the next open, where the kernel silently follows it
+    // if it has since become a symlink. We drive the race deterministically via
+    // the SecureWriteDeps.open seam: right after `ws/a` is verified as a real dir
+    // (its check-open returns), a racing process swaps it for a symlink to
+    // `outside` (which already contains `b/`), so the write lands at
+    // outside/b/file.txt — OUTSIDE the Workspace.
+    //
+    // When openat-relative-to-parent-fd lands, flip this to expect NO escape
+    // (existsSync(...) === false and the call to reject).
+    const ws = mkdtempSync(join(tmpdir(), 'vibe-ws-'))
+    const outside = mkdtempSync(join(tmpdir(), 'vibe-outside-'))
+    mkdirSync(join(ws, 'a'))
+    mkdirSync(join(ws, 'a', 'b'))
+    mkdirSync(join(outside, 'b'))
+
+    let opens = 0
+    const racingOpen = (async (...args: Parameters<typeof open>) => {
+      const handle = await open(...args)
+      opens += 1
+      if (opens === 1) {
+        // `ws/a` has just been verified as a real dir; swap it for a symlink to
+        // `outside` before the next (deeper) open re-traverses it.
+        rmSync(join(ws, 'a'), { recursive: true, force: true })
+        symlinkSync(outside, join(ws, 'a'))
+      }
+      return handle
+    }) as typeof open
+
+    await secureWriteWithinRoot(ws, ws + '/a/b/file.txt', 'pwned', { open: racingOpen })
+
+    // CURRENT (residual) behavior: the write ESCAPED to outside/b/file.txt.
+    expect(existsSync(join(outside, 'b', 'file.txt'))).toBe(true)
+    expect(readFileSync(join(outside, 'b', 'file.txt'), 'utf8')).toBe('pwned')
+
+    rmSync(ws, { recursive: true, force: true })
+    rmSync(outside, { recursive: true, force: true })
   })
 })
 

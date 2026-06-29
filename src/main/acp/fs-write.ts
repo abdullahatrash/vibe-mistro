@@ -66,14 +66,21 @@ export async function handleFsWriteTextFile(
   //     a path-based writeFile would FOLLOW it outside. O_NOFOLLOW on the final
   //     open refuses it. FULLY closed (open and write are the same fd — no
   //     re-resolution between them).
-  //   • a planted INTERMEDIATE symlink swapped in for a validated real dir — each
-  //     intermediate is re-opened with O_NOFOLLOW|O_DIRECTORY, so a symlink there
-  //     fails with ELOOP. Closed for already-planted symlinks.
-  // ONE irreducible residual remains: a sub-microsecond swap of an intermediate
-  // directory for a symlink BETWEEN our O_NOFOLLOW open of that component and the
-  // open of the next one down. Truly closing it needs native openat() relative to
-  // the parent fd (no portable Node API); it is accepted under ADR-0004's desktop
-  // trust model ("you launched this agent against your account").
+  //   • a STATICALLY-PLANTED intermediate symlink (present BEFORE the walk reaches
+  //     it) — when we open that component as a path ending in it with
+  //     O_NOFOLLOW|O_DIRECTORY it fails with ELOOP. Caught.
+  // RESIDUAL (accepted under ADR-0004's desktop trust model — "you launched this
+  // agent against your account"): a LIVE mid-walk swap of an intermediate dir to a
+  // symlink by a separate racing local process still escapes. We open by ABSOLUTE
+  // PATH (not openat relative to a held fd), so O_NOFOLLOW guards ONLY the FINAL
+  // component of each path. Once a component is verified, it is re-traversed as a
+  // NON-final component on every deeper open, where the kernel SILENTLY follows it
+  // if it has since become a symlink. So the residual window for an intermediate
+  // component runs from its check-open ALL THE WAY to the final write-open, and the
+  // kept-open FileHandles anchor NOTHING (they are not load-bearing). Truly closing
+  // it needs native openat() relative to the parent fd (no portable Node API),
+  // which would ALSO make the held fds load-bearing. See the "KNOWN RESIDUAL"
+  // characterization test in fs-write.test.ts.
   let writeTarget = path
   let secureRoot: string | undefined
   if (deps.workspaceDir) {
