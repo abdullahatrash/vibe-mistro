@@ -8,6 +8,11 @@ import { readFile } from 'node:fs/promises'
  *
  * Pure over an injected reader (Seam C): the WorkspaceAgent wires the real
  * `node:fs` reader; tests pass a fake or a temp file.
+ *
+ * Reads are intentionally UNCONFINED (any absolute path the user can read),
+ * for parity with the `vibe` CLI's trust model — a coding agent routinely needs
+ * files outside the project. This asymmetry with the confined `fs/write` is a
+ * deliberate, documented decision: see ADR-0004 (and fs-write.ts).
  */
 
 /** Reads a file's text content. Injectable for testing. */

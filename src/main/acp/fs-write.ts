@@ -1,5 +1,5 @@
-import { writeFile } from 'node:fs/promises'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { realpath, writeFile } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 
 /**
  * Serve the agent's `fs/write_text_file` request (agent → client). Like reads,
@@ -10,13 +10,14 @@ import { isAbsolute, relative, resolve } from 'node:path'
  * Pure over an injected writer (Seam C): the WorkspaceAgent wires the real
  * `node:fs` writer; tests pass a fake or a temp dir.
  *
- * Confinement (TB3, carry-over from #4): now that the agent can write, we reject
- * paths that resolve outside the Workspace directory. Writes are destructive and
- * the user opened *this* Workspace, so honoring an arbitrary absolute path is the
- * wrong default. The check is **lexical** (path.relative on resolved paths) and
- * does NOT resolve symlinks, so a symlink *inside* the Workspace pointing out
- * would still pass. Reads stay unconfined for parity with the `vibe` CLI (see
- * fs-read.ts). The symlink gap and confining reads are tracked in follow-up #8.
+ * Confinement (ADR-0004): writes are confined to the Workspace — the user opened
+ * *this* Workspace and approved a write they believe lands in it, so honoring an
+ * arbitrary path is the wrong default. The check is **symlink-resolved**: it
+ * compares the real path of the nearest existing ancestor of the target (the
+ * file itself may not exist yet) against the real path of the Workspace root, so
+ * a symlink *inside* the Workspace pointing out cannot escape, and a symlinked
+ * Workspace root isn't falsely rejected. Reads stay UNCONFINED for parity with
+ * the `vibe` CLI — see fs-read.ts and ADR-0004.
  */
 
 /** Writes text to a file. Injectable for testing. */
@@ -55,7 +56,7 @@ export async function handleFsWriteTextFile(
   if (typeof content !== 'string') {
     return { error: { code: -32602, message: 'fs/write_text_file: missing or invalid `content`' } }
   }
-  if (deps.workspaceDir && !isPathWithin(deps.workspaceDir, path)) {
+  if (deps.workspaceDir && !(await isWriteWithinWorkspace(deps.workspaceDir, path))) {
     return {
       error: {
         code: -32602,
@@ -74,9 +75,45 @@ export async function handleFsWriteTextFile(
 }
 
 /**
- * True when `target` resolves to `dir` or a descendant of it. Lexical only —
- * does not resolve symlinks, so a symlink inside `dir` pointing out still
- * passes (see #8).
+ * True when `target`'s real path resolves to the Workspace's real path or a
+ * descendant — symlink-resolved confinement (ADR-0004). Both sides are
+ * realpath-resolved before the lexical comparison, so a symlink inside the
+ * Workspace pointing out cannot escape and a symlinked Workspace root isn't
+ * falsely rejected. The target may not exist yet, so we realpath the nearest
+ * existing ancestor and re-append the non-existent tail.
+ */
+export async function isWriteWithinWorkspace(workspaceDir: string, target: string): Promise<boolean> {
+  const realRoot = await realpath(workspaceDir).catch(() => resolve(workspaceDir))
+  const realTarget = await realpathNearest(target)
+  return isPathWithin(realRoot, realTarget)
+}
+
+/**
+ * Resolve the real path of `target` by realpath-ing its nearest existing
+ * ancestor and re-appending the not-yet-existing tail. Falls back to a lexical
+ * resolve if nothing along the path exists.
+ */
+async function realpathNearest(target: string): Promise<string> {
+  let current = resolve(target)
+  const tail: string[] = []
+  for (;;) {
+    try {
+      const real = await realpath(current)
+      return tail.length ? join(real, ...tail.reverse()) : real
+    } catch {
+      const parent = dirname(current)
+      if (parent === current) return resolve(target) // reached the root, nothing exists
+      tail.push(basename(current))
+      current = parent
+    }
+  }
+}
+
+/**
+ * True when `target` resolves to `dir` or a descendant of it — a pure lexical
+ * comparison. Callers pass realpath-resolved paths (see `isWriteWithinWorkspace`)
+ * so symlinks are already resolved; on raw paths this rejects `..`/absolute
+ * escapes only.
  */
 export function isPathWithin(dir: string, target: string): boolean {
   const rel = relative(resolve(dir), resolve(target))
