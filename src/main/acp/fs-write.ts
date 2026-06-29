@@ -13,8 +13,10 @@ import { isAbsolute, relative, resolve } from 'node:path'
  * Confinement (TB3, carry-over from #4): now that the agent can write, we reject
  * paths that resolve outside the Workspace directory. Writes are destructive and
  * the user opened *this* Workspace, so honoring an arbitrary absolute path is the
- * wrong default. Reads stay unconfined for parity with the `vibe` CLI (see
- * fs-read.ts) — tightening reads is a separate hardening follow-up.
+ * wrong default. The check is **lexical** (path.relative on resolved paths) and
+ * does NOT resolve symlinks, so a symlink *inside* the Workspace pointing out
+ * would still pass. Reads stay unconfined for parity with the `vibe` CLI (see
+ * fs-read.ts). The symlink gap and confining reads are tracked in follow-up #8.
  */
 
 /** Writes text to a file. Injectable for testing. */
@@ -71,7 +73,11 @@ export async function handleFsWriteTextFile(
   }
 }
 
-/** True when `target` resolves to `dir` or a descendant of it. */
+/**
+ * True when `target` resolves to `dir` or a descendant of it. Lexical only —
+ * does not resolve symlinks, so a symlink inside `dir` pointing out still
+ * passes (see #8).
+ */
 export function isPathWithin(dir: string, target: string): boolean {
   const rel = relative(resolve(dir), resolve(target))
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))

@@ -77,6 +77,30 @@ export function Conversation({ thread }: { thread: ThreadConnection }): JSX.Elem
     })
   }
 
+  // Escape hatch for a wedged turn: deny any still-pending permission (so the
+  // agent stops blocking and `session/prompt` can resolve) before re-enabling
+  // input. Reducer is pure, so the IPC reply happens here, not in `recover`.
+  function recover(): void {
+    for (const item of state.items) {
+      if (item.kind !== 'permission' || item.chosenOptionId !== null) continue
+      const deny =
+        item.options.find((o) => o.kind.startsWith('reject')) ?? item.options[item.options.length - 1]
+      if (!deny) continue
+      void window.api.respondPermission({
+        agentId: thread.agentId,
+        requestId: item.requestId,
+        optionId: deny.optionId,
+      })
+      dispatch({
+        type: 'resolve-permission',
+        requestId: item.requestId,
+        optionId: deny.optionId,
+        name: deny.name,
+      })
+    }
+    dispatch({ type: 'recover' })
+  }
+
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -107,9 +131,9 @@ export function Conversation({ thread }: { thread: ThreadConnection }): JSX.Elem
 
       {state.isProcessing && (
         // Escape hatch: if a turn wedges (e.g. a permission prompt is dismissed
-        // and `session/prompt` never resolves), re-enable input instead of
-        // sticking disabled forever (carry-over from #4).
-        <button className="recover" onClick={() => dispatch({ type: 'recover' })}>
+        // and `session/prompt` never resolves), deny any pending permission and
+        // re-enable input instead of sticking disabled forever (carry-over #4).
+        <button className="recover" onClick={recover}>
           Turn stuck? End it and re-enable input ▶
         </button>
       )}
