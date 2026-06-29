@@ -95,7 +95,11 @@ export function App(): JSX.Element {
             </div>
           )}
 
-          {connect.status === 'connected' && <Conversation thread={connect.thread} />}
+          {connect.status === 'connected' && (
+            // Key by agentId so the Conversation's useReducer state can't bleed
+            // across Threads — a new Thread gets a fresh reducer, not the old one.
+            <Conversation key={connect.thread.agentId} thread={connect.thread} />
+          )}
         </section>
       </main>
     </div>

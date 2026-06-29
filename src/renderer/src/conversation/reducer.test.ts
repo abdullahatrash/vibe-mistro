@@ -97,6 +97,28 @@ describe('conversationReducer (Seam A)', () => {
     expect(assistant).toHaveLength(1)
   })
 
+  it('keeps interleaved messageIds as distinct items in first-arrival order, each accumulated', () => {
+    // thoughtA, thoughtB, thoughtA — proves findIndex-by-(kind+messageId) routes
+    // deltas to the right item rather than the most recent one.
+    const state = [
+      update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'A1 ' }, messageId: 'a' }),
+      update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'B1 ' }, messageId: 'b' }),
+      update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'A2' }, messageId: 'a' }),
+      // Two assistant messages in sequence → two assistant items.
+      update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'first' }, messageId: 'm1' }),
+      update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'second' }, messageId: 'm2' }),
+    ].reduce<ConversationState>(feed, initialConversationState)
+
+    const reasoning = state.items.filter((i): i is ReasoningItem => i.kind === 'reasoning')
+    expect(reasoning.map((r) => r.messageId)).toEqual(['a', 'b']) // first-arrival order
+    expect(reasoning[0].text).toBe('A1 A2') // accumulated despite the interleaved 'b'
+    expect(reasoning[1].text).toBe('B1 ')
+
+    const assistant = state.items.filter((i): i is AssistantItem => i.kind === 'assistant')
+    expect(assistant.map((a) => a.messageId)).toEqual(['m1', 'm2'])
+    expect(assistant.map((a) => a.text)).toEqual(['first', 'second'])
+  })
+
   it('renders an unknown sessionUpdate as a generic fallback item (never dropped)', () => {
     const state = feed(
       initialConversationState,
