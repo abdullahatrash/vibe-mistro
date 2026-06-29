@@ -35,10 +35,17 @@ export const SPAWN_HINT =
 /** A failure surfaced to the renderer, optionally with an actionable hint. */
 export class WorkspaceAgentError extends Error {
   readonly hint: string | null
-  constructor(message: string, hint: string | null = null) {
+  /**
+   * Auth classification of this failure, when known. `not-signed-in` marks a
+   * -32000 UnauthenticatedError (mid-session expiry) so callers route to the
+   * sign-in panel and keep the agent alive instead of treating it as generic.
+   */
+  readonly authState: AuthState | null
+  constructor(message: string, hint: string | null = null, authState: AuthState | null = null) {
     super(message)
     this.name = 'WorkspaceAgentError'
     this.hint = hint
+    this.authState = authState
   }
 }
 
@@ -75,7 +82,7 @@ export interface WorkspaceAgentOptions {
 
 export class WorkspaceAgent extends EventEmitter {
   private readonly client: AcpClient
-  private readonly workspaceDir: string
+  private readonly workspaceDirValue: string
   private readonly readTextFile?: ReadTextFn
   private readonly writeTextFile?: WriteTextFn
   private readonly openUrl?: (url: string) => void
@@ -91,7 +98,7 @@ export class WorkspaceAgent extends EventEmitter {
 
   constructor(options: WorkspaceAgentOptions) {
     super()
-    this.workspaceDir = options.workspaceDir
+    this.workspaceDirValue = options.workspaceDir
     this.readTextFile = options.readTextFile
     this.writeTextFile = options.writeTextFile
     this.openUrl = options.openUrl
@@ -183,6 +190,11 @@ export class WorkspaceAgent extends EventEmitter {
   /** Whether sign-out is currently available (from the last `_auth/status`). */
   get signOutAvailable(): boolean {
     return this.signOutAvailableValue
+  }
+
+  /** The absolute Workspace directory this agent operates in (for dedup). */
+  get workspaceDir(): string {
+    return this.workspaceDirValue
   }
 
   /** Fold a fresh `_auth/status` result into the cached auth state + sign-out gate. */
@@ -305,7 +317,7 @@ export class WorkspaceAgent extends EventEmitter {
     let result: SessionNewResult
     try {
       result = await this.client.request<SessionNewResult>('session/new', {
-        cwd: this.workspaceDir,
+        cwd: this.workspaceDirValue,
         mcpServers: [],
       })
     } catch (err) {
@@ -386,7 +398,7 @@ export class WorkspaceAgent extends EventEmitter {
   private async serveFsWrite(id: number | string, params: unknown): Promise<void> {
     const outcome = await handleFsWriteTextFile(params, {
       write: this.writeTextFile,
-      workspaceDir: this.workspaceDir,
+      workspaceDir: this.workspaceDirValue,
     })
     if ('result' in outcome) this.client.respond(id, outcome.result)
     else this.client.respondError(id, outcome.error)
@@ -427,7 +439,16 @@ export class WorkspaceAgent extends EventEmitter {
     // UnauthenticatedError (docs/acp-capture.md §8). This replaces the earlier
     // message-regex heuristic, which missed the real "Missing API key" wording.
     if (classifyAuthError(rpc) === 'not-signed-in') {
-      return new WorkspaceAgentError(`Not signed in to Mistral Vibe: ${message}`, AUTH_HINT)
+      // Mid-session expiry: flip the cached auth state so callers keep the agent
+      // alive and route to the sign-in panel, and tag the error so they can tell
+      // it apart from a generic failure.
+      this.authStateValue = 'not-signed-in'
+      this.signOutAvailableValue = false
+      return new WorkspaceAgentError(
+        `Not signed in to Mistral Vibe: ${message}`,
+        AUTH_HINT,
+        'not-signed-in',
+      )
     }
     return new WorkspaceAgentError(message)
   }

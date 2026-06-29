@@ -398,6 +398,53 @@ async function connectSignedIn(fake: CapturingFake): Promise<WorkspaceAgent> {
   })
 }
 
+describe('WorkspaceAgent — mid-session expiry (-32000)', () => {
+  it('tags an openThread -32000 as not-signed-in and flips the cached auth state', async () => {
+    const fake = makeCapturingFake()
+    const agent = await connectSignedIn(fake)
+    expect(agent.authState).toBe('signed-in')
+
+    const opening = agent.openThread()
+    const settled = opening.catch((e: unknown) => e)
+    await new Promise((r) => setTimeout(r, 0))
+    const sessReq = sent(fake).find((m) => m.method === 'session/new')
+    fake.feed(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: sessReq?.id,
+        error: { code: -32000, message: 'Missing API key for mistral provider.' },
+      }) + '\n',
+    )
+
+    const err = await settled
+    expect(err).toBeInstanceOf(WorkspaceAgentError)
+    expect((err as WorkspaceAgentError).authState).toBe('not-signed-in')
+    // Expiry detected: the agent now reports not-signed-in so the caller can
+    // keep it alive and route to the sign-in panel.
+    expect(agent.authState).toBe('not-signed-in')
+  })
+
+  it('tags a prompt -32000 (turn expiry) as not-signed-in without killing the agent', async () => {
+    const fake = makeCapturingFake()
+    const agent = await connect(fake)
+
+    const turn = agent.prompt(SESSION_ID, 'hi')
+    const settled = turn.catch((e: unknown) => e)
+    const promptReq = sent(fake).find((m) => m.method === 'session/prompt')
+    fake.feed(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: promptReq?.id,
+        error: { code: -32000, message: 'Missing API key for mistral provider.' },
+      }) + '\n',
+    )
+
+    const err = await settled
+    expect((err as WorkspaceAgentError).authState).toBe('not-signed-in')
+    expect(agent.authState).toBe('not-signed-in')
+  })
+})
+
 describe('WorkspaceAgent — sign out (_auth/signOut)', () => {
   it('sends _auth/signOut, re-queries status, and transitions signed-in → not-signed-in', async () => {
     const fake = makeCapturingFake()

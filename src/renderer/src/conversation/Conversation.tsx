@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState, type JSX, type KeyboardEvent } from 'react'
-import type { ThreadConnection } from '../../../shared/ipc'
+import type { AuthMethod, ThreadConnection } from '../../../shared/ipc'
 import {
   conversationReducer,
   initialConversationState,
@@ -23,7 +23,14 @@ let promptSeq = 0
  * are served transparently in main, so a read-only turn streams reasoning + an
  * answer and completes without any approval UI (that's TB3).
  */
-export function Conversation({ thread }: { thread: ThreadConnection }): JSX.Element {
+export function Conversation({
+  thread,
+  onAuthExpired,
+}: {
+  thread: ThreadConnection
+  /** Mid-session expiry (-32000): route to in-place re-auth with these methods. */
+  onAuthExpired: (authMethods: AuthMethod[]) => void
+}): JSX.Element {
   const [state, dispatch] = useReducer(conversationReducer, initialConversationState)
   const [draft, setDraft] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
@@ -53,8 +60,13 @@ export function Conversation({ thread }: { thread: ThreadConnection }): JSX.Elem
         sessionId: thread.sessionId,
         text,
       })
-      // Surface a failed turn as a conversation item rather than dropping it.
-      if (!result.ok) dispatch({ type: 'turn-error', message: result.error })
+      // Mid-session expiry: route to in-place re-auth (the agent stays alive).
+      if (!result.ok && result.kind === 'not-signed-in') {
+        onAuthExpired(result.authMethods)
+      } else if (!result.ok) {
+        // Surface a failed turn as a conversation item rather than dropping it.
+        dispatch({ type: 'turn-error', message: result.error })
+      }
     } finally {
       // The turn's stopReason resolves sendPrompt; flip back to the user's turn.
       dispatch({ type: 'turn-complete' })
