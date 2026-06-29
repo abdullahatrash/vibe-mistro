@@ -43,6 +43,16 @@ export function turnErrorEntry(message: string): TranscriptEntry {
 }
 
 /**
+ * The agent's context was reset on a reopen (TB4 #33), teed at `sendPrompt` when a
+ * `session/load` resume failed and main re-bound a fresh `session/new` — mirrors
+ * the `agent-rebound` reducer action. Persisted so the notice survives a later
+ * reopen; the user-facing copy is a renderer-side constant, so it carries none.
+ */
+export function agentReboundEntry(): TranscriptEntry {
+  return { t: 'agent-rebound' }
+}
+
+/**
  * A permission response, teed at `respondPermission` — mirrors `resolve-permission`.
  * Main observes `requestId` + `optionId` at the chokepoint but not the option's
  * display `name` (that lives in the renderer's permission item), so `name`
@@ -203,6 +213,7 @@ function isTranscriptEntry(value: unknown): value is TranscriptEntry {
     t === 'acp-event' ||
     t === 'turn-complete' ||
     t === 'turn-error' ||
-    t === 'resolve-permission'
+    t === 'resolve-permission' ||
+    t === 'agent-rebound'
   )
 }

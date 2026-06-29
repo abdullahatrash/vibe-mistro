@@ -49,6 +49,20 @@ export class WorkspaceAgentError extends Error {
   }
 }
 
+/**
+ * A `session/load` resume failed for a reason that should fall back to a fresh
+ * re-bind (TB4 #33): the captured `-32602` "Session not found" (acp-capture §9),
+ * or — fail-safe — ANY other non-auth load rejection. Distinct from a plain
+ * `WorkspaceAgentError` so the binding logic can tell "resume failed, re-bind"
+ * apart from "mid-session auth expiry" (which routes to sign-in instead).
+ */
+export class SessionLoadError extends WorkspaceAgentError {
+  constructor(message: string) {
+    super(message)
+    this.name = 'SessionLoadError'
+  }
+}
+
 interface InitializeResult {
   protocolVersion?: number
   agentInfo?: { name?: string; title?: string; version?: string }
@@ -101,6 +115,20 @@ export class WorkspaceAgent extends EventEmitter {
    * (TB6 #35) so we never send a doomed -32601 to an agent that can't service it.
    */
   private sessionCloseAvailableValue = false
+  /**
+   * Whether `initialize` advertised `agentCapabilities.loadSession` (acp-capture
+   * §1/§9) — gates the `session/load` resume path (TB4 #33). When false, callers
+   * go straight to a fresh re-bind instead of sending a doomed `session/load`.
+   */
+  private loadSessionAvailableValue = false
+  /**
+   * Sessions with a `session/load` in flight (TB4 #33). While a session id is in
+   * this set we DROP its `session/update` notifications instead of emitting them:
+   * on resume the agent replays prior history over the wire (acp-capture §9), but
+   * WE already own that history in our JSONL and rendered it on reopen — forwarding
+   * the replay would DOUBLE the conversation. Cleared when the load settles.
+   */
+  private readonly loadingSessions = new Set<string>()
 
   constructor(options: WorkspaceAgentOptions) {
     super()
@@ -116,7 +144,12 @@ export class WorkspaceAgent extends EventEmitter {
     })
 
     // Forward raw protocol + lifecycle events; we do not interpret them here.
-    this.client.on('notification', (msg: unknown) => this.emit('event', msg))
+    // EXCEPT: while a `session/load` is in flight for a session, drop its replayed
+    // `session/update` notifications (TB4 #33) — see `loadingSessions`.
+    this.client.on('notification', (msg: unknown) => {
+      if (this.isSuppressedReplay(msg)) return
+      this.emit('event', msg)
+    })
     this.client.on('serverRequest', (msg: unknown) => this.onServerRequest(msg))
     this.client.on('stderr', (text: string) => this.emit('event', { type: 'stderr', text }))
     this.client.on('exit', (info: unknown) => this.emit('event', { type: 'exit', info }))
@@ -173,6 +206,7 @@ export class WorkspaceAgent extends EventEmitter {
       ])
       this.authMethodsValue = extractAuthMethods(init)
       this.sessionCloseAvailableValue = extractSessionCloseCapability(init)
+      this.loadSessionAvailableValue = extractLoadSessionCapability(init)
       // `initialize` can't reveal auth state (its authMethods is always
       // present), so query the `_auth/status` extension method (acp-capture §8).
       await this.detectAuthState(earlyFailure)
@@ -197,6 +231,11 @@ export class WorkspaceAgent extends EventEmitter {
   /** Whether sign-out is currently available (from the last `_auth/status`). */
   get signOutAvailable(): boolean {
     return this.signOutAvailableValue
+  }
+
+  /** Whether the agent advertised `loadSession` — gates the resume path (TB4 #33). */
+  get loadSessionAvailable(): boolean {
+    return this.loadSessionAvailableValue
   }
 
   /** The absolute Workspace directory this agent operates in (for dedup). */
@@ -373,6 +412,54 @@ export class WorkspaceAgent extends EventEmitter {
     return thread
   }
 
+  /** Whether this agent currently hosts (has opened or loaded) a given session. */
+  hasSession(sessionId: string): boolean {
+    return this.threads.has(sessionId)
+  }
+
+  /**
+   * Resume a prior Thread's ACP session via `session/load` (TB4 #33, acp-capture
+   * §9). Params mirror `session/new` but carry the stored `sessionId`; the success
+   * result has NO `sessionId` (the caller already knows the id it loaded), so we
+   * keep the one we passed and register it so the next prompt reuses it. While the
+   * load is in flight we SUPPRESS the session's replayed `session/update`
+   * notifications (`loadingSessions`) — we already own that history in our JSONL,
+   * so forwarding the replay would double the conversation.
+   *
+   * On failure, throws a `SessionLoadError` for the captured `-32602` "Session not
+   * found" (and — fail-safe — any other non-auth load rejection) so the caller can
+   * re-bind a fresh session; a `-32000` rejection is mapped to a not-signed-in
+   * `WorkspaceAgentError` instead, routing to sign-in rather than a re-bind.
+   */
+  async loadThread(sessionId: string): Promise<ThreadInfo> {
+    if (!this.initialized) {
+      throw new WorkspaceAgentError('Agent is not initialized; call start() first.')
+    }
+    this.loadingSessions.add(sessionId)
+    try {
+      const result = await this.client.request<SessionNewResult>('session/load', {
+        sessionId,
+        cwd: this.workspaceDirValue,
+        mcpServers: [],
+      })
+      const thread: ThreadInfo = {
+        // The `session/load` result omits `sessionId` (acp-capture §9) — keep ours.
+        sessionId,
+        title: result.title ?? null,
+        modes: result.modes ?? null,
+        models: result.models ?? null,
+      }
+      this.threads.set(sessionId, thread)
+      return thread
+    } catch (err) {
+      throw this.mapLoadError(err)
+    } finally {
+      // Clear the suppression gate the instant the load settles (success OR
+      // failure): from here on, live streaming for this session forwards normally.
+      this.loadingSessions.delete(sessionId)
+    }
+  }
+
   /**
    * Send a prompt to a Thread (`session/prompt`) and resolve when the turn
    * ends. The streamed `session/update` notifications flow out on the `event`
@@ -479,6 +566,37 @@ export class WorkspaceAgent extends EventEmitter {
     this.client.removeListener('exit', onExit)
   }
 
+  /**
+   * Whether a notification is a `session/update` replayed for a session whose
+   * `session/load` is still in flight (TB4 #33) — if so we drop it (don't emit).
+   * Only `session/update` replays are gated; any other notification flows through.
+   *
+   * Fail-safe: while ANY load is in flight we ALSO drop a `session/update` that
+   * lacks a usable string `sessionId`. We can't attribute it to a session, and a
+   * malformed replay leaking into the tee during a load window would double history;
+   * dropping an unattributable update for the duration of a load is the safer call.
+   */
+  private isSuppressedReplay(msg: unknown): boolean {
+    if (this.loadingSessions.size === 0) return false
+    const m = msg as { method?: unknown; params?: { sessionId?: unknown } } | null
+    if (!m || m.method !== 'session/update') return false
+    const sessionId = m.params?.sessionId
+    if (typeof sessionId !== 'string') return true // unattributable during a load -> drop
+    return this.loadingSessions.has(sessionId)
+  }
+
+  /**
+   * Map a `session/load` rejection (TB4 #33). A `-32000` is a mid-session auth
+   * expiry — map (and cache) it as not-signed-in so the caller routes to sign-in.
+   * Everything else (the captured `-32602` "Session not found", or any other
+   * failure — fail-safe) becomes a `SessionLoadError` so the caller re-binds fresh.
+   */
+  private mapLoadError(err: unknown): WorkspaceAgentError {
+    const mapped = this.mapErrorAndCacheAuth(err)
+    if (mapped.authState === 'not-signed-in') return mapped
+    return new SessionLoadError(mapped.message)
+  }
+
   /** Spawn-time failures (ENOENT, etc.). */
   private mapSpawnError(err: unknown): WorkspaceAgentError {
     const code = (err as { code?: string })?.code
@@ -549,6 +667,16 @@ function extractSessionCloseCapability(init: InitializeResult): boolean {
   const caps = (init.agentCapabilities as { sessionCapabilities?: { close?: unknown } } | null)
     ?.sessionCapabilities
   return !!caps && caps.close !== undefined
+}
+
+/**
+ * Whether `initialize` advertised `agentCapabilities.loadSession: true`
+ * (acp-capture §1/§9). Defaults to false on any absent/malformed shape — so we
+ * only attempt `session/load` against an agent that genuinely announces resume
+ * support (TB4 #33), and fall straight to a re-bind otherwise.
+ */
+function extractLoadSessionCapability(init: InitializeResult): boolean {
+  return (init.agentCapabilities as { loadSession?: unknown } | null)?.loadSession === true
 }
 
 /** Pull the well-formed `authMethods` out of an `initialize` result. */

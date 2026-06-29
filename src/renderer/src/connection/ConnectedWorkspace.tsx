@@ -31,6 +31,9 @@ export function ConnectedWorkspace({
   /** Mid-session expiry (-32000): route to in-place re-auth with these methods. */
   onAuthExpired: (authMethods: AuthMethod[]) => void
 }): JSX.Element {
+  // A continue-from-cold-launch lands here with the CONTINUED Thread already AS the
+  // connection thread (main opened no extra Thread, TB4 #33) — so it's live +
+  // selected by default, with no separate continue plumbing.
   const [liveThreadIds, setLiveThreadIds] = useState<ReadonlySet<string>>(
     () => new Set([connection.threadId]),
   )
@@ -66,6 +69,14 @@ export function ConnectedWorkspace({
   // The session to seed the selected Thread with: the one bound this session (if
   // any) wins over the persisted cursor, so a bound draft isn't re-minted on switch.
   const seedSession = seedSessionId(selected, boundSessions)
+
+  // Continue a reopened (cold) Thread (TB4 #33): promote it to live + select it.
+  // Its persisted `sessionId` cursor seeds the live view, so the FIRST prompt drives
+  // `ensureBoundSession`'s resume path (`session/load`, re-binding fresh on failure).
+  function continueThread(threadId: string): void {
+    setLiveThreadIds((prev) => new Set(prev).add(threadId))
+    setSelectedThreadId(threadId)
+  }
 
   return (
     <div className="workspace">
@@ -114,6 +125,7 @@ export function ConnectedWorkspace({
           key={selected.id}
           thread={selected}
           onClose={() => setSelectedThreadId(connection.threadId)}
+          onContinue={() => continueThread(selected.id)}
         />
       )}
     </div>

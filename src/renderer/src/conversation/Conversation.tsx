@@ -7,6 +7,7 @@ import {
   type ConversationItem,
   type ErrorItem,
   type FallbackItem,
+  type NoticeItem,
   type PermissionItem,
   type PermissionOption,
   type ReasoningItem,
@@ -101,6 +102,11 @@ export function Conversation({
       boundRef.current = e.sessionId
       setBoundSessionId(e.sessionId)
       onBoundRef.current?.(e.sessionId)
+      // A re-bind (TB4 #33): the agent couldn't resume this reopened Thread, so
+      // main minted a fresh session. Weave the honest "context reset" notice in
+      // NOW — main emits `thread:bound` before the prompt streams, so it lands
+      // after the user's prompt and before the agent's response (matching replay).
+      if (e.rebound) dispatch({ type: 'agent-rebound' })
     })
   }, [thread.threadId])
 
@@ -297,6 +303,8 @@ export function Item({
       return <ErrorRow item={item} />
     case 'fallback':
       return <FallbackRow item={item} />
+    case 'notice':
+      return <NoticeRow item={item} />
   }
 }
 
@@ -379,6 +387,17 @@ function ErrorRow({ item }: { item: ErrorItem }): JSX.Element {
     <div className="alert">
       <div className="alert__title">Turn ended</div>
       <div className="alert__message">{item.message}</div>
+    </div>
+  )
+}
+
+function NoticeRow({ item }: { item: NoticeItem }): JSX.Element {
+  return (
+    <div className="notice">
+      <span className="notice__icon" aria-hidden>
+        ↻
+      </span>
+      <span className="notice__message">{item.message}</span>
     </div>
   )
 }

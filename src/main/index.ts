@@ -26,6 +26,7 @@ import { getShellEnv } from './shell-env'
 import { groupThreadsByWorkspace, MetadataStore } from './persistence/metadata-store'
 import {
   acpEventEntry,
+  agentReboundEntry,
   resolvePermissionEntry,
   sessionIdFromPayload,
   TranscriptStore,
@@ -35,7 +36,7 @@ import {
   type TranscriptEntry,
 } from './persistence/transcript'
 import { WorkspaceAgent, WorkspaceAgentError } from './workspace-agent'
-import { ensureBoundSession } from './thread-binding'
+import { ensureBoundSession, resolveContinueTarget } from './thread-binding'
 import { createThreadDraft } from './persistence/drafts'
 import { deleteThread } from './persistence/delete-thread'
 
@@ -145,16 +146,22 @@ async function recordThread(agentId: string, workspaceDir: string, thread: Threa
 }
 
 /**
- * Resolve the ACP session to prompt, binding a draft on its first prompt (TB5).
- * With a metadata store, delegate to `ensureBoundSession` (one `session/new`,
- * bind by id, reuse thereafter) and seed the transcript bridge on a fresh mint.
+ * Resolve the ACP session to prompt, binding a draft on its first prompt (TB5) and
+ * RESUMING a reopened Thread on its first prompt (TB4 #33). With a metadata store,
+ * delegate to `ensureBoundSession`, which distinguishes the three cases: draft ->
+ * `session/new`; reopened (stored session not hosted by this fresh agent) ->
+ * `session/load`, re-binding fresh on a resume failure; already-hosted -> reuse.
+ * `minted` is true for a draft mint OR a re-bind; `rebound` flags the re-bind so
+ * the caller tees the "context reset" notice and re-emits `thread:bound`.
+ *
  * Without a store (best-effort degraded mode), open a session directly so a draft
- * can still prompt; an already-bound Thread always reuses its `sessionId`.
+ * can still prompt; reuse a session the agent already hosts, else open a fresh one
+ * (never the bug's `No open Thread` throw — degraded mode has no cursor to resume).
  */
 async function bindThreadSession(
   agent: WorkspaceAgent,
   args: SendPromptArgs,
-): Promise<{ sessionId: string; minted: boolean }> {
+): Promise<{ sessionId: string; minted: boolean; rebound: boolean }> {
   // Point the bridge at the Thread being prompted, so a session-less lifecycle
   // event tees to the ACTIVE Thread when several share an agent — refreshed every
   // prompt (last-write-wins, and only the active Thread prompts at a time).
@@ -167,11 +174,13 @@ async function bindThreadSession(
       workspaceId: args.workspaceId,
       sessionId: args.sessionId,
     })
-    return { sessionId: bound.sessionId, minted: bound.minted }
+    return { sessionId: bound.sessionId, minted: bound.minted, rebound: bound.rebound }
   }
-  if (args.sessionId) return { sessionId: args.sessionId, minted: false }
+  if (args.sessionId && agent.hasSession(args.sessionId)) {
+    return { sessionId: args.sessionId, minted: false, rebound: false }
+  }
   const thread = await agent.openThread()
-  return { sessionId: thread.sessionId, minted: true }
+  return { sessionId: thread.sessionId, minted: true, rebound: false }
 }
 
 /**
@@ -206,6 +215,37 @@ function connectionFor(
     ...thread,
     threadId: ids.threadId,
     workspaceId: ids.workspaceId,
+    signOutAvailable: agent.signOutAvailable,
+    authMethods: agent.authMethods,
+  }
+}
+
+/**
+ * Build a connection that CONTINUES an existing persisted Thread (TB4 #33) WITHOUT
+ * opening a new one: look its record up in the metadata store and seed the
+ * connection with its ids + stored `sessionId` cursor (modes/models stay null until
+ * the lazy `session/load` on first prompt). Also seeds the transcript bridge so a
+ * session-less lifecycle event tees to this Thread. Returns `null` when there's no
+ * store or no matching record, so the caller falls back to opening a fresh Thread.
+ */
+function continueConnection(
+  agentId: string,
+  agent: WorkspaceAgent,
+  threadId: string,
+): ThreadConnection | null {
+  if (!metadataStore) return null
+  const target = resolveContinueTarget(metadataStore, threadId)
+  if (!target) return null
+  transcriptThreads.set(agentId, target.threadId)
+  return {
+    agentId,
+    workspaceDir: agent.workspaceDir,
+    sessionId: target.sessionId,
+    title: target.title,
+    modes: null,
+    models: null,
+    threadId: target.threadId,
+    workspaceId: target.workspaceId,
     signOutAvailable: agent.signOutAvailable,
     authMethods: agent.authMethods,
   }
@@ -321,6 +361,15 @@ function registerIpc(): void {
         return { ok: false, kind: 'not-signed-in', agentId, workspaceDir: args.workspaceDir, authMethods: agent.authMethods }
       }
 
+      // Continue from the cold launch list (TB4 #33): connect to the EXISTING
+      // Thread (its first prompt drives the lazy `session/load` resume) without
+      // opening — and persisting — a throwaway empty Thread. Falls through to the
+      // normal open when the record can't be resolved (degraded / no store).
+      if (args.continueThreadId) {
+        const continued = continueConnection(agentId, agent, args.continueThreadId)
+        if (continued) return { ok: true, thread: continued }
+      }
+
       const thread = await agent.openThread()
       const ids = await recordThread(agentId, args.workspaceDir, thread)
       return { ok: true, thread: connectionFor(agentId, agent, thread, ids) }
@@ -355,16 +404,20 @@ function registerIpc(): void {
       // binding failure surfaces WITHOUT teeing: nothing was logged yet, so a
       // failed first prompt leaves no transcript residue.
       let sessionId: string
+      let rebound: boolean
       try {
         const bound = await bindThreadSession(agent, args)
         sessionId = bound.sessionId
+        rebound = bound.rebound
         // Tell the renderer its draft is now bound, the INSTANT `session/new`
         // returns and BEFORE `agent.prompt` streams any event below (same
         // webContents, so ordered ahead of those `acp:event`s). This binds the
         // draft's live view to its OWN session up front, so it never infers a
-        // session from an arbitrary (possibly sibling) event.
+        // session from an arbitrary (possibly sibling) event. `rebound` (TB4 #33)
+        // carries a NEW session for a reopened Thread whose resume failed — the
+        // renderer rebinds its live view to it AND renders the "context reset" notice.
         if (bound.minted && !event.sender.isDestroyed()) {
-          event.sender.send(IPC.threadBound, { threadId: args.threadId, sessionId })
+          event.sender.send(IPC.threadBound, { threadId: args.threadId, sessionId, rebound })
         }
       } catch (err) {
         if (err instanceof WorkspaceAgentError && err.authState === 'not-signed-in') {
@@ -378,6 +431,10 @@ function registerIpc(): void {
       // Thread id, so no bridge lookup — a draft's first prompt can't misroute to
       // another Thread. Main has no renderer item id, so mint an opaque replay key.
       teeTranscript(args.threadId, userPromptEntry(randomUUID(), args.text))
+      // On a re-bind (TB4 #33), persist the "context reset" notice right AFTER the
+      // user's prompt and BEFORE the turn's events — so a later reopen replays it
+      // in the same position the live view rendered it (`thread:bound` -> notice).
+      if (rebound) teeTranscript(args.threadId, agentReboundEntry())
       try {
         const result = await agent.prompt(sessionId, args.text)
         // Tee the clean turn end: this signal lives ONLY in this IPC response

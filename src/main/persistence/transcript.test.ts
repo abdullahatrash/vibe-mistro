@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   acpEventEntry,
+  agentReboundEntry,
   parseTranscript,
   resolvePermissionEntry,
   sessionIdFromPayload,
@@ -179,6 +180,10 @@ describe('entry constructors mirror the reducer inputs', () => {
       optionId: 'deny',
       name: null,
     })
+    // The agent-rebound notice (TB4 #33) carries no payload — the copy is a
+    // renderer-side constant — and round-trips through parseTranscript.
+    expect(agentReboundEntry()).toEqual({ t: 'agent-rebound' })
+    expect(parseTranscript('{"t":"agent-rebound"}\n')).toEqual([{ t: 'agent-rebound' }])
   })
 })
 

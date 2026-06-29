@@ -110,6 +110,17 @@ export interface FallbackItem {
   raw: unknown
 }
 
+/**
+ * A system notice woven into the conversation (TB4 #33) — currently the honest
+ * "agent context was reset" line shown after a `session/load` resume failed and
+ * main re-bound a fresh session. Not a turn error; the composer stays usable.
+ */
+export interface NoticeItem {
+  kind: 'notice'
+  id: string
+  message: string
+}
+
 export type ConversationItem =
   | UserItem
   | ReasoningItem
@@ -118,6 +129,7 @@ export type ConversationItem =
   | PermissionItem
   | ErrorItem
   | FallbackItem
+  | NoticeItem
 
 export interface ContextUsage {
   used: number
@@ -148,7 +160,17 @@ export interface ConversationState {
   fallbackSeq: number
   /** Monotonic counter for stable error item ids. */
   errorSeq: number
+  /** Monotonic counter for stable notice item ids (TB4 #33). */
+  noticeSeq: number
 }
+
+/**
+ * The user-facing "agent context reset" copy (TB4 #33). Honest per ADR-0005: the
+ * visible history above is OURS (read from JSONL) and stays; only the agent's own
+ * memory restarted, so it won't recall the earlier turns.
+ */
+export const REBOUND_NOTICE =
+  "Agent context was reset — the agent couldn't resume this thread, so it starts fresh and won't recall earlier turns. Your conversation history above is preserved."
 
 export const initialConversationState: ConversationState = {
   items: [],
@@ -159,6 +181,7 @@ export const initialConversationState: ConversationState = {
   isProcessing: false,
   fallbackSeq: 0,
   errorSeq: 0,
+  noticeSeq: 0,
 }
 
 export type ConversationAction =
@@ -168,6 +191,9 @@ export type ConversationAction =
   | { type: 'turn-error'; message: string }
   | { type: 'recover' }
   | { type: 'resolve-permission'; requestId: number | string; optionId: string; name: string }
+  // The agent's context was reset after a failed `session/load` resume (TB4 #33):
+  // append the honest "context reset" notice. Not a turn error — input stays usable.
+  | { type: 'agent-rebound' }
   // Seed a live Thread from its replayed JSONL history (TB5 #34): replace the
   // whole state, so switching INTO a Thread shows its saved conversation before
   // live events resume. The provided state is already folded (via replayTranscript).
@@ -196,6 +222,8 @@ export function conversationReducer(
       return { ...appendError(state, 'Turn ended manually — input re-enabled.'), isProcessing: false }
     case 'resolve-permission':
       return resolvePermission(state, action.requestId, action.optionId, action.name)
+    case 'agent-rebound':
+      return appendNotice(state, REBOUND_NOTICE)
     case 'acp-event':
       return reduceAcpEvent(state, action.payload)
   }
@@ -436,6 +464,11 @@ function appendFallback(state: ConversationState, update: SessionUpdate): Conver
 function appendError(state: ConversationState, message: string): ConversationState {
   const item: ErrorItem = { kind: 'error', id: `error:${state.errorSeq}`, message }
   return { ...state, items: [...state.items, item], errorSeq: state.errorSeq + 1 }
+}
+
+function appendNotice(state: ConversationState, message: string): ConversationState {
+  const item: NoticeItem = { kind: 'notice', id: `notice:${state.noticeSeq}`, message }
+  return { ...state, items: [...state.items, item], noticeSeq: state.noticeSeq + 1 }
 }
 
 function extractCommands(update: SessionUpdate): AcpCommand[] {

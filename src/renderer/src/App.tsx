@@ -71,6 +71,29 @@ export function App(): JSX.Element {
     setConnect(routeThreadResult(await window.api.openThread({ agentId })))
   }
 
+  /**
+   * Continue a reopened Thread from the cold launch list (TB4 #33). No agent runs
+   * for a cold-list Thread, so we spawn its Workspace agent via `startThread`,
+   * passing `continueThreadId` so main opens NO extra Thread and instead seeds the
+   * connection with THIS Thread (its first prompt drives the `session/load` resume).
+   * The connection thread IS the continued one, so it lands selected + live with no
+   * separate plumbing. The Workspace dir comes from the cold list (a `ThreadMeta`
+   * carries only `workspaceId`). If the agent comes up not-signed-in, no Thread is
+   * opened (the standard not-signed-in result) and the continue can be re-driven.
+   */
+  async function continueColdThread(thread: ThreadMeta): Promise<void> {
+    const workspace = recents.find((w) => w.id === thread.workspaceId)
+    if (!workspace) return
+    setColdThread(null)
+    setConnect({ status: 'connecting', workspaceDir: workspace.dir })
+    setConnect(
+      routeThreadResult(
+        await window.api.startThread({ workspaceDir: workspace.dir, continueThreadId: thread.id }),
+      ),
+    )
+    void refreshRecents()
+  }
+
   /** Sign-out / mid-session expiry: drop back to the sign-in panel (same agent). */
   function toSignInPanel(agentId: string, workspaceDir: string, authMethods: AuthMethod[]): void {
     setConnect({ status: 'not-signed-in', agentId, workspaceDir, authMethods })
@@ -118,7 +141,11 @@ export function App(): JSX.Element {
           {/* Reopened Thread: render its saved conversation from JSONL, read-only,
               with NO agent spawned (TB3). Takes over the idle view until closed. */}
           {connect.status === 'idle' && coldThread && (
-            <ColdThread thread={coldThread} onClose={() => setColdThread(null)} />
+            <ColdThread
+              thread={coldThread}
+              onClose={() => setColdThread(null)}
+              onContinue={() => void continueColdThread(coldThread)}
+            />
           )}
 
           {connect.status === 'idle' && !coldThread && (
