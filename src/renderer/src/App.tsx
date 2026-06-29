@@ -26,10 +26,6 @@ export function App(): JSX.Element {
   // A persisted Thread the user clicked to REOPEN read-only from its JSONL (TB3,
   // #32) — rendered with no agent spawned. null = showing the cold launch list.
   const [coldThread, setColdThread] = useState<ThreadMeta | null>(null)
-  // A reopened Thread the user chose to CONTINUE from the cold launch list (TB4,
-  // #33): set while we spawn that Workspace's agent, then handed to
-  // `ConnectedWorkspace` so it lands selected + live and resumes on first prompt.
-  const [continueThreadId, setContinueThreadId] = useState<string | null>(null)
 
   async function runDetect(): Promise<void> {
     setLoading(true)
@@ -62,9 +58,6 @@ export function App(): JSX.Element {
   async function openProject(): Promise<void> {
     const workspaceDir = await window.api.openWorkspaceDialog()
     if (!workspaceDir) return
-    // A normal Open-project connect opens a fresh Thread — clear any pending
-    // cold-list continue so its id can't leak into this different connection (TB4).
-    setContinueThreadId(null)
     setConnect({ status: 'connecting', workspaceDir })
     setConnect(routeThreadResult(await window.api.startThread({ workspaceDir })))
     // Main has now persisted the Workspace (and any Thread); reflect it in the list.
@@ -80,19 +73,24 @@ export function App(): JSX.Element {
 
   /**
    * Continue a reopened Thread from the cold launch list (TB4 #33). No agent runs
-   * for a cold-list Thread, so we spawn its Workspace agent (reusing the same
-   * `startThread` connect flow as Open project), then hand the Thread id to
-   * `ConnectedWorkspace` via `continueThreadId` so it lands selected + live and its
-   * first prompt drives the resume (`session/load`). The Workspace dir comes from
-   * the cold list (a `ThreadMeta` carries only `workspaceId`).
+   * for a cold-list Thread, so we spawn its Workspace agent via `startThread`,
+   * passing `continueThreadId` so main opens NO extra Thread and instead seeds the
+   * connection with THIS Thread (its first prompt drives the `session/load` resume).
+   * The connection thread IS the continued one, so it lands selected + live with no
+   * separate plumbing. The Workspace dir comes from the cold list (a `ThreadMeta`
+   * carries only `workspaceId`). If the agent comes up not-signed-in, no Thread is
+   * opened (the standard not-signed-in result) and the continue can be re-driven.
    */
   async function continueColdThread(thread: ThreadMeta): Promise<void> {
     const workspace = recents.find((w) => w.id === thread.workspaceId)
     if (!workspace) return
     setColdThread(null)
-    setContinueThreadId(thread.id)
     setConnect({ status: 'connecting', workspaceDir: workspace.dir })
-    setConnect(routeThreadResult(await window.api.startThread({ workspaceDir: workspace.dir })))
+    setConnect(
+      routeThreadResult(
+        await window.api.startThread({ workspaceDir: workspace.dir, continueThreadId: thread.id }),
+      ),
+    )
     void refreshRecents()
   }
 
@@ -210,7 +208,6 @@ export function App(): JSX.Element {
                 onAuthExpired={(authMethods) =>
                   toSignInPanel(connect.thread.agentId, connect.thread.workspaceDir, authMethods)
                 }
-                continueThreadId={continueThreadId ?? undefined}
               />
             </>
           )}

@@ -36,7 +36,7 @@ import {
   type TranscriptEntry,
 } from './persistence/transcript'
 import { WorkspaceAgent, WorkspaceAgentError } from './workspace-agent'
-import { ensureBoundSession } from './thread-binding'
+import { ensureBoundSession, resolveContinueTarget } from './thread-binding'
 import { createThreadDraft } from './persistence/drafts'
 import { deleteThread } from './persistence/delete-thread'
 
@@ -221,6 +221,37 @@ function connectionFor(
 }
 
 /**
+ * Build a connection that CONTINUES an existing persisted Thread (TB4 #33) WITHOUT
+ * opening a new one: look its record up in the metadata store and seed the
+ * connection with its ids + stored `sessionId` cursor (modes/models stay null until
+ * the lazy `session/load` on first prompt). Also seeds the transcript bridge so a
+ * session-less lifecycle event tees to this Thread. Returns `null` when there's no
+ * store or no matching record, so the caller falls back to opening a fresh Thread.
+ */
+function continueConnection(
+  agentId: string,
+  agent: WorkspaceAgent,
+  threadId: string,
+): ThreadConnection | null {
+  if (!metadataStore) return null
+  const target = resolveContinueTarget(metadataStore, threadId)
+  if (!target) return null
+  transcriptThreads.set(agentId, target.threadId)
+  return {
+    agentId,
+    workspaceDir: agent.workspaceDir,
+    sessionId: target.sessionId,
+    title: target.title,
+    modes: null,
+    models: null,
+    threadId: target.threadId,
+    workspaceId: target.workspaceId,
+    signOutAvailable: agent.signOutAvailable,
+    authMethods: agent.authMethods,
+  }
+}
+
+/**
  * Map a thread-open failure to a result. An auth-classified error (a -32000
  * mid-session/expiry) keeps the agent ALIVE and routes to the sign-in panel;
  * any other failure stops + disposes the agent.
@@ -328,6 +359,15 @@ function registerIpc(): void {
       // shows the sign-in panel and re-tries openThread after sign-in.
       if (agent.authState === 'not-signed-in') {
         return { ok: false, kind: 'not-signed-in', agentId, workspaceDir: args.workspaceDir, authMethods: agent.authMethods }
+      }
+
+      // Continue from the cold launch list (TB4 #33): connect to the EXISTING
+      // Thread (its first prompt drives the lazy `session/load` resume) without
+      // opening — and persisting — a throwaway empty Thread. Falls through to the
+      // normal open when the record can't be resolved (degraded / no store).
+      if (args.continueThreadId) {
+        const continued = continueConnection(agentId, agent, args.continueThreadId)
+        if (continued) return { ok: true, thread: continued }
       }
 
       const thread = await agent.openThread()

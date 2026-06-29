@@ -570,13 +570,19 @@ export class WorkspaceAgent extends EventEmitter {
    * Whether a notification is a `session/update` replayed for a session whose
    * `session/load` is still in flight (TB4 #33) — if so we drop it (don't emit).
    * Only `session/update` replays are gated; any other notification flows through.
+   *
+   * Fail-safe: while ANY load is in flight we ALSO drop a `session/update` that
+   * lacks a usable string `sessionId`. We can't attribute it to a session, and a
+   * malformed replay leaking into the tee during a load window would double history;
+   * dropping an unattributable update for the duration of a load is the safer call.
    */
   private isSuppressedReplay(msg: unknown): boolean {
     if (this.loadingSessions.size === 0) return false
     const m = msg as { method?: unknown; params?: { sessionId?: unknown } } | null
     if (!m || m.method !== 'session/update') return false
     const sessionId = m.params?.sessionId
-    return typeof sessionId === 'string' && this.loadingSessions.has(sessionId)
+    if (typeof sessionId !== 'string') return true // unattributable during a load -> drop
+    return this.loadingSessions.has(sessionId)
   }
 
   /**

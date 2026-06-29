@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ensureBoundSession, type SessionBinder } from './thread-binding'
+import { ensureBoundSession, resolveContinueTarget, type SessionBinder } from './thread-binding'
 import { createThreadDraft } from './persistence/drafts'
 import { MetadataStore } from './persistence/metadata-store'
 import { SessionLoadError, WorkspaceAgentError } from './workspace-agent'
@@ -217,6 +217,54 @@ describe('ensureBoundSession — reopened Thread (TB4 #33)', () => {
 
     expect(agent.loadCalls).toBe(1)
     expect(agent.newCalls).toBe(0) // an auth expiry is NOT a resume failure — no re-bind
+  })
+})
+
+/**
+ * Cold-launch "Continue" (TB4 #33 review FIX 1): continuing a reopened Thread must
+ * spawn the agent but open NO new Thread — `resolveContinueTarget` READS the
+ * existing record (adds NO record, mints NO session), and the first prompt resumes
+ * THAT session. Pinned at the store + binding seam (the IPC handler that calls these
+ * is electron-coupled).
+ */
+describe('resolveContinueTarget — continue without opening a Thread (TB4 #33)', () => {
+  it('seeds from the existing record without persisting a new Thread, then resumes on first prompt', async () => {
+    const store = new MetadataStore({ filePath: join(dir, `continue-${randomName()}.json`) })
+    await store.load()
+    const ws = await store.upsertWorkspace({ dir: '/proj/continue' })
+    const existing = await store.upsertThread({ workspaceId: ws.id, sessionId: 'cursor-1', title: 'Earlier' })
+    const before = store.snapshot().threads.length
+
+    // Resolving the continue target reads the record — it persists nothing.
+    const target = resolveContinueTarget(store, existing.id)
+    expect(target).toEqual({
+      threadId: existing.id,
+      workspaceId: ws.id,
+      sessionId: 'cursor-1',
+      title: 'Earlier',
+    })
+    expect(store.snapshot().threads.length).toBe(before) // NO extra Thread persisted
+
+    // The first prompt on the continued Thread resumes its stored session — no
+    // session/new, no new record.
+    const agent = fakeBinder({ loadOutcome: 'resume' })
+    const bound = await ensureBoundSession({
+      agent,
+      store,
+      threadId: target!.threadId,
+      workspaceId: target!.workspaceId,
+      sessionId: target!.sessionId,
+    })
+    expect(agent.loadCalls).toBe(1)
+    expect(agent.newCalls).toBe(0)
+    expect(bound).toMatchObject({ sessionId: 'cursor-1', resumed: true, minted: false, rebound: false })
+    expect(store.snapshot().threads.length).toBe(before) // still no extra record
+  })
+
+  it('returns null for an unknown Thread id (caller falls back to opening fresh)', async () => {
+    const store = new MetadataStore({ filePath: join(dir, `continue-miss-${randomName()}.json`) })
+    await store.load()
+    expect(resolveContinueTarget(store, 'no-such-thread')).toBeNull()
   })
 })
 

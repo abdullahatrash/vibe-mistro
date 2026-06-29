@@ -22,7 +22,6 @@ export function ConnectedWorkspace({
   threads,
   refreshRecents,
   onAuthExpired,
-  continueThreadId,
 }: {
   connection: ThreadConnection
   /** The Workspace's persisted Threads (most-recent-first) from the cold list. */
@@ -31,17 +30,14 @@ export function ConnectedWorkspace({
   refreshRecents: () => Promise<void>
   /** Mid-session expiry (-32000): route to in-place re-auth with these methods. */
   onAuthExpired: (authMethods: AuthMethod[]) => void
-  /**
-   * A reopened Thread to CONTINUE on connect (TB4 #33): land selected + live so its
-   * first prompt resumes it (`session/load`). Set when the user continued from the
-   * cold launch list (which had to spawn this agent first).
-   */
-  continueThreadId?: string
 }): JSX.Element {
+  // A continue-from-cold-launch lands here with the CONTINUED Thread already AS the
+  // connection thread (main opened no extra Thread, TB4 #33) — so it's live +
+  // selected by default, with no separate continue plumbing.
   const [liveThreadIds, setLiveThreadIds] = useState<ReadonlySet<string>>(
-    () => new Set(continueThreadId ? [connection.threadId, continueThreadId] : [connection.threadId]),
+    () => new Set([connection.threadId]),
   )
-  const [selectedThreadId, setSelectedThreadId] = useState(continueThreadId ?? connection.threadId)
+  const [selectedThreadId, setSelectedThreadId] = useState(connection.threadId)
   // Sessions bound this session (TB5): a draft's first prompt mints one, lifted
   // here so switching away and back re-seeds it instead of re-minting.
   const [boundSessions, setBoundSessions] = useState<Record<string, string>>(() =>

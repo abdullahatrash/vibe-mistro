@@ -1012,6 +1012,34 @@ describe('WorkspaceAgent.loadThread() — resume (TB4 #33)', () => {
     await loading
   })
 
+  it('DROPS a session/update with no usable sessionId DURING a load (fail-safe), then forwards it after', async () => {
+    const fake = makeCapturingFake()
+    const agent = await connect(fake)
+    const events: unknown[] = []
+    agent.on('event', (e) => events.push(e))
+
+    // A malformed replay with no sessionId can't be attributed — drop it during the
+    // load window rather than risk teeing it (which would double history).
+    const noSessionUpdate =
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'session/update',
+        params: { update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'x' }, messageId: 'a1' } },
+      }) + '\n'
+
+    const loading = agent.loadThread(LOAD_SESSION_ID)
+    await new Promise((r) => setTimeout(r, 0))
+    const req = loadRequest(fake)
+    fake.feed(noSessionUpdate)
+    expect(events.filter(isSessionUpdate)).toHaveLength(0) // dropped during the load
+
+    // Once the load settles (no load in flight), such a notification forwards again.
+    fake.feed(JSON.stringify({ jsonrpc: '2.0', id: req?.id, result: {} }) + '\n')
+    await loading
+    fake.feed(noSessionUpdate)
+    expect(events.filter(isSessionUpdate)).toHaveLength(1)
+  })
+
   it('rejects with SessionLoadError on -32602 "Session not found", leaves the session unhosted, and clears the gate', async () => {
     const fake = makeCapturingFake()
     const agent = await connect(fake)

@@ -36,6 +36,41 @@ export interface ThreadBindStore {
   }): Promise<ThreadRecord>
 }
 
+/** The seed needed to connect to a CONTINUED (already-persisted) Thread (TB4 #33). */
+export interface ContinueTarget {
+  threadId: string
+  workspaceId: string
+  /** The stored ACP session cursor to resume on first prompt (null = a fresh draft). */
+  sessionId: string | null
+  title: string | null
+}
+
+/** The minimal store surface for resolving a continue target: read the index. */
+export interface ContinueLookupStore {
+  snapshot(): { threads: ThreadRecord[] }
+}
+
+/**
+ * Resolve the persisted Thread to seed a continue-start connection (TB4 #33) — the
+ * cold-launch "Continue" path spawns the agent but opens NO new Thread, so it
+ * READS (never writes) the existing record's ids + stored session cursor. Returns
+ * `null` when the record can't be found, so the caller falls back to opening a
+ * fresh Thread (degraded / no store) and connect never wedges.
+ */
+export function resolveContinueTarget(
+  store: ContinueLookupStore,
+  threadId: string,
+): ContinueTarget | null {
+  const record = store.snapshot().threads.find((t) => t.id === threadId)
+  if (!record) return null
+  return {
+    threadId: record.id,
+    workspaceId: record.workspaceId,
+    sessionId: record.sessionId,
+    title: record.title,
+  }
+}
+
 export interface BoundSession {
   /** The ACP session this Thread is now bound to. */
   sessionId: string

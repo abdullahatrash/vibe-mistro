@@ -117,6 +117,15 @@ export interface ThreadInfo {
 export interface StartThreadArgs {
   /** Absolute path to the Workspace the agent should operate in. */
   workspaceDir: string
+  /**
+   * Continue an existing persisted Thread from the cold launch list (TB4 #33).
+   * When set, `startThread` spawns + starts the agent and records the Workspace as
+   * usual, but opens NO new Thread (no `session/new`, no extra record) — it seeds
+   * the connection with THIS Thread's stored `sessionId` cursor instead, so the
+   * first prompt drives the lazy `session/load` resume. Falls back to opening a
+   * fresh Thread when the record can't be found (degraded / no store).
+   */
+  continueThreadId?: string
 }
 
 /** Open a Thread on an agent already started + signed in (after sign-in / re-auth). */
@@ -126,7 +135,13 @@ export interface OpenThreadArgs {
 }
 
 /** A Thread plus the Workspace agent that hosts it. */
-export interface ThreadConnection extends ThreadInfo {
+export interface ThreadConnection extends Omit<ThreadInfo, 'sessionId'> {
+  /**
+   * The bound ACP session, or `null` for a continued/draft Thread whose session
+   * binds lazily on first prompt (TB4 #33): a continue-start seeds this from the
+   * stored cursor (which may be null for a never-prompted draft).
+   */
+  sessionId: string | null
   /** Id of the Workspace agent (one `vibe-acp` process) in main. */
   agentId: string
   workspaceDir: string
