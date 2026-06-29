@@ -5,8 +5,12 @@ import {
   initialConversationState,
   type AssistantItem,
   type ConversationItem,
+  type ErrorItem,
   type FallbackItem,
+  type PermissionItem,
+  type PermissionOption,
   type ReasoningItem,
+  type ToolItem,
   type UserItem,
 } from './reducer'
 
@@ -44,15 +48,33 @@ export function Conversation({ thread }: { thread: ThreadConnection }): JSX.Elem
     setDraft('')
     dispatch({ type: 'send-prompt', id: `user:${promptSeq++}`, text })
     try {
-      await window.api.sendPrompt({
+      const result = await window.api.sendPrompt({
         agentId: thread.agentId,
         sessionId: thread.sessionId,
         text,
       })
+      // Surface a failed turn as a conversation item rather than dropping it.
+      if (!result.ok) dispatch({ type: 'turn-error', message: result.error })
     } finally {
       // The turn's stopReason resolves sendPrompt; flip back to the user's turn.
       dispatch({ type: 'turn-complete' })
     }
+  }
+
+  // Answer a pending permission request: relay the choice to the agent and mark
+  // the prompt resolved so it stops asking (state stays renderer-owned).
+  function respondPermission(item: PermissionItem, option: PermissionOption): void {
+    void window.api.respondPermission({
+      agentId: thread.agentId,
+      requestId: item.requestId,
+      optionId: option.optionId,
+    })
+    dispatch({
+      type: 'resolve-permission',
+      requestId: item.requestId,
+      optionId: option.optionId,
+      name: option.name,
+    })
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
@@ -79,9 +101,18 @@ export function Conversation({ thread }: { thread: ThreadConnection }): JSX.Elem
           <p className="hint">Send a prompt to start the conversation.</p>
         )}
         {state.items.map((item) => (
-          <Item key={item.id} item={item} />
+          <Item key={item.id} item={item} onPermission={respondPermission} />
         ))}
       </div>
+
+      {state.isProcessing && (
+        // Escape hatch: if a turn wedges (e.g. a permission prompt is dismissed
+        // and `session/prompt` never resolves), re-enable input instead of
+        // sticking disabled forever (carry-over from #4).
+        <button className="recover" onClick={() => dispatch({ type: 'recover' })}>
+          Turn stuck? End it and re-enable input ▶
+        </button>
+      )}
 
       <div className="composer">
         <textarea
@@ -123,7 +154,13 @@ function UsageBar({ state }: { state: { usage: { used: number; size: number } | 
   )
 }
 
-function Item({ item }: { item: ConversationItem }): JSX.Element {
+function Item({
+  item,
+  onPermission,
+}: {
+  item: ConversationItem
+  onPermission: (item: PermissionItem, option: PermissionOption) => void
+}): JSX.Element {
   switch (item.kind) {
     case 'user':
       return <UserRow item={item} />
@@ -131,6 +168,12 @@ function Item({ item }: { item: ConversationItem }): JSX.Element {
       return <ReasoningRow item={item} />
     case 'assistant':
       return <AssistantRow item={item} />
+    case 'tool':
+      return <ToolRow item={item} />
+    case 'permission':
+      return <PermissionRow item={item} onPermission={onPermission} />
+    case 'error':
+      return <ErrorRow item={item} />
     case 'fallback':
       return <FallbackRow item={item} />
   }
@@ -160,6 +203,62 @@ function ReasoningRow({ item }: { item: ReasoningItem }): JSX.Element {
       <summary className="reasoning__summary">Reasoning</summary>
       <div className="reasoning__body">{item.text}</div>
     </details>
+  )
+}
+
+function ToolRow({ item }: { item: ToolItem }): JSX.Element {
+  const done = item.status === 'completed'
+  const label = item.title ?? item.toolKind ?? 'tool'
+  const path = item.locations.find((l) => l.path)?.path
+  return (
+    <div className="tool">
+      <div className="tool__head">
+        <span className={done ? 'dot dot--ok' : 'dot dot--pending'} aria-hidden />
+        <span className="tool__name">{label}</span>
+        <span className="tool__status">{item.status}</span>
+      </div>
+      {path && <div className="tool__path mono">{path}</div>}
+    </div>
+  )
+}
+
+function PermissionRow({
+  item,
+  onPermission,
+}: {
+  item: PermissionItem
+  onPermission: (item: PermissionItem, option: PermissionOption) => void
+}): JSX.Element {
+  return (
+    <div className="permission">
+      <div className="permission__title">
+        Permission request{item.toolCallId ? ` · ${item.toolCallId}` : ''}
+      </div>
+      {item.chosenName ? (
+        <div className="permission__chosen">You chose: {item.chosenName}</div>
+      ) : (
+        <div className="permission__options">
+          {item.options.map((option) => (
+            <button
+              key={option.optionId}
+              className={option.kind.startsWith('reject') ? 'btn btn--ghost' : 'btn'}
+              onClick={() => onPermission(item, option)}
+            >
+              {option.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ErrorRow({ item }: { item: ErrorItem }): JSX.Element {
+  return (
+    <div className="alert">
+      <div className="alert__title">Turn ended</div>
+      <div className="alert__message">{item.message}</div>
+    </div>
   )
 }
 
