@@ -140,6 +140,17 @@ export class MetadataStore {
   }
 
   /**
+   * Resolve a Thread's minted `id` from its bound ACP `sessionId` (TB2 transcript
+   * routing). Events flow keyed by `sessionId`, but the JSONL is keyed by the
+   * minted Thread `id`; this bridges the two. A null/unmatched session is `null`
+   * (a `null`-session Thread never matches), so the caller can skip the tee.
+   */
+  findThreadIdBySessionId(sessionId: string | null | undefined): string | null {
+    if (!sessionId) return null
+    return this.state.threads.find((t) => t.sessionId === sessionId)?.id ?? null
+  }
+
+  /**
    * The current in-memory index, most-recent-first (Workspaces by
    * `lastOpenedAt`, Threads by `lastActiveAt`) — the order the renderer lists.
    */

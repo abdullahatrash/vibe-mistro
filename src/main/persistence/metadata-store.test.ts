@@ -172,6 +172,21 @@ describe('MetadataStore atomic persist', () => {
   })
 })
 
+describe('findThreadIdBySessionId (transcript routing)', () => {
+  it('resolves the minted Thread id from its bound ACP sessionId, else null', async () => {
+    const store = storeAt('session-lookup.json')
+    await store.load()
+    const ws = await store.upsertWorkspace({ dir: '/proj/route' })
+    const bound = await store.upsertThread({ workspaceId: ws.id, sessionId: 'sess-route' })
+    // A Thread with no session yet must not match a null/absent lookup.
+    await store.upsertThread({ workspaceId: ws.id })
+
+    expect(store.findThreadIdBySessionId('sess-route')).toBe(bound.id)
+    expect(store.findThreadIdBySessionId('no-such-session')).toBeNull()
+    expect(store.findThreadIdBySessionId(null)).toBeNull()
+  })
+})
+
 describe('groupThreadsByWorkspace (pure)', () => {
   it('nests Threads under their Workspace, both most-recent-first, dropping orphans', () => {
     const grouped = groupThreadsByWorkspace({
