@@ -16,6 +16,23 @@ enforcement point for what the agent can touch on disk. We adopt an **asymmetric
   nearest existing ancestor** of the target (the file itself may not exist yet) and rejects it unless
   that real path is within the real path of the Workspace — so a symlink *inside* the Workspace pointing
   outside cannot be used to escape. This closes the lexical-only gap from the TB3 (#4) review.
+  The validated write is then performed **through file descriptors opened with `O_NOFOLLOW`**
+  (`secureWriteWithinRoot`) rather than by path (#21): each intermediate component is reopened
+  `O_RDONLY | O_DIRECTORY | O_NOFOLLOW` and the final component `O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW`,
+  with the content written through the final handle. This fully closes a pre-existing **dangling
+  final-component symlink** bypass (realpath throws on it, so it stays literal and looks in-Workspace, yet
+  a path-based write would follow it out) and refuses **statically-planted intermediate symlinks** present
+  before the walk reaches them (`ELOOP`). The residual: a **live mid-walk swap** of an intermediate dir to a
+  symlink by a separate racing local process still escapes. The opens are by **absolute path** (not `openat`
+  relative to a held fd), so `O_NOFOLLOW` guards only the FINAL component of each path; once a component is
+  verified it is re-traversed as a NON-final component on every deeper open, where the kernel silently
+  follows it if it has since become a symlink. The residual window for an intermediate component therefore
+  runs from its check-open all the way to the final write-open, and the kept-open `FileHandle`s anchor
+  nothing (they are not load-bearing). Truly closing it needs native `openat()` relative to the parent fd
+  (no portable Node API), which would also make the held fds load-bearing; it is accepted under this ADR's
+  desktop trust model. On platforms without `O_NOFOLLOW` (e.g. Windows) the writer falls back to a path-based
+  write, which gets **none** of this hardening — it remains vulnerable to the static dangling-final-symlink
+  write; this is acceptable only because macOS/darwin is the primary target.
 
 ## Considered options
 
