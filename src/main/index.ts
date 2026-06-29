@@ -59,6 +59,12 @@ function registerIpc(): void {
   })
 
   ipcMain.handle(IPC.startThread, async (event, args: StartThreadArgs): Promise<StartThreadResult> => {
+    // TODO(#12): a retained not-signed-in agent (below) is NOT deduped by
+    // workspaceDir — we always mint a fresh agentId + spawn a new
+    // WorkspaceAgent. Not reachable in this slice (the sign-in button is
+    // inert), but once #12 makes it actionable a re-Connect to the same
+    // workspace would orphan the previous not-signed-in agent (its child
+    // lingers). #12 must reuse or stop the existing agent for this workspace.
     const agentId = `a${++agentCounterSeed}`
     const agent = new WorkspaceAgent({ workspaceDir: args.workspaceDir, env: getShellEnv() })
 
@@ -70,15 +76,42 @@ function registerIpc(): void {
 
     try {
       await agent.start()
+
+      // Detected not-signed-in: keep the agent (the sign-in flow will drive it)
+      // but don't open a Thread — session/new would fail with -32000. The
+      // renderer shows the sign-in panel (ADR-0003: detection only here).
+      if (agent.authState === 'not-signed-in') {
+        agents.set(agentId, agent)
+        return {
+          ok: false,
+          kind: 'not-signed-in',
+          agentId,
+          workspaceDir: args.workspaceDir,
+          authMethods: agent.authMethods,
+        }
+      }
+
       const thread = await agent.openThread()
       agents.set(agentId, agent)
       return { ok: true, thread: { agentId, workspaceDir: args.workspaceDir, ...thread } }
     } catch (err) {
       agent.stop()
+      // TODO(#12): fallback UX gap. When `_auth/status` returned `unknown` but
+      // the user is actually signed out, `session/new` (openThread) fails with
+      // -32000 and lands here — we surface it as a generic error alert (still
+      // carrying AUTH_HINT) rather than the SignInPanel. Routing this auth-error
+      // path to the panel requires keeping the agent alive (not stop()-ing it)
+      // so the sign-in flow can drive it, which is coupled to the
+      // agent-dedup/lifecycle work in #12.
       if (err instanceof WorkspaceAgentError) {
-        return { ok: false, error: err.message, hint: err.hint }
+        return { ok: false, kind: 'error', error: err.message, hint: err.hint }
       }
-      return { ok: false, error: err instanceof Error ? err.message : String(err), hint: null }
+      return {
+        ok: false,
+        kind: 'error',
+        error: err instanceof Error ? err.message : String(err),
+        hint: null,
+      }
     }
   })
 
