@@ -2,6 +2,14 @@
 
 Our decisions, synthesized from the three references. When they disagree, this doc wins.
 
+## Scope boundary
+
+vibe-monitor is a **thin orchestrator** over an external agent (`vibe-acp`). The model loop, tool
+selection, and code intelligence (LSP-style lookups, search, edits) belong to **Vibe** — we render
+its tool-call output, we don't reimplement it. No language servers, no embedded model. This is the
+structural difference from opencode (which *is* the agent). See
+[adr/0002](./adr/0002-thin-orchestrator-boundary.md).
+
 ## Stack
 
 - **Electron + electron-vite**, main/preload/renderer split. **React 19 + TypeScript** in the
