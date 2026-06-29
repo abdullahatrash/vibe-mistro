@@ -10,6 +10,8 @@ export const IPC = {
   openWorkspaceDialog: 'workspace:open-dialog',
   /** Start a Workspace agent, run the ACP handshake, and open a Thread. */
   startThread: 'thread:start',
+  /** Open a Thread on an already-started agent (after sign-in / re-auth). */
+  openThread: 'thread:open',
   /** Stop / dispose a Workspace agent (and its Threads). */
   stopAgent: 'agent:stop',
   /** Send a prompt to a Thread (`session/prompt`); resolves on turn completion. */
@@ -18,6 +20,8 @@ export const IPC = {
   respondPermission: 'permission:respond',
   /** Drive Vibe's browser sign-in on a not-signed-in agent (`authenticate`). */
   signIn: 'auth:sign-in',
+  /** Sign out the agent's session (`_auth/signOut`). */
+  signOut: 'auth:sign-out',
   /** Main -> renderer: streamed ACP event tagged by the owning agent. */
   acpEvent: 'acp:event',
 } as const
@@ -89,11 +93,21 @@ export interface StartThreadArgs {
   workspaceDir: string
 }
 
+/** Open a Thread on an agent already started + signed in (after sign-in / re-auth). */
+export interface OpenThreadArgs {
+  /** Id of the started Workspace agent to open a Thread on. */
+  agentId: string
+}
+
 /** A Thread plus the Workspace agent that hosts it. */
 export interface ThreadConnection extends ThreadInfo {
   /** Id of the Workspace agent (one `vibe-acp` process) in main. */
   agentId: string
   workspaceDir: string
+  /** Whether sign-out is available — drives the connected signed-in indicator. */
+  signOutAvailable: boolean
+  /** Advertised sign-in methods, kept so sign-out can route back to the panel. */
+  authMethods: AuthMethod[]
 }
 
 export type StartThreadResult =
@@ -136,7 +150,10 @@ export interface SendPromptArgs {
 
 export type SendPromptResult =
   | { ok: true; result: PromptResult }
-  | { ok: false; error: string }
+  // Mid-session expiry (-32000): the agent stays alive so the renderer can route
+  // to the sign-in panel in place and re-auth on the same agent (no restart).
+  | { ok: false; kind: 'not-signed-in'; agentId: string; authMethods: AuthMethod[] }
+  | { ok: false; kind: 'error'; error: string }
 
 /** Reply to an agent `session/request_permission` with the user's choice. */
 export interface RespondPermissionArgs {
@@ -162,4 +179,19 @@ export interface SignInArgs {
  */
 export type SignInResult =
   | { ok: true; authState: AuthState }
+  | { ok: false; error: string }
+
+/** Sign out the agent's session; the agent stays alive for a re-sign-in. */
+export interface SignOutArgs {
+  /** Id of the Workspace agent to sign out. */
+  agentId: string
+}
+
+/**
+ * Result of a sign-out. On success `authState` is the post-sign-out state
+ * (not-signed-in) and `authMethods` lets the renderer show the sign-in panel for
+ * an account switch. Failures are recoverable — the user stays signed in.
+ */
+export type SignOutResult =
+  | { ok: true; authState: AuthState; authMethods: AuthMethod[] }
   | { ok: false; error: string }

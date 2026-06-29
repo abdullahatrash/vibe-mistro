@@ -1,14 +1,13 @@
 import { useEffect, useReducer, useRef, useState, type JSX } from 'react'
-import type { AuthMethod, ThreadConnection, VibeDetectResult } from '../../shared/ipc'
-import { authReducer, initialAuthViewState, selectAuthView } from './auth/auth-view'
+import type { AuthMethod, VibeDetectResult } from '../../shared/ipc'
+import {
+  authReducer,
+  initialAuthViewState,
+  selectAuthView,
+  signedInAuthViewState,
+} from './auth/auth-view'
+import { routeThreadResult, type ConnectState } from './connection/routing'
 import { Conversation } from './conversation/Conversation'
-
-type ConnectState =
-  | { status: 'idle' }
-  | { status: 'connecting'; workspaceDir: string }
-  | { status: 'connected'; thread: ThreadConnection }
-  | { status: 'not-signed-in'; agentId: string; workspaceDir: string; authMethods: AuthMethod[] }
-  | { status: 'error'; message: string; hint: string | null }
 
 export function App(): JSX.Element {
   const [detect, setDetect] = useState<VibeDetectResult | null>(null)
@@ -29,21 +28,20 @@ export function App(): JSX.Element {
   async function openProject(): Promise<void> {
     const workspaceDir = await window.api.openWorkspaceDialog()
     if (!workspaceDir) return
-
     setConnect({ status: 'connecting', workspaceDir })
-    const result = await window.api.startThread({ workspaceDir })
-    if (result.ok) {
-      setConnect({ status: 'connected', thread: result.thread })
-    } else if (result.kind === 'not-signed-in') {
-      setConnect({
-        status: 'not-signed-in',
-        agentId: result.agentId,
-        workspaceDir: result.workspaceDir,
-        authMethods: result.authMethods,
-      })
-    } else {
-      setConnect({ status: 'error', message: result.error, hint: result.hint })
-    }
+    setConnect(routeThreadResult(await window.api.startThread({ workspaceDir })))
+  }
+
+  // After sign-in (or in-place re-auth) the agent is already started + signed in;
+  // open a Thread on it and land in a connected conversation.
+  async function continueToThread(agentId: string, workspaceDir: string): Promise<void> {
+    setConnect({ status: 'connecting', workspaceDir })
+    setConnect(routeThreadResult(await window.api.openThread({ agentId })))
+  }
+
+  /** Sign-out / mid-session expiry: drop back to the sign-in panel (same agent). */
+  function toSignInPanel(agentId: string, workspaceDir: string, authMethods: AuthMethod[]): void {
+    setConnect({ status: 'not-signed-in', agentId, workspaceDir, authMethods })
   }
 
   const connecting = connect.status === 'connecting'
@@ -101,6 +99,7 @@ export function App(): JSX.Element {
               key={connect.agentId}
               agentId={connect.agentId}
               authMethods={connect.authMethods}
+              onSignedIn={() => void continueToThread(connect.agentId, connect.workspaceDir)}
             />
           )}
 
@@ -113,9 +112,28 @@ export function App(): JSX.Element {
           )}
 
           {connect.status === 'connected' && (
-            // Key by agentId so the Conversation's useReducer state can't bleed
-            // across Threads — a new Thread gets a fresh reducer, not the old one.
-            <Conversation key={connect.thread.agentId} thread={connect.thread} />
+            <>
+              {/* Key by agentId (like Conversation) so its useReducer seed resets
+                  across connections — a new agent can't inherit the prior
+                  session's sign-out gate. */}
+              <SignedInBar
+                key={connect.thread.agentId}
+                agentId={connect.thread.agentId}
+                authMethods={connect.thread.authMethods}
+                signOutAvailable={connect.thread.signOutAvailable}
+                onSignedOut={(authMethods) =>
+                  toSignInPanel(connect.thread.agentId, connect.thread.workspaceDir, authMethods)
+                }
+              />
+              {/* Key by agentId so the Conversation's reducer can't bleed across Threads. */}
+              <Conversation
+                key={connect.thread.agentId}
+                thread={connect.thread}
+                onAuthExpired={(authMethods) =>
+                  toSignInPanel(connect.thread.agentId, connect.thread.workspaceDir, authMethods)
+                }
+              />
+            </>
           )}
         </section>
       </main>
@@ -124,18 +142,19 @@ export function App(): JSX.Element {
 }
 
 /**
- * The not-signed-in panel: visibly distinct from the binary-missing status and
- * the generic-error alert. Clicking Sign-in drives Vibe's delegated browser
- * sign-in via main (#12) — the system browser opens, and on success the panel
- * transitions to a signed-in confirmation. The auth lifecycle (signing-in /
- * signed-in / error) is the pure `authReducer`; this component is the glue.
+ * The not-signed-in panel: clicking Sign-in drives Vibe's delegated browser
+ * sign-in via main; on success it bubbles up (`onSignedIn`) so the app opens a
+ * Thread on the same retained agent and lands in a connected conversation. The
+ * auth lifecycle (signing-in / signed-in / error) is the pure `authReducer`.
  */
 function SignInPanel({
   agentId,
   authMethods,
+  onSignedIn,
 }: {
   agentId: string
   authMethods: AuthMethod[]
+  onSignedIn: () => void
 }): JSX.Element {
   const [state, dispatch] = useReducer(authReducer, authMethods, initialAuthViewState)
   // Generation counter: bumped on every attempt start and on cancel. The
@@ -152,6 +171,7 @@ function SignInPanel({
     if (attempt !== attemptRef.current) return // cancelled/superseded — drop the stale result
     if (result.ok && result.authState === 'signed-in') {
       dispatch({ type: 'sign-in-success' })
+      onSignedIn() // continue to a connected Thread on the same agent
     } else {
       dispatch({
         type: 'sign-in-error',
@@ -165,13 +185,18 @@ function SignInPanel({
     dispatch({ type: 'sign-in-cancel' })
   }
 
-  if (view.kind === 'none') {
-    // Reaching `none` in this panel means we just signed in. This terminal
-    // confirmation is #12's end state; opening a Thread from here (routing
-    // Open-project through sign-in) is #13.
+  if (view.kind === 'signed-in') {
     return (
       <div className="signin signin--done">
-        <div className="signin__title">Signed in to Mistral Vibe</div>
+        <div className="signin__title">Signed in — opening your workspace…</div>
+      </div>
+    )
+  }
+
+  if (view.kind === 'signing-out') {
+    return (
+      <div className="signin">
+        <div className="signin__title">Signing out…</div>
       </div>
     )
   }
@@ -200,6 +225,66 @@ function SignInPanel({
       <button className="btn signin__action" onClick={() => void signIn(view.methodId)}>
         {view.kind === 'error' ? `Retry — ${view.methodName}` : view.methodName}
       </button>
+    </div>
+  )
+}
+
+/**
+ * The signed-in indicator shown while connected: status + a Sign-out control
+ * gated on `signOutAvailable` (Vibe exposes no account identity, so none is
+ * shown). Sign-out returns to the sign-in panel (`onSignedOut`) for an account
+ * switch. The sign-out lifecycle is the pure `authReducer`.
+ */
+function SignedInBar({
+  agentId,
+  authMethods,
+  signOutAvailable,
+  onSignedOut,
+}: {
+  agentId: string
+  authMethods: AuthMethod[]
+  signOutAvailable: boolean
+  onSignedOut: (authMethods: AuthMethod[]) => void
+}): JSX.Element | null {
+  const [state, dispatch] = useReducer(
+    authReducer,
+    signedInAuthViewState(authMethods, signOutAvailable),
+  )
+  const view = selectAuthView(state)
+
+  async function signOut(): Promise<void> {
+    dispatch({ type: 'sign-out-start' })
+    const result = await window.api.signOut({ agentId })
+    if (result.ok) {
+      dispatch({ type: 'sign-out-success' })
+      onSignedOut(result.authMethods)
+    } else {
+      dispatch({ type: 'sign-out-error', message: result.error })
+    }
+  }
+
+  if (view.kind === 'signing-out') {
+    return (
+      <div className="signedin">
+        <span className="signedin__label">Signing out…</span>
+      </div>
+    )
+  }
+
+  if (view.kind !== 'signed-in') return null
+
+  return (
+    <div className="signedin">
+      <span className="dot dot--ok" aria-hidden />
+      <span className="signedin__label">Signed in to Mistral Vibe</span>
+      {view.identity && <span className="signedin__identity">{view.identity}</span>}
+      {view.error && <span className="signedin__error">{view.error}</span>}
+      <span className="signedin__spacer" />
+      {view.signOutAvailable && (
+        <button className="btn btn--ghost" onClick={() => void signOut()}>
+          Sign out
+        </button>
+      )}
     </div>
   )
 }

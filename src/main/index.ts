@@ -2,13 +2,18 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
 import {
   IPC,
+  type OpenThreadArgs,
   type RespondPermissionArgs,
   type SendPromptArgs,
   type SendPromptResult,
   type SignInArgs,
   type SignInResult,
+  type SignOutArgs,
+  type SignOutResult,
   type StartThreadArgs,
   type StartThreadResult,
+  type ThreadConnection,
+  type ThreadInfo,
 } from '../shared/ipc'
 import { detectVibe } from './vibe-detect'
 import { getShellEnv } from './shell-env'
@@ -16,6 +21,46 @@ import { WorkspaceAgent, WorkspaceAgentError } from './workspace-agent'
 
 /** Active Workspace agents keyed by a generated agent id. */
 const agents = new Map<string, WorkspaceAgent>()
+
+/** Build the renderer-facing connection (carries the sign-out gate + methods). */
+function connectionFor(agentId: string, agent: WorkspaceAgent, thread: ThreadInfo): ThreadConnection {
+  return {
+    agentId,
+    workspaceDir: agent.workspaceDir,
+    ...thread,
+    signOutAvailable: agent.signOutAvailable,
+    authMethods: agent.authMethods,
+  }
+}
+
+/**
+ * Map a thread-open failure to a result. An auth-classified error (a -32000
+ * mid-session/expiry) keeps the agent ALIVE and routes to the sign-in panel;
+ * any other failure stops + disposes the agent.
+ */
+function threadFailureResult(agentId: string, agent: WorkspaceAgent, err: unknown): StartThreadResult {
+  if (err instanceof WorkspaceAgentError && err.authState === 'not-signed-in') {
+    // Keep the agent alive AND registered so the renderer's follow-up
+    // signIn({agentId}) finds it. Idempotent: startThread already registers on a
+    // successful start(), but a -32000 thrown from start() itself reaches here
+    // before that, so without this the child would leak + the button would dead-end.
+    agents.set(agentId, agent)
+    return { ok: false, kind: 'not-signed-in', agentId, workspaceDir: agent.workspaceDir, authMethods: agent.authMethods }
+  }
+  agent.stop()
+  agents.delete(agentId)
+  if (err instanceof WorkspaceAgentError) return { ok: false, kind: 'error', error: err.message, hint: err.hint }
+  return { ok: false, kind: 'error', error: err instanceof Error ? err.message : String(err), hint: null }
+}
+
+/** Stop + drop any live agent bound to this workspace (dedup before re-spawn). */
+function disposeAgentsForWorkspace(workspaceDir: string): void {
+  for (const [id, agent] of agents) {
+    if (agent.workspaceDir !== workspaceDir) continue
+    agent.stop()
+    agents.delete(id)
+  }
+}
 let agentCounterSeed = 0
 
 function createWindow(): void {
@@ -61,12 +106,10 @@ function registerIpc(): void {
   })
 
   ipcMain.handle(IPC.startThread, async (event, args: StartThreadArgs): Promise<StartThreadResult> => {
-    // TODO(#13): a retained not-signed-in agent (below) is NOT deduped by
-    // workspaceDir — we always mint a fresh agentId + spawn a new
-    // WorkspaceAgent. Sign-in (#12) reuses the same agent by agentId, so this
-    // doesn't bite yet; but #13 (route Open-project through sign-in) re-Connects
-    // to the same workspace and would orphan the previous not-signed-in agent
-    // (its child lingers). #13 must reuse or stop the existing agent.
+    // Dedup: dispose any existing agent for this workspace before spawning, so a
+    // re-Connect (e.g. after a not-signed-in panel) can't orphan the previous child.
+    disposeAgentsForWorkspace(args.workspaceDir)
+
     const agentId = `a${++agentCounterSeed}`
     const agent = new WorkspaceAgent({
       workspaceDir: args.workspaceDir,
@@ -83,42 +126,32 @@ function registerIpc(): void {
 
     try {
       await agent.start()
+      agents.set(agentId, agent)
 
-      // Detected not-signed-in: keep the agent (the sign-in flow will drive it)
-      // but don't open a Thread — session/new would fail with -32000. The
-      // renderer shows the sign-in panel (ADR-0003: detection only here).
+      // Detected not-signed-in: keep the agent (the sign-in flow drives it) but
+      // don't open a Thread — session/new would fail with -32000. The renderer
+      // shows the sign-in panel and re-tries openThread after sign-in.
       if (agent.authState === 'not-signed-in') {
-        agents.set(agentId, agent)
-        return {
-          ok: false,
-          kind: 'not-signed-in',
-          agentId,
-          workspaceDir: args.workspaceDir,
-          authMethods: agent.authMethods,
-        }
+        return { ok: false, kind: 'not-signed-in', agentId, workspaceDir: args.workspaceDir, authMethods: agent.authMethods }
       }
 
       const thread = await agent.openThread()
-      agents.set(agentId, agent)
-      return { ok: true, thread: { agentId, workspaceDir: args.workspaceDir, ...thread } }
+      return { ok: true, thread: connectionFor(agentId, agent, thread) }
     } catch (err) {
-      agent.stop()
-      // TODO(#13): fallback UX gap. When `_auth/status` returned `unknown` but
-      // the user is actually signed out, `session/new` (openThread) fails with
-      // -32000 and lands here — we surface it as a generic error alert (still
-      // carrying AUTH_HINT) rather than the SignInPanel. Routing this auth-error
-      // path to the panel requires keeping the agent alive (not stop()-ing it)
-      // so the sign-in flow can drive it, which is coupled to the
-      // agent-dedup/lifecycle work deferred to #13.
-      if (err instanceof WorkspaceAgentError) {
-        return { ok: false, kind: 'error', error: err.message, hint: err.hint }
-      }
-      return {
-        ok: false,
-        kind: 'error',
-        error: err instanceof Error ? err.message : String(err),
-        hint: null,
-      }
+      return threadFailureResult(agentId, agent, err)
+    }
+  })
+
+  ipcMain.handle(IPC.openThread, async (_event, args: OpenThreadArgs): Promise<StartThreadResult> => {
+    // Open a Thread on an agent already started + signed in (after sign-in or an
+    // in-place re-auth). Reuses the retained agent — no re-spawn.
+    const agent = agents.get(args.agentId)
+    if (!agent) return { ok: false, kind: 'error', error: `No active agent for id ${args.agentId}.`, hint: null }
+    try {
+      const thread = await agent.openThread()
+      return { ok: true, thread: connectionFor(args.agentId, agent, thread) }
+    } catch (err) {
+      return threadFailureResult(args.agentId, agent, err)
     }
   })
 
@@ -126,12 +159,17 @@ function registerIpc(): void {
     IPC.sendPrompt,
     async (_event, args: SendPromptArgs): Promise<SendPromptResult> => {
       const agent = agents.get(args.agentId)
-      if (!agent) return { ok: false, error: `No active agent for id ${args.agentId}.` }
+      if (!agent) return { ok: false, kind: 'error', error: `No active agent for id ${args.agentId}.` }
       try {
         const result = await agent.prompt(args.sessionId, args.text)
         return { ok: true, result }
       } catch (err) {
-        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+        // Mid-session expiry (-32000): keep the agent alive so the renderer can
+        // re-auth in place on the same agent; don't stop it.
+        if (err instanceof WorkspaceAgentError && err.authState === 'not-signed-in') {
+          return { ok: false, kind: 'not-signed-in', agentId: args.agentId, authMethods: agent.authMethods }
+        }
+        return { ok: false, kind: 'error', error: err instanceof Error ? err.message : String(err) }
       }
     },
   )
@@ -152,6 +190,19 @@ function registerIpc(): void {
     try {
       const authState = await agent.signIn(args.methodId)
       return { ok: true, authState }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle(IPC.signOut, async (_event, args: SignOutArgs): Promise<SignOutResult> => {
+    // Sign out via Vibe's keyring removal and relay the new state; the agent
+    // stays alive so the user can sign a different account back in (ADR-0003).
+    const agent = agents.get(args.agentId)
+    if (!agent) return { ok: false, error: `No active agent for id ${args.agentId}.` }
+    try {
+      const authState = await agent.signOut()
+      return { ok: true, authState, authMethods: agent.authMethods }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }

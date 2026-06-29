@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { AcpClient, type SpawnFn } from './acp/client'
 import { handleFsReadTextFile, type ReadTextFn } from './acp/fs-read'
 import { handleFsWriteTextFile, type WriteTextFn } from './acp/fs-write'
-import { classifyAuthError, classifyAuthStatus } from './auth/auth-state'
+import { classifyAuthError, classifyAuthStatus, extractSignOutAvailable } from './auth/auth-state'
 import { DELEGATED_AUTH_METHOD_ID } from '../shared/ipc'
 import type {
   AuthMethod,
@@ -35,10 +35,17 @@ export const SPAWN_HINT =
 /** A failure surfaced to the renderer, optionally with an actionable hint. */
 export class WorkspaceAgentError extends Error {
   readonly hint: string | null
-  constructor(message: string, hint: string | null = null) {
+  /**
+   * Auth classification of this failure, when known. `not-signed-in` marks a
+   * -32000 UnauthenticatedError (mid-session expiry) so callers route to the
+   * sign-in panel and keep the agent alive instead of treating it as generic.
+   */
+  readonly authState: AuthState | null
+  constructor(message: string, hint: string | null = null, authState: AuthState | null = null) {
     super(message)
     this.name = 'WorkspaceAgentError'
     this.hint = hint
+    this.authState = authState
   }
 }
 
@@ -75,7 +82,7 @@ export interface WorkspaceAgentOptions {
 
 export class WorkspaceAgent extends EventEmitter {
   private readonly client: AcpClient
-  private readonly workspaceDir: string
+  private readonly workspaceDirValue: string
   private readonly readTextFile?: ReadTextFn
   private readonly writeTextFile?: WriteTextFn
   private readonly openUrl?: (url: string) => void
@@ -86,10 +93,12 @@ export class WorkspaceAgent extends EventEmitter {
   private authStateValue: AuthState = 'unknown'
   /** Sign-in methods advertised by `initialize` (e.g. `browser-auth`). */
   private authMethodsValue: AuthMethod[] = []
+  /** Whether `_auth/status` reports sign-out is available — gates the control. */
+  private signOutAvailableValue = false
 
   constructor(options: WorkspaceAgentOptions) {
     super()
-    this.workspaceDir = options.workspaceDir
+    this.workspaceDirValue = options.workspaceDir
     this.readTextFile = options.readTextFile
     this.writeTextFile = options.writeTextFile
     this.openUrl = options.openUrl
@@ -162,7 +171,7 @@ export class WorkspaceAgent extends EventEmitter {
       await this.detectAuthState(earlyFailure)
       this.initialized = true
     } catch (err) {
-      throw this.toAgentError(err)
+      throw this.mapErrorAndCacheAuth(err)
     } finally {
       this.detachStartGuards(onError, onExit)
     }
@@ -178,6 +187,23 @@ export class WorkspaceAgent extends EventEmitter {
     return this.authMethodsValue
   }
 
+  /** Whether sign-out is currently available (from the last `_auth/status`). */
+  get signOutAvailable(): boolean {
+    return this.signOutAvailableValue
+  }
+
+  /** The absolute Workspace directory this agent operates in (for dedup). */
+  get workspaceDir(): string {
+    return this.workspaceDirValue
+  }
+
+  /** Fold a fresh `_auth/status` result into the cached auth state + sign-out gate. */
+  private applyAuthStatus(status: unknown): AuthState {
+    this.authStateValue = classifyAuthStatus(status)
+    this.signOutAvailableValue = extractSignOutAvailable(status)
+    return this.authStateValue
+  }
+
   /**
    * Query the `_auth/status` extension method and classify the result. Process
    * death during the call is fatal (races `earlyFailure`); a plain RPC failure
@@ -187,7 +213,7 @@ export class WorkspaceAgent extends EventEmitter {
   private async detectAuthState(earlyFailure: Promise<never>): Promise<void> {
     try {
       const status = await Promise.race([this.client.request('_auth/status'), earlyFailure])
-      this.authStateValue = classifyAuthStatus(status)
+      this.applyAuthStatus(status)
     } catch (err) {
       if (err instanceof WorkspaceAgentError) throw err
       this.authStateValue = 'unknown'
@@ -237,11 +263,41 @@ export class WorkspaceAgent extends EventEmitter {
       })
 
       const status = await this.client.request('_auth/status')
-      this.authStateValue = classifyAuthStatus(status)
-      return this.authStateValue
+      return this.applyAuthStatus(status)
     } catch (err) {
       throw this.toSignInError(err)
     }
+  }
+
+  /**
+   * Sign out via the `_auth/signOut` extension method (acp-capture §8): Vibe
+   * removes the api key from its keyring (we never see it). On `{}` we re-query
+   * `_auth/status` and transition `signed-in → not-signed-in`. Gated on the last
+   * known `signOutAvailable` so we don't round-trip a call the agent will reject
+   * (-32602). Resolves the post-sign-out `AuthState`; rejects (no wedge) on a
+   * keyring failure (-32603) or early exit.
+   */
+  async signOut(): Promise<AuthState> {
+    if (!this.initialized) {
+      throw new WorkspaceAgentError('Agent is not initialized; call start() first.')
+    }
+    if (!this.signOutAvailableValue) {
+      throw new WorkspaceAgentError('Sign-out is not available for this session.', AUTH_HINT)
+    }
+    try {
+      await this.client.request('_auth/signOut')
+      const status = await this.client.request('_auth/status')
+      return this.applyAuthStatus(status)
+    } catch (err) {
+      throw this.toSignOutError(err)
+    }
+  }
+
+  /** Map a sign-out failure to a clear message (not a bare RPC string). */
+  private toSignOutError(err: unknown): WorkspaceAgentError {
+    if (err instanceof WorkspaceAgentError) return err
+    const detail = (err as { message?: string })?.message ?? (err instanceof Error ? err.message : String(err))
+    return new WorkspaceAgentError(`Sign-out failed: ${detail}`, AUTH_HINT)
   }
 
   /** Map a sign-in failure to a clear message (not a bare RPC string). */
@@ -261,11 +317,11 @@ export class WorkspaceAgent extends EventEmitter {
     let result: SessionNewResult
     try {
       result = await this.client.request<SessionNewResult>('session/new', {
-        cwd: this.workspaceDir,
+        cwd: this.workspaceDirValue,
         mcpServers: [],
       })
     } catch (err) {
-      throw this.toAgentError(err)
+      throw this.mapErrorAndCacheAuth(err)
     }
 
     const thread: ThreadInfo = {
@@ -300,7 +356,7 @@ export class WorkspaceAgent extends EventEmitter {
         prompt: [{ type: 'text', text }],
       })
     } catch (err) {
-      throw this.toAgentError(err)
+      throw this.mapErrorAndCacheAuth(err)
     }
   }
 
@@ -342,7 +398,7 @@ export class WorkspaceAgent extends EventEmitter {
   private async serveFsWrite(id: number | string, params: unknown): Promise<void> {
     const outcome = await handleFsWriteTextFile(params, {
       write: this.writeTextFile,
-      workspaceDir: this.workspaceDir,
+      workspaceDir: this.workspaceDirValue,
     })
     if ('result' in outcome) this.client.respond(id, outcome.result)
     else this.client.respondError(id, outcome.error)
@@ -372,8 +428,14 @@ export class WorkspaceAgent extends EventEmitter {
     return new WorkspaceAgentError(`Failed to launch vibe-acp: ${message}`, SPAWN_HINT)
   }
 
-  /** Map a request rejection (JSON-RPC error, early failure) to a clear error. */
-  private toAgentError(err: unknown): WorkspaceAgentError {
+  /**
+   * Map a request rejection (JSON-RPC error, early failure) to a clear error.
+   * SIDE EFFECT: a -32000 UnauthenticatedError also caches the agent's auth
+   * state as `not-signed-in` (mid-session expiry) — call only from a real
+   * request-failure path, never to map an error read-only (e.g. for logging),
+   * or you'd silently mark a live agent signed-out.
+   */
+  private mapErrorAndCacheAuth(err: unknown): WorkspaceAgentError {
     if (err instanceof WorkspaceAgentError) return err
 
     const rpc = err as { code?: number; message?: string; data?: unknown }
@@ -383,7 +445,16 @@ export class WorkspaceAgent extends EventEmitter {
     // UnauthenticatedError (docs/acp-capture.md §8). This replaces the earlier
     // message-regex heuristic, which missed the real "Missing API key" wording.
     if (classifyAuthError(rpc) === 'not-signed-in') {
-      return new WorkspaceAgentError(`Not signed in to Mistral Vibe: ${message}`, AUTH_HINT)
+      // Mid-session expiry: flip the cached auth state so callers keep the agent
+      // alive and route to the sign-in panel, and tag the error so they can tell
+      // it apart from a generic failure.
+      this.authStateValue = 'not-signed-in'
+      this.signOutAvailableValue = false
+      return new WorkspaceAgentError(
+        `Not signed in to Mistral Vibe: ${message}`,
+        AUTH_HINT,
+        'not-signed-in',
+      )
     }
     return new WorkspaceAgentError(message)
   }
