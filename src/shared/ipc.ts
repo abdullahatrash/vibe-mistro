@@ -24,6 +24,8 @@ export const IPC = {
   signOut: 'auth:sign-out',
   /** Main -> renderer: streamed ACP event tagged by the owning agent. */
   acpEvent: 'acp:event',
+  /** List persisted Workspaces + their Threads for the cold launch list (ADR-0005). */
+  listMetadata: 'metadata:list',
 } as const
 
 /**
@@ -203,3 +205,41 @@ export interface SignOutArgs {
 export type SignOutResult =
   | { ok: true; authState: AuthState; authMethods: AuthMethod[] }
   | { ok: false; error: string }
+
+/**
+ * Persisted Workspace metadata (ADR-0005): a project dir the user has opened.
+ * The renderer lists these on launch with NO agent spawned and no transcript
+ * loaded — opening for content is a later slice (TB3).
+ */
+export interface WorkspaceMeta {
+  /** Durable, minted id (stable across launches; keyed internally by `dir`). */
+  id: string
+  /** Absolute Workspace directory. */
+  dir: string
+  /** Human label for the list (defaults to the dir when none is given). */
+  displayName: string
+  /** Epoch-ms of the most recent open — drives most-recent-first ordering. */
+  lastOpenedAt: number
+}
+
+/**
+ * Persisted Thread metadata (ADR-0001 domain id). The Thread `id` is OUR durable
+ * handle, distinct from the ACP `sessionId` it last bound to (`sessionId` is the
+ * resume cursor for a later reopen, `null` before any session is minted).
+ */
+export interface ThreadMeta {
+  id: string
+  workspaceId: string
+  sessionId: string | null
+  title: string | null
+  createdAt: number
+  lastActiveAt: number
+}
+
+/** A Workspace with its Threads nested, both most-recent-first — the cold list. */
+export interface WorkspaceThreads extends WorkspaceMeta {
+  threads: ThreadMeta[]
+}
+
+/** The `listMetadata` reply: persisted Workspaces with their Threads. */
+export type ListMetadataResult = WorkspaceThreads[]
