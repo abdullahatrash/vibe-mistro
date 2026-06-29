@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll } from 'vitest'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { handleFsWriteTextFile, isPathWithin, type WriteTextFn } from './fs-write'
@@ -78,6 +78,115 @@ describe('handleFsWriteTextFile (Seam C)', () => {
       expect(outcome.error.code).toBe(-32603)
       expect(outcome.error.message).toMatch(/EACCES/)
     }
+  })
+})
+
+/**
+ * Symlink confinement (#8 / ADR-0004): a lexical check trusts symlinks, so a
+ * link *inside* the Workspace pointing out is a real write-escape. The check
+ * must resolve real paths (realpath of the nearest existing ancestor, since the
+ * target file may not exist yet). Exercised against REAL temp dirs + symlinks.
+ */
+describe('handleFsWriteTextFile — symlink confinement (#8)', () => {
+  it('rejects a write through an in-Workspace symlink that escapes, without writing', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vibe-ws-'))
+    const outside = mkdtempSync(join(tmpdir(), 'vibe-outside-'))
+    // A symlink INSIDE the Workspace pointing OUT — lexically `evil/secret.txt`
+    // looks contained, but it resolves outside.
+    symlinkSync(outside, join(ws, 'evil'))
+
+    let wrote = false
+    const write: WriteTextFn = async () => {
+      wrote = true
+    }
+    const outcome = await handleFsWriteTextFile(
+      { path: join(ws, 'evil', 'secret.txt'), content: 'pwned' },
+      { write, workspaceDir: ws },
+    )
+
+    expect('error' in outcome).toBe(true)
+    if ('error' in outcome) {
+      expect(outcome.error.code).toBe(-32602)
+      expect(outcome.error.message).toMatch(/escapes the Workspace/)
+    }
+    expect(wrote).toBe(false)
+
+    rmSync(ws, { recursive: true, force: true })
+    rmSync(outside, { recursive: true, force: true })
+  })
+
+  it('rejects a `..` that climbs out THROUGH a symlink (raw uncollapsed path)', async () => {
+    // base/{workspace, outside}; workspace/link -> outside.
+    const base = mkdtempSync(join(tmpdir(), 'vibe-base-'))
+    const ws = join(base, 'workspace')
+    const outside = join(base, 'outside')
+    mkdirSync(ws)
+    mkdirSync(outside)
+    symlinkSync(outside, join(ws, 'link'))
+
+    // RAW string concat (NOT path.join/resolve) so the `..` is NOT collapsed at
+    // construction — exactly as the agent's JSON-RPC string arrives. The kernel
+    // follows link -> outside, THEN applies `..` -> base, landing at base/pwned.txt.
+    const attack = ws + '/link/../pwned.txt'
+
+    const outcome = await handleFsWriteTextFile({ path: attack, content: 'pwned' }, { workspaceDir: ws })
+
+    expect('error' in outcome).toBe(true)
+    if ('error' in outcome) expect(outcome.error.code).toBe(-32602)
+    // Nothing may land outside the Workspace.
+    expect(existsSync(join(base, 'pwned.txt'))).toBe(false)
+    expect(existsSync(join(outside, 'pwned.txt'))).toBe(false)
+
+    rmSync(base, { recursive: true, force: true })
+  })
+
+  it('allows a `..` that stays within the Workspace (between existing dirs)', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vibe-ws-'))
+    mkdirSync(join(ws, 'a'))
+    mkdirSync(join(ws, 'b'))
+    // a/../b/note.txt resolves to b/note.txt — inside the Workspace.
+    const outcome = await handleFsWriteTextFile(
+      { path: ws + '/a/../b/note.txt', content: 'ok' },
+      { workspaceDir: ws },
+    )
+    expect(outcome).toEqual({ result: {} })
+    expect(readFileSync(join(ws, 'b', 'note.txt'), 'utf8')).toBe('ok')
+
+    rmSync(ws, { recursive: true, force: true })
+  })
+
+  it('allows a not-yet-existing file in an existing in-Workspace subdir', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'vibe-ws-'))
+    mkdirSync(join(ws, 'sub'))
+
+    const outcome = await handleFsWriteTextFile(
+      { path: join(ws, 'sub', 'new.txt'), content: 'ok' },
+      { workspaceDir: ws },
+    )
+
+    expect(outcome).toEqual({ result: {} })
+    expect(readFileSync(join(ws, 'sub', 'new.txt'), 'utf8')).toBe('ok')
+
+    rmSync(ws, { recursive: true, force: true })
+  })
+
+  it('allows a normal write when the Workspace root itself is reached via a symlink', async () => {
+    const realRoot = mkdtempSync(join(tmpdir(), 'vibe-realroot-'))
+    const linkRoot = `${realRoot}-link`
+    symlinkSync(realRoot, linkRoot) // linkRoot -> realRoot
+
+    // Both the Workspace root and the target are realpath-resolved, so a write
+    // inside a symlinked Workspace is NOT falsely rejected.
+    const outcome = await handleFsWriteTextFile(
+      { path: join(linkRoot, 'file.txt'), content: 'ok' },
+      { workspaceDir: linkRoot },
+    )
+
+    expect(outcome).toEqual({ result: {} })
+    expect(readFileSync(join(realRoot, 'file.txt'), 'utf8')).toBe('ok')
+
+    rmSync(realRoot, { recursive: true, force: true })
+    rmSync(linkRoot, { force: true })
   })
 })
 
