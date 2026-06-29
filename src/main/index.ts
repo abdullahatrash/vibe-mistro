@@ -1,4 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { mkdir } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { basename, join } from 'node:path'
 import {
   IPC,
@@ -19,6 +21,13 @@ import {
 import { detectVibe } from './vibe-detect'
 import { getShellEnv } from './shell-env'
 import { groupThreadsByWorkspace, MetadataStore } from './persistence/metadata-store'
+import {
+  acpEventEntry,
+  resolvePermissionEntry,
+  TranscriptStore,
+  userPromptEntry,
+  type TranscriptEntry,
+} from './persistence/transcript'
 import { WorkspaceAgent, WorkspaceAgentError } from './workspace-agent'
 
 /** Active Workspace agents keyed by a generated agent id. */
@@ -32,23 +41,59 @@ const agents = new Map<string, WorkspaceAgent>()
 let metadataStore: MetadataStore | null = null
 
 /**
+ * The per-Thread transcript writer (ADR-0005, TB2). Assigned at app-ready (needs
+ * `userData`) alongside `metadataStore`. Best-effort like the metadata writes —
+ * a failed tee never breaks the live conversation.
+ */
+let transcriptStore: TranscriptStore | null = null
+
+/**
+ * Bridge the ACP-keyed event flow to the JSONL key. Streamed events + permission
+ * replies cross main keyed by `agentId` (the chokepoints carry no `sessionId`),
+ * but the transcript is keyed by the minted Thread `id` (TB1). We populate this
+ * `agentId -> threadId` index when a Thread is recorded; the store's
+ * `findThreadIdBySessionId` is the secondary path (e.g. `sendPrompt`, which does
+ * carry a `sessionId`). A miss skips the tee — never breaking the live flow.
+ */
+const transcriptThreads = new Map<string, string>()
+
+/** Resolve the active Thread id for a chokepoint, or null to skip the tee. */
+function threadIdForTee(agentId: string, sessionId?: string | null): string | null {
+  return (
+    transcriptThreads.get(agentId) ?? metadataStore?.findThreadIdBySessionId(sessionId ?? null) ?? null
+  )
+}
+
+/**
+ * Tee one conversation INPUT to the active Thread's JSONL (ADR-0005). Best-effort
+ * and fire-and-forget, guarded exactly like `recordThread`: an absent store or an
+ * unresolved Thread id skips the write; the append itself swallows I/O errors.
+ */
+function teeTranscript(threadId: string | null, entry: TranscriptEntry): void {
+  if (!transcriptStore || !threadId) return
+  void transcriptStore.append(threadId, entry)
+}
+
+/**
  * Persist that this Workspace was opened and a Thread minted. The Thread gets a
  * durable id (minted by the store) distinct from its ACP `sessionId`, which is
  * stored as the resume cursor for a later reopen (TB3). Best-effort: a metadata
- * write must never break the live connect flow.
+ * write must never break the live connect flow. Also seeds the `agentId ->
+ * threadId` transcript bridge so the agent's streamed events tee to this Thread.
  */
-async function recordThread(workspaceDir: string, thread: ThreadInfo): Promise<void> {
+async function recordThread(agentId: string, workspaceDir: string, thread: ThreadInfo): Promise<void> {
   if (!metadataStore) return
   try {
     const ws = await metadataStore.upsertWorkspace({
       dir: workspaceDir,
       displayName: basename(workspaceDir),
     })
-    await metadataStore.upsertThread({
+    const record = await metadataStore.upsertThread({
       workspaceId: ws.id,
       sessionId: thread.sessionId,
       title: thread.title,
     })
+    transcriptThreads.set(agentId, record.id)
   } catch {
     // A persistence failure is non-fatal — the user is still connected.
   }
@@ -170,6 +215,9 @@ function registerIpc(): void {
     })
 
     agent.on('event', (payload: unknown) => {
+      // Tee each streamed payload to the active Thread's transcript (ADR-0005)
+      // before forwarding it — best-effort, never gating the live forward.
+      teeTranscript(threadIdForTee(agentId), acpEventEntry(payload))
       if (!event.sender.isDestroyed()) {
         event.sender.send(IPC.acpEvent, { agentId, payload })
       }
@@ -191,7 +239,7 @@ function registerIpc(): void {
       }
 
       const thread = await agent.openThread()
-      await recordThread(args.workspaceDir, thread)
+      await recordThread(agentId, args.workspaceDir, thread)
       return { ok: true, thread: connectionFor(agentId, agent, thread) }
     } catch (err) {
       return threadFailureResult(agentId, agent, err)
@@ -205,7 +253,7 @@ function registerIpc(): void {
     if (!agent) return { ok: false, kind: 'error', error: `No active agent for id ${args.agentId}.`, hint: null }
     try {
       const thread = await agent.openThread()
-      await recordThread(agent.workspaceDir, thread)
+      await recordThread(args.agentId, agent.workspaceDir, thread)
       return { ok: true, thread: connectionFor(args.agentId, agent, thread) }
     } catch (err) {
       return threadFailureResult(args.agentId, agent, err)
@@ -217,6 +265,10 @@ function registerIpc(): void {
     async (_event, args: SendPromptArgs): Promise<SendPromptResult> => {
       const agent = agents.get(args.agentId)
       if (!agent) return { ok: false, kind: 'error', error: `No active agent for id ${args.agentId}.` }
+      // Tee the user's prompt (the conversation INPUT) before sending it, so it
+      // precedes the streamed events it triggers. Main has no renderer item id,
+      // so we mint one — it's an opaque replay key, never matched against.
+      teeTranscript(threadIdForTee(args.agentId, args.sessionId), userPromptEntry(randomUUID(), args.text))
       try {
         const result = await agent.prompt(args.sessionId, args.text)
         return { ok: true, result }
@@ -233,8 +285,11 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.respondPermission, (_event, args: RespondPermissionArgs) => {
     // Main only relays the user's choice back to the agent by request id; the
-    // approve/deny decision lives in the renderer (ADR-0001).
+    // approve/deny decision lives in the renderer (ADR-0001). We also tee the
+    // choice to the transcript — main sees requestId + optionId but not the
+    // option's display name (renderer-side), so the entry's `name` is null.
     const agent = agents.get(args.agentId)
+    teeTranscript(threadIdForTee(args.agentId), resolvePermissionEntry(args.requestId, args.optionId))
     agent?.respondPermission(args.requestId, args.optionId)
   })
 
@@ -284,6 +339,17 @@ app.whenReady().then(async () => {
   // fetch sees prior Workspaces/Threads. `userData` is only valid once ready.
   metadataStore = new MetadataStore({ filePath: join(app.getPath('userData'), 'metadata.json') })
   await metadataStore.load()
+
+  // The per-Thread transcript dir (ADR-0005). `appendFile` won't create parent
+  // dirs, so ensure it exists once here; a failure leaves `transcriptStore` null
+  // and teeing becomes a silent no-op (best-effort — the conversation is fine).
+  const transcriptsDir = join(app.getPath('userData'), 'transcripts')
+  try {
+    await mkdir(transcriptsDir, { recursive: true })
+    transcriptStore = new TranscriptStore({ dir: transcriptsDir })
+  } catch {
+    transcriptStore = null
+  }
 
   registerIpc()
   createWindow()
