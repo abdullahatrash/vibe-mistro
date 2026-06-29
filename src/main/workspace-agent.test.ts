@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { AUTH_HINT, SPAWN_HINT, WorkspaceAgent, WorkspaceAgentError } from './workspace-agent'
+import {
+  AUTH_HINT,
+  SessionLoadError,
+  SPAWN_HINT,
+  WorkspaceAgent,
+  WorkspaceAgentError,
+} from './workspace-agent'
 import type { ChildProcessLike, SpawnFn } from './acp/client'
 
 /**
@@ -893,5 +899,172 @@ describe('WorkspaceAgent — write + permission (TB3)', () => {
 
     const reply = sent(fake).find((m) => m.id === 0 && m.result !== undefined)
     expect(reply?.result).toEqual({ outcome: { outcome: 'selected', optionId: 'allow_once' } })
+  })
+})
+
+// --- TB4: session/load resume + replay suppression (#33) ---------------------
+
+/** A session id NOT opened by `connect` — the agent must `session/load` to host it. */
+const LOAD_SESSION_ID = 'aaaa1111-bbbb-2222-cccc-333344445555'
+
+/** A `session/update` notification for a session (a replayed-history chunk). */
+function sessionUpdate(sessionId: string): string {
+  return (
+    JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'session/update',
+      params: {
+        sessionId,
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'replay' }, messageId: 'a1' },
+      },
+    }) + '\n'
+  )
+}
+
+/** Whether an emitted `event` payload is a `session/update` notification. */
+function isSessionUpdate(e: unknown): boolean {
+  return (e as { method?: string } | null)?.method === 'session/update'
+}
+
+/** The `session/load` request the agent sent, parsed loosely (cwd/mcpServers). */
+function loadRequest(fake: CapturingFake): { id?: number; params?: { sessionId?: string; cwd?: string; mcpServers?: unknown[] } } | undefined {
+  return fake.writes
+    .map((w) => JSON.parse(w) as { id?: number; method?: string; params?: { sessionId?: string; cwd?: string; mcpServers?: unknown[] } })
+    .find((m) => m.method === 'session/load')
+}
+
+/** Drive a ready agent whose initialize advertises (or omits) `loadSession`. */
+async function connectWithLoadSession(fake: CapturingFake, advertise: boolean): Promise<WorkspaceAgent> {
+  const agent = new WorkspaceAgent({ workspaceDir: '/abs/workspace', spawn: () => fake.child })
+  const started = agent.start()
+  fake.feed(
+    JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      result: { protocolVersion: 1, agentCapabilities: advertise ? { loadSession: true } : {} },
+    }) + '\n',
+  )
+  await new Promise((r) => setTimeout(r, 0))
+  fake.feed(
+    JSON.stringify({ jsonrpc: '2.0', id: 2, result: { authenticated: true, authState: 'os_keyring' } }) + '\n',
+  )
+  await started
+  return agent
+}
+
+describe('WorkspaceAgent.loadThread() — resume (TB4 #33)', () => {
+  it('sends session/load {sessionId,cwd,mcpServers:[]}, registers the session, and resolves to its info', async () => {
+    const fake = makeCapturingFake()
+    const agent = await connect(fake)
+    expect(agent.hasSession(LOAD_SESSION_ID)).toBe(false)
+
+    const loading = agent.loadThread(LOAD_SESSION_ID)
+    await new Promise((r) => setTimeout(r, 0))
+    const req = loadRequest(fake)
+    expect(req?.params).toEqual({ sessionId: LOAD_SESSION_ID, cwd: '/abs/workspace', mcpServers: [] })
+
+    // The result mirrors session/new but carries NO sessionId (acp-capture §9).
+    fake.feed(JSON.stringify({ jsonrpc: '2.0', id: req?.id, result: { modes: null, models: null } }) + '\n')
+    const info = await loading
+    expect(info.sessionId).toBe(LOAD_SESSION_ID) // kept the id we loaded
+    expect(agent.hasSession(LOAD_SESSION_ID)).toBe(true) // now hosted -> next prompt reuses it
+  })
+
+  it('SUPPRESSES the wire-replayed session/update during load, then forwards live ones (no double history)', async () => {
+    const fake = makeCapturingFake()
+    const agent = await connect(fake)
+    const events: unknown[] = []
+    agent.on('event', (e) => events.push(e))
+
+    const loading = agent.loadThread(LOAD_SESSION_ID)
+    await new Promise((r) => setTimeout(r, 0))
+    const req = loadRequest(fake)
+
+    // A replayed-history notification arrives BETWEEN the request and its result —
+    // we already own this history in our JSONL, so it must NOT be emitted outward.
+    fake.feed(sessionUpdate(LOAD_SESSION_ID))
+    expect(events.filter(isSessionUpdate)).toHaveLength(0)
+
+    // The result resolves (the "resume complete" signal) — the gate clears.
+    fake.feed(JSON.stringify({ jsonrpc: '2.0', id: req?.id, result: {} }) + '\n')
+    await loading
+
+    // A notification AFTER resume forwards normally (live streaming resumes).
+    fake.feed(sessionUpdate(LOAD_SESSION_ID))
+    expect(events.filter(isSessionUpdate)).toHaveLength(1)
+  })
+
+  it('does NOT suppress notifications for a DIFFERENT session while one is loading', async () => {
+    const fake = makeCapturingFake()
+    const agent = await connect(fake)
+    const events: unknown[] = []
+    agent.on('event', (e) => events.push(e))
+
+    const loading = agent.loadThread(LOAD_SESSION_ID)
+    await new Promise((r) => setTimeout(r, 0))
+    const req = loadRequest(fake)
+
+    // The gate is per-session: a sibling session's live event still flows through.
+    fake.feed(sessionUpdate(SESSION_ID))
+    expect(events.filter(isSessionUpdate)).toHaveLength(1)
+
+    fake.feed(JSON.stringify({ jsonrpc: '2.0', id: req?.id, result: {} }) + '\n')
+    await loading
+  })
+
+  it('rejects with SessionLoadError on -32602 "Session not found", leaves the session unhosted, and clears the gate', async () => {
+    const fake = makeCapturingFake()
+    const agent = await connect(fake)
+
+    const settled = agent.loadThread(LOAD_SESSION_ID).catch((e: unknown) => e)
+    await new Promise((r) => setTimeout(r, 0))
+    const req = loadRequest(fake)
+    fake.feed(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: req?.id,
+        error: { code: -32602, message: 'Session not found: x', data: { session_id: 'x' } },
+      }) + '\n',
+    )
+
+    const err = await settled
+    expect(err).toBeInstanceOf(SessionLoadError)
+    expect(agent.hasSession(LOAD_SESSION_ID)).toBe(false) // a failed resume hosts nothing
+
+    // The suppression gate cleared on failure too — later notifications forward.
+    const events: unknown[] = []
+    agent.on('event', (e) => events.push(e))
+    fake.feed(sessionUpdate(LOAD_SESSION_ID))
+    expect(events.filter(isSessionUpdate)).toHaveLength(1)
+  })
+
+  it('maps a -32000 load failure to a not-signed-in WorkspaceAgentError (NOT a SessionLoadError)', async () => {
+    const fake = makeCapturingFake()
+    const agent = await connect(fake)
+
+    const settled = agent.loadThread(LOAD_SESSION_ID).catch((e: unknown) => e)
+    await new Promise((r) => setTimeout(r, 0))
+    const req = loadRequest(fake)
+    fake.feed(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: req?.id,
+        error: { code: -32000, message: 'Missing API key for mistral provider.' },
+      }) + '\n',
+    )
+
+    const err = await settled
+    expect(err).toBeInstanceOf(WorkspaceAgentError)
+    expect(err).not.toBeInstanceOf(SessionLoadError)
+    expect((err as WorkspaceAgentError).authState).toBe('not-signed-in')
+    expect(agent.authState).toBe('not-signed-in') // flips so the caller routes to sign-in
+  })
+
+  it('reflects agentCapabilities.loadSession from initialize (gates the resume path)', async () => {
+    const withCap = await connectWithLoadSession(makeCapturingFake(), true)
+    expect(withCap.loadSessionAvailable).toBe(true)
+
+    const withoutCap = await connectWithLoadSession(makeCapturingFake(), false)
+    expect(withoutCap.loadSessionAvailable).toBe(false)
   })
 })

@@ -164,6 +164,12 @@ export interface AcpEvent {
 export interface ThreadBoundEvent {
   threadId: string
   sessionId: string
+  /**
+   * True when this binding RE-bound a reopened Thread to a fresh `session/new`
+   * after a `session/load` resume failed (TB4 #33). The renderer renders a
+   * one-time "agent context reset" notice; absent/false on a normal draft mint.
+   */
+  rebound?: boolean
 }
 
 /** Token usage for a completed turn (`session/prompt` response). */
@@ -323,6 +329,11 @@ export type TranscriptEntry =
   | { t: 'turn-complete' }
   | { t: 'turn-error'; message: string }
   | { t: 'resolve-permission'; requestId: number | string; optionId: string; name: string | null }
+  // The agent's context was reset on a reopen (TB4 #33): a `session/load` resume
+  // failed, so main re-bound the SAME Thread to a fresh `session/new`. Teed so the
+  // "context reset" notice persists in history across a later reopen. The copy is
+  // a renderer-side constant, so the entry carries no payload.
+  | { t: 'agent-rebound' }
 
 /** The `readTranscript` reply: a Thread's transcript entries (empty when none). */
 export type ReadTranscriptResult = TranscriptEntry[]

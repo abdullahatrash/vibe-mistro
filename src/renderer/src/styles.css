@@ -468,6 +468,29 @@ body {
   font-weight: 600;
 }
 
+/* Agent context-reset notice (TB4 #33): woven into the conversation, not an error. */
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--accent-tint);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.notice__icon {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.notice__message {
+  flex: 1;
+}
+
 .usage {
   display: flex;
   gap: 16px;

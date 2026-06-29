@@ -41,6 +41,8 @@ function toAction(entry: TranscriptEntry, state: ConversationState): Conversatio
       return { type: 'turn-complete' }
     case 'turn-error':
       return { type: 'turn-error', message: entry.message }
+    case 'agent-rebound':
+      return { type: 'agent-rebound' }
     case 'resolve-permission':
       return {
         type: 'resolve-permission',

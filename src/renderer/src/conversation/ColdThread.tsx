@@ -10,16 +10,20 @@ import { replayTranscript } from './replay'
  * stream over IPC (`readTranscript`) and replay it through the SAME reducer the
  * live turn used (`replayTranscript`) to rebuild exactly what the user saw.
  *
- * The composer stays disabled: actually CONTINUING the conversation (spawn +
- * `session/load`) is a later slice (TB4, #33), so this view only displays the
- * history and points there.
+ * When `onContinue` is provided (TB4 #33), a "Continue" affordance spawns/uses the
+ * Workspace agent and resumes this Thread via `session/load` (re-binding fresh if
+ * the agent can't resume) — the first prompt then runs on the resumed session. The
+ * caller owns that transition (it has the Workspace context); here we only invite it.
  */
 export function ColdThread({
   thread,
   onClose,
+  onContinue,
 }: {
   thread: ThreadMeta
   onClose: () => void
+  /** Continue this reopened Thread live (TB4 #33). Absent = view-only. */
+  onContinue?: () => void
 }): JSX.Element {
   // null = still loading; a ConversationState once the transcript has replayed.
   const [state, setState] = useState<ConversationState | null>(null)
@@ -46,6 +50,11 @@ export function ColdThread({
         </button>
         <span className="conv__title">{title}</span>
         <span className="badge">history</span>
+        {onContinue && (
+          <button className="btn" onClick={onContinue}>
+            Continue
+          </button>
+        )}
       </div>
 
       <UsageBar state={view} />
@@ -61,8 +70,9 @@ export function ColdThread({
       </div>
 
       <p className="hint">
-        Viewing saved history — replayed from disk with no agent running. Continuing this conversation
-        is coming soon.
+        {onContinue
+          ? 'Viewing saved history — replayed from disk. Continue to resume this conversation with the agent.'
+          : 'Viewing saved history — replayed from disk with no agent running.'}
       </p>
     </div>
   )

@@ -2,10 +2,12 @@ import { describe, it, expect } from 'vitest'
 import {
   conversationReducer,
   initialConversationState,
+  REBOUND_NOTICE,
   type AssistantItem,
   type ConversationState,
   type ErrorItem,
   type FallbackItem,
+  type NoticeItem,
   type PermissionItem,
   type ReasoningItem,
   type ToolItem,
@@ -378,5 +380,27 @@ describe('hydrate (TB5 switch-to-live seeding)', () => {
       { type: 'hydrate', state: replayed },
     )
     expect(next).toEqual(replayed)
+  })
+})
+
+/**
+ * Agent context-reset notice (TB4 #33): a failed `session/load` resume re-binds a
+ * fresh session, and the reducer weaves an honest "context reset" notice into the
+ * conversation — NOT a turn error, so the composer stays usable.
+ */
+describe('agent-rebound (TB4 context reset notice)', () => {
+  it('appends a notice item with the reset copy without disabling input', () => {
+    const start: ConversationState = {
+      ...initialConversationState,
+      items: [{ kind: 'user', id: 'u1', text: 'continue please' }],
+    }
+    const next = conversationReducer(start, { type: 'agent-rebound' })
+
+    const notice = next.items.find((i): i is NoticeItem => i.kind === 'notice')
+    expect(notice?.message).toBe(REBOUND_NOTICE)
+    // The notice follows the user's prompt and is NOT an error item.
+    expect(next.items.map((i) => i.kind)).toEqual(['user', 'notice'])
+    expect(next.isProcessing).toBe(false)
+    expect(next.items.some((i) => i.kind === 'error')).toBe(false)
   })
 })

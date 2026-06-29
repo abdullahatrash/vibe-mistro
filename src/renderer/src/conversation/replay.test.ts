@@ -3,8 +3,10 @@ import type { TranscriptEntry } from '../../../shared/ipc'
 import {
   conversationReducer,
   initialConversationState,
+  REBOUND_NOTICE,
   type AssistantItem,
   type ConversationState,
+  type NoticeItem,
   type PermissionItem,
   type ReasoningItem,
   type ToolItem,
@@ -111,6 +113,23 @@ describe('replayTranscript (TB3 #32)', () => {
       { t: 'acp-event', payload: update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'working' }, messageId: 'a1' }) },
     ]
     expect(replayTranscript(cutOff).isProcessing).toBe(false)
+  })
+
+  it('replays an agent-rebound entry as a persisted context-reset notice (TB4 #33)', () => {
+    // A reopened Thread whose resume failed: main teed the notice right after the
+    // user prompt, before the re-bound turn's events. Reopening must show it again.
+    const transcript: TranscriptEntry[] = [
+      { t: 'user-prompt', id: 'user:0', text: 'continue please' },
+      { t: 'agent-rebound' },
+      { t: 'acp-event', payload: update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Fresh start.' }, messageId: 'a1' }) },
+      { t: 'turn-complete' },
+    ]
+
+    const replayed = replayTranscript(transcript)
+    expect(replayed.items.map((i) => i.kind)).toEqual(['user', 'notice', 'assistant'])
+    const notice = replayed.items.find((i): i is NoticeItem => i.kind === 'notice')
+    expect(notice?.message).toBe(REBOUND_NOTICE)
+    expect(replayed.isProcessing).toBe(false)
   })
 
   it('replays an empty transcript to the initial (empty) conversation, never throwing', () => {

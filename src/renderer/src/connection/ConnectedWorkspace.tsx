@@ -22,6 +22,7 @@ export function ConnectedWorkspace({
   threads,
   refreshRecents,
   onAuthExpired,
+  continueThreadId,
 }: {
   connection: ThreadConnection
   /** The Workspace's persisted Threads (most-recent-first) from the cold list. */
@@ -30,11 +31,17 @@ export function ConnectedWorkspace({
   refreshRecents: () => Promise<void>
   /** Mid-session expiry (-32000): route to in-place re-auth with these methods. */
   onAuthExpired: (authMethods: AuthMethod[]) => void
+  /**
+   * A reopened Thread to CONTINUE on connect (TB4 #33): land selected + live so its
+   * first prompt resumes it (`session/load`). Set when the user continued from the
+   * cold launch list (which had to spawn this agent first).
+   */
+  continueThreadId?: string
 }): JSX.Element {
   const [liveThreadIds, setLiveThreadIds] = useState<ReadonlySet<string>>(
-    () => new Set([connection.threadId]),
+    () => new Set(continueThreadId ? [connection.threadId, continueThreadId] : [connection.threadId]),
   )
-  const [selectedThreadId, setSelectedThreadId] = useState(connection.threadId)
+  const [selectedThreadId, setSelectedThreadId] = useState(continueThreadId ?? connection.threadId)
   // Sessions bound this session (TB5): a draft's first prompt mints one, lifted
   // here so switching away and back re-seeds it instead of re-minting.
   const [boundSessions, setBoundSessions] = useState<Record<string, string>>(() =>
@@ -66,6 +73,14 @@ export function ConnectedWorkspace({
   // The session to seed the selected Thread with: the one bound this session (if
   // any) wins over the persisted cursor, so a bound draft isn't re-minted on switch.
   const seedSession = seedSessionId(selected, boundSessions)
+
+  // Continue a reopened (cold) Thread (TB4 #33): promote it to live + select it.
+  // Its persisted `sessionId` cursor seeds the live view, so the FIRST prompt drives
+  // `ensureBoundSession`'s resume path (`session/load`, re-binding fresh on failure).
+  function continueThread(threadId: string): void {
+    setLiveThreadIds((prev) => new Set(prev).add(threadId))
+    setSelectedThreadId(threadId)
+  }
 
   return (
     <div className="workspace">
@@ -114,6 +129,7 @@ export function ConnectedWorkspace({
           key={selected.id}
           thread={selected}
           onClose={() => setSelectedThreadId(connection.threadId)}
+          onContinue={() => continueThread(selected.id)}
         />
       )}
     </div>
