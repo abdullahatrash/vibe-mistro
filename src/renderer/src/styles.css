@@ -173,6 +173,48 @@ body {
   font-size: 12px;
 }
 
+.recents {
+  margin-top: 16px;
+}
+
+.recents__title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.recents__list,
+.recents__threads {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.recents__workspace {
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.recents__ws-name {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.recents__threads {
+  margin-top: 4px;
+  border-left: 2px solid var(--border);
+  padding-left: 12px;
+}
+
+.recents__thread,
+.recents__empty {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 2px 0;
+}
+
 .thread {
   display: flex;
   flex-direction: column;

@@ -1,7 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import {
   IPC,
+  type ListMetadataResult,
   type OpenThreadArgs,
   type RespondPermissionArgs,
   type SendPromptArgs,
@@ -17,10 +18,60 @@ import {
 } from '../shared/ipc'
 import { detectVibe } from './vibe-detect'
 import { getShellEnv } from './shell-env'
+import { groupThreadsByWorkspace, MetadataStore } from './persistence/metadata-store'
 import { WorkspaceAgent, WorkspaceAgentError } from './workspace-agent'
 
 /** Active Workspace agents keyed by a generated agent id. */
 const agents = new Map<string, WorkspaceAgent>()
+
+/**
+ * The single-writer metadata index (ADR-0005). Assigned at app-ready (needs
+ * `userData`) and loaded before the first window so the renderer's cold list
+ * fetch sees the persisted state. A failed load degrades to empty, never throws.
+ */
+let metadataStore: MetadataStore | null = null
+
+/**
+ * Persist that this Workspace was opened and a Thread minted. The Thread gets a
+ * durable id (minted by the store) distinct from its ACP `sessionId`, which is
+ * stored as the resume cursor for a later reopen (TB3). Best-effort: a metadata
+ * write must never break the live connect flow.
+ */
+async function recordThread(workspaceDir: string, thread: ThreadInfo): Promise<void> {
+  if (!metadataStore) return
+  try {
+    const ws = await metadataStore.upsertWorkspace({
+      dir: workspaceDir,
+      displayName: basename(workspaceDir),
+    })
+    await metadataStore.upsertThread({
+      workspaceId: ws.id,
+      sessionId: thread.sessionId,
+      title: thread.title,
+    })
+  } catch {
+    // A persistence failure is non-fatal — the user is still connected.
+  }
+}
+
+/**
+ * Persist that a Workspace was opened, BEFORE the agent starts, so even a
+ * not-signed-in Workspace lists. Best-effort exactly like `recordThread`: a
+ * failing `persist()` (disk full / read-only userData) must NEVER reject the
+ * connect flow — the renderer's onClick has no `.catch`, so a throw here would
+ * wedge the UI on "Launching…".
+ */
+async function recordWorkspaceOpen(workspaceDir: string): Promise<void> {
+  if (!metadataStore) return
+  try {
+    await metadataStore.upsertWorkspace({
+      dir: workspaceDir,
+      displayName: basename(workspaceDir),
+    })
+  } catch {
+    // A persistence failure is non-fatal — the connect flow proceeds.
+  }
+}
 
 /** Build the renderer-facing connection (carries the sign-out gate + methods). */
 function connectionFor(agentId: string, agent: WorkspaceAgent, thread: ThreadInfo): ThreadConnection {
@@ -124,6 +175,10 @@ function registerIpc(): void {
       }
     })
 
+    // Persist the Workspace open up front (ADR-0005), so even a not-signed-in
+    // Workspace shows in the cold list. Best-effort — must not reject connect.
+    await recordWorkspaceOpen(args.workspaceDir)
+
     try {
       await agent.start()
       agents.set(agentId, agent)
@@ -136,6 +191,7 @@ function registerIpc(): void {
       }
 
       const thread = await agent.openThread()
+      await recordThread(args.workspaceDir, thread)
       return { ok: true, thread: connectionFor(agentId, agent, thread) }
     } catch (err) {
       return threadFailureResult(agentId, agent, err)
@@ -149,6 +205,7 @@ function registerIpc(): void {
     if (!agent) return { ok: false, kind: 'error', error: `No active agent for id ${args.agentId}.`, hint: null }
     try {
       const thread = await agent.openThread()
+      await recordThread(agent.workspaceDir, thread)
       return { ok: true, thread: connectionFor(args.agentId, agent, thread) }
     } catch (err) {
       return threadFailureResult(args.agentId, agent, err)
@@ -213,9 +270,21 @@ function registerIpc(): void {
     agent?.stop()
     agents.delete(agentId)
   })
+
+  ipcMain.handle(IPC.listMetadata, (): ListMetadataResult => {
+    // The cold launch list (ADR-0005): persisted Workspaces + Threads from
+    // metadata alone — no agent spawned, no transcript loaded.
+    if (!metadataStore) return []
+    return groupThreadsByWorkspace(metadataStore.snapshot())
+  })
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // Load the persisted index before the first window so the renderer's launch
+  // fetch sees prior Workspaces/Threads. `userData` is only valid once ready.
+  metadataStore = new MetadataStore({ filePath: join(app.getPath('userData'), 'metadata.json') })
+  await metadataStore.load()
+
   registerIpc()
   createWindow()
 

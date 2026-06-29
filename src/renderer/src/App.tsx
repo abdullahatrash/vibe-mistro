@@ -1,5 +1,11 @@
 import { useEffect, useReducer, useRef, useState, type JSX } from 'react'
-import type { AuthMethod, VibeDetectResult } from '../../shared/ipc'
+import type {
+  AuthMethod,
+  ListMetadataResult,
+  ThreadMeta,
+  VibeDetectResult,
+  WorkspaceThreads,
+} from '../../shared/ipc'
 import {
   authReducer,
   initialAuthViewState,
@@ -13,6 +19,9 @@ export function App(): JSX.Element {
   const [detect, setDetect] = useState<VibeDetectResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [connect, setConnect] = useState<ConnectState>({ status: 'idle' })
+  // Persisted Workspaces + Threads (ADR-0005), listed cold on launch from
+  // metadata alone — no agent spawned, no transcript loaded.
+  const [recents, setRecents] = useState<ListMetadataResult>([])
 
   async function runDetect(): Promise<void> {
     setLoading(true)
@@ -21,8 +30,13 @@ export function App(): JSX.Element {
     setLoading(false)
   }
 
+  async function refreshRecents(): Promise<void> {
+    setRecents(await window.api.listMetadata())
+  }
+
   useEffect(() => {
     void runDetect()
+    void refreshRecents()
   }, [])
 
   async function openProject(): Promise<void> {
@@ -30,6 +44,8 @@ export function App(): JSX.Element {
     if (!workspaceDir) return
     setConnect({ status: 'connecting', workspaceDir })
     setConnect(routeThreadResult(await window.api.startThread({ workspaceDir })))
+    // Main has now persisted the Workspace (and any Thread); reflect it in the list.
+    void refreshRecents()
   }
 
   // After sign-in (or in-place re-auth) the agent is already started + signed in;
@@ -86,6 +102,8 @@ export function App(): JSX.Element {
           {connect.status === 'idle' && (
             <p className="hint">Open a project folder to start a Vibe agent and connect a Thread.</p>
           )}
+
+          {connect.status === 'idle' && recents.length > 0 && <RecentList workspaces={recents} />}
 
           {connect.status === 'connecting' && (
             <p className="hint">
@@ -289,6 +307,45 @@ function SignedInBar({
       )}
     </div>
   )
+}
+
+/**
+ * The cold launch list (ADR-0005 metadata-first lazy reopen): persisted
+ * Workspaces with their Threads, most-recent-first, rendered read-only from
+ * metadata alone — NO `vibe-acp` spawned. Opening an entry for its content is a
+ * later slice (TB3), so entries are not yet clickable.
+ */
+function RecentList({ workspaces }: { workspaces: WorkspaceThreads[] }): JSX.Element {
+  return (
+    <div className="recents">
+      <div className="recents__title">Recent workspaces</div>
+      <ul className="recents__list">
+        {workspaces.map((w) => (
+          <li key={w.id} className="recents__workspace">
+            <div className="recents__ws-name" title={w.dir}>
+              {w.displayName}
+            </div>
+            {w.threads.length > 0 ? (
+              <ul className="recents__threads">
+                {w.threads.map((t) => (
+                  <li key={t.id} className="recents__thread">
+                    {threadLabel(t)}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="recents__empty">No threads yet</div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+/** A Thread's list label — its title, or a placeholder until one arrives (TB2). */
+function threadLabel(thread: ThreadMeta): string {
+  return thread.title ?? 'Untitled thread'
 }
 
 function StatusRow({ ok, label }: { ok: boolean; label: string }): JSX.Element {
