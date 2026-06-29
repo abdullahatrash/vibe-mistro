@@ -103,6 +103,24 @@ describe('selectAuthView', () => {
     })
   })
 
+  it('falls back to browser-auth when the delegated method is not advertised (#17)', () => {
+    // Older vibe-acp doesn't honor the delegated opt-in, so only the blocking
+    // `browser-auth` method is advertised. The selector must pick it — that id
+    // is what flows to main's `signIn`, driving the blocking fallback.
+    const view = selectAuthView(initialAuthViewState([BROWSER_AUTH]))
+    expect(view).toMatchObject({ kind: 'sign-in', methodId: 'browser-auth' })
+  })
+
+  it('prefers a drivable method over an undrivable one the agent lists first (#17)', () => {
+    // If the agent advertises a method main's `signIn` can't drive (e.g. an
+    // env-var/api-key method) BEFORE `browser-auth`, the selector must still pick
+    // the drivable `browser-auth`, not authMethods[0] — otherwise `signIn` would
+    // refuse the chosen method and strand the user.
+    const apiKey: AuthMethod = { id: 'api-key', name: 'API key' }
+    const view = selectAuthView(initialAuthViewState([apiKey, BROWSER_AUTH]))
+    expect(view).toMatchObject({ kind: 'sign-in', methodId: 'browser-auth' })
+  })
+
   it('shows a signing-in view during the browser step', () => {
     const state = authReducer(initialAuthViewState([DELEGATED]), { type: 'sign-in-start' })
     expect(selectAuthView(state)).toEqual({ kind: 'signing-in' })
