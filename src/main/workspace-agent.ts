@@ -3,6 +3,7 @@ import { AcpClient, type SpawnFn } from './acp/client'
 import { handleFsReadTextFile, type ReadTextFn } from './acp/fs-read'
 import { handleFsWriteTextFile, type WriteTextFn } from './acp/fs-write'
 import { classifyAuthError, classifyAuthStatus } from './auth/auth-state'
+import { DELEGATED_AUTH_METHOD_ID } from '../shared/ipc'
 import type {
   AuthMethod,
   AuthState,
@@ -68,6 +69,8 @@ export interface WorkspaceAgentOptions {
   readTextFile?: ReadTextFn
   /** Override the file writer used to serve `fs/write_text_file` (testing). */
   writeTextFile?: WriteTextFn
+  /** Open a URL in the system browser (delegated sign-in). Injected for testing. */
+  openUrl?: (url: string) => void
 }
 
 export class WorkspaceAgent extends EventEmitter {
@@ -75,6 +78,7 @@ export class WorkspaceAgent extends EventEmitter {
   private readonly workspaceDir: string
   private readonly readTextFile?: ReadTextFn
   private readonly writeTextFile?: WriteTextFn
+  private readonly openUrl?: (url: string) => void
   /** Threads hosted by this agent, keyed by their ACP `sessionId`. */
   private readonly threads = new Map<string, ThreadInfo>()
   private initialized = false
@@ -88,6 +92,7 @@ export class WorkspaceAgent extends EventEmitter {
     this.workspaceDir = options.workspaceDir
     this.readTextFile = options.readTextFile
     this.writeTextFile = options.writeTextFile
+    this.openUrl = options.openUrl
     this.client = new AcpClient({
       command: options.command,
       cwd: options.workspaceDir,
@@ -140,7 +145,13 @@ export class WorkspaceAgent extends EventEmitter {
       const init = await Promise.race([
         this.client.request<InitializeResult>('initialize', {
           protocolVersion: PROTOCOL_VERSION,
-          clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
+          clientCapabilities: {
+            fs: { readTextFile: true, writeTextFile: true },
+            // Opt in to client-driven sign-in; without this `_meta` flag the
+            // agent never advertises the `browser-auth-delegated` method
+            // (acp-capture §8).
+            _meta: { 'browser-auth-delegated': true },
+          },
           clientInfo: CLIENT_INFO,
         }),
         earlyFailure,
@@ -181,6 +192,63 @@ export class WorkspaceAgent extends EventEmitter {
       if (err instanceof WorkspaceAgentError) throw err
       this.authStateValue = 'unknown'
     }
+  }
+
+  /**
+   * Drive Vibe's client-driven browser sign-in (`browser-auth-delegated`, the
+   * ADR-0003 primary path; acp-capture §8). Non-blocking `start` mints a
+   * `signInUrl` we open in the system browser; the long-poll `complete` awaits
+   * the user finishing in the browser and persists the key to Vibe's keyring;
+   * we then re-query `_auth/status` to confirm. We never see or store the
+   * credential. Returns the post-sign-in `AuthState` (`signed-in` on success);
+   * rejects (without wedging) on failure, cancel, an expired/unknown attempt
+   * (-32602), or early process exit.
+   */
+  async signIn(methodId: string): Promise<AuthState> {
+    if (!this.initialized) {
+      throw new WorkspaceAgentError('Agent is not initialized; call start() first.')
+    }
+    // We only drive the delegated two-step. Sending `action:start/complete` to
+    // the blocking `browser-auth` method would fail silently, so reject any
+    // other method up front. (The blocking fallback is a separate slice.)
+    if (methodId !== DELEGATED_AUTH_METHOD_ID) {
+      throw new WorkspaceAgentError(
+        'Delegated browser sign-in is unavailable for this agent.',
+        AUTH_HINT,
+      )
+    }
+    // Unlike start(), this does NOT race `earlyFailure`; its no-wedge property
+    // relies on AcpClient.rejectAllPending firing on `exit`/`stop`, which rejects
+    // any in-flight authenticate/_auth/status request. Keep that on refactor.
+    try {
+      const started = await this.client.request('authenticate', { methodId, action: 'start' })
+      const meta = extractDelegatedMeta(started, methodId)
+      // Fail fast before opening the browser or sending a doomed `complete`
+      // (which would surface a raw -32602) if `start` returned no attempt.
+      if (!meta?.attemptId) {
+        throw new WorkspaceAgentError('Sign-in could not start — Vibe returned no attempt.', AUTH_HINT)
+      }
+      if (meta.signInUrl) this.openUrl?.(meta.signInUrl)
+
+      await this.client.request('authenticate', {
+        methodId,
+        action: 'complete',
+        attemptId: meta.attemptId,
+      })
+
+      const status = await this.client.request('_auth/status')
+      this.authStateValue = classifyAuthStatus(status)
+      return this.authStateValue
+    } catch (err) {
+      throw this.toSignInError(err)
+    }
+  }
+
+  /** Map a sign-in failure to a clear message (not a bare RPC string). */
+  private toSignInError(err: unknown): WorkspaceAgentError {
+    if (err instanceof WorkspaceAgentError) return err
+    const detail = (err as { message?: string })?.message ?? (err instanceof Error ? err.message : String(err))
+    return new WorkspaceAgentError(`Sign-in failed: ${detail}`, AUTH_HINT)
   }
 
   /**
@@ -319,6 +387,24 @@ export class WorkspaceAgent extends EventEmitter {
     }
     return new WorkspaceAgentError(message)
   }
+}
+
+interface DelegatedMeta {
+  attemptId?: string
+  signInUrl?: string
+}
+
+/**
+ * Pull the `browser-auth-delegated` payload out of an `authenticate` response.
+ * The agent keys its `_meta` by the method id (acp-capture §8): both `start`
+ * (`{attemptId, signInUrl, expiresAt}`) and `complete` (`{attemptId, status}`)
+ * use this envelope.
+ */
+function extractDelegatedMeta(response: unknown, methodId: string): DelegatedMeta | null {
+  const meta = (response as { _meta?: Record<string, unknown> } | null)?._meta
+  const entry = meta?.[methodId]
+  if (!entry || typeof entry !== 'object') return null
+  return entry as DelegatedMeta
 }
 
 /** Pull the well-formed `authMethods` out of an `initialize` result. */

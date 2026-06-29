@@ -5,6 +5,8 @@ import {
   type RespondPermissionArgs,
   type SendPromptArgs,
   type SendPromptResult,
+  type SignInArgs,
+  type SignInResult,
   type StartThreadArgs,
   type StartThreadResult,
 } from '../shared/ipc'
@@ -59,14 +61,19 @@ function registerIpc(): void {
   })
 
   ipcMain.handle(IPC.startThread, async (event, args: StartThreadArgs): Promise<StartThreadResult> => {
-    // TODO(#12): a retained not-signed-in agent (below) is NOT deduped by
+    // TODO(#13): a retained not-signed-in agent (below) is NOT deduped by
     // workspaceDir — we always mint a fresh agentId + spawn a new
-    // WorkspaceAgent. Not reachable in this slice (the sign-in button is
-    // inert), but once #12 makes it actionable a re-Connect to the same
-    // workspace would orphan the previous not-signed-in agent (its child
-    // lingers). #12 must reuse or stop the existing agent for this workspace.
+    // WorkspaceAgent. Sign-in (#12) reuses the same agent by agentId, so this
+    // doesn't bite yet; but #13 (route Open-project through sign-in) re-Connects
+    // to the same workspace and would orphan the previous not-signed-in agent
+    // (its child lingers). #13 must reuse or stop the existing agent.
     const agentId = `a${++agentCounterSeed}`
-    const agent = new WorkspaceAgent({ workspaceDir: args.workspaceDir, env: getShellEnv() })
+    const agent = new WorkspaceAgent({
+      workspaceDir: args.workspaceDir,
+      env: getShellEnv(),
+      // Delegated sign-in (#12): open the returned signInUrl in the system browser.
+      openUrl: (url) => void shell.openExternal(url),
+    })
 
     agent.on('event', (payload: unknown) => {
       if (!event.sender.isDestroyed()) {
@@ -96,13 +103,13 @@ function registerIpc(): void {
       return { ok: true, thread: { agentId, workspaceDir: args.workspaceDir, ...thread } }
     } catch (err) {
       agent.stop()
-      // TODO(#12): fallback UX gap. When `_auth/status` returned `unknown` but
+      // TODO(#13): fallback UX gap. When `_auth/status` returned `unknown` but
       // the user is actually signed out, `session/new` (openThread) fails with
       // -32000 and lands here — we surface it as a generic error alert (still
       // carrying AUTH_HINT) rather than the SignInPanel. Routing this auth-error
       // path to the panel requires keeping the agent alive (not stop()-ing it)
       // so the sign-in flow can drive it, which is coupled to the
-      // agent-dedup/lifecycle work in #12.
+      // agent-dedup/lifecycle work deferred to #13.
       if (err instanceof WorkspaceAgentError) {
         return { ok: false, kind: 'error', error: err.message, hint: err.hint }
       }
@@ -134,6 +141,20 @@ function registerIpc(): void {
     // approve/deny decision lives in the renderer (ADR-0001).
     const agent = agents.get(args.agentId)
     agent?.respondPermission(args.requestId, args.optionId)
+  })
+
+  ipcMain.handle(IPC.signIn, async (_event, args: SignInArgs): Promise<SignInResult> => {
+    // Drive Vibe's browser sign-in on the agent retained from startThread; main
+    // orchestrates + relays the resulting AuthState, the renderer owns the view
+    // state (ADR-0001). Credentials never touch us — Vibe owns the keyring (ADR-0003).
+    const agent = agents.get(args.agentId)
+    if (!agent) return { ok: false, error: `No active agent for id ${args.agentId}.` }
+    try {
+      const authState = await agent.signIn(args.methodId)
+      return { ok: true, authState }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   ipcMain.handle(IPC.stopAgent, (_event, agentId: string) => {

@@ -1,6 +1,6 @@
-import { useEffect, useState, type JSX } from 'react'
+import { useEffect, useReducer, useRef, useState, type JSX } from 'react'
 import type { AuthMethod, ThreadConnection, VibeDetectResult } from '../../shared/ipc'
-import { selectAuthView } from './auth/auth-view'
+import { authReducer, initialAuthViewState, selectAuthView } from './auth/auth-view'
 import { Conversation } from './conversation/Conversation'
 
 type ConnectState =
@@ -97,7 +97,11 @@ export function App(): JSX.Element {
           )}
 
           {connect.status === 'not-signed-in' && (
-            <SignInPanel authMethods={connect.authMethods} />
+            <SignInPanel
+              key={connect.agentId}
+              agentId={connect.agentId}
+              authMethods={connect.authMethods}
+            />
           )}
 
           {connect.status === 'error' && (
@@ -121,19 +125,80 @@ export function App(): JSX.Element {
 
 /**
  * The not-signed-in panel: visibly distinct from the binary-missing status and
- * the generic-error alert. Renders the agent's advertised sign-in method name
- * and a Sign-in button. The button is intentionally inert here — its click
- * handler is wired in #12 (browser-auth-delegated).
+ * the generic-error alert. Clicking Sign-in drives Vibe's delegated browser
+ * sign-in via main (#12) — the system browser opens, and on success the panel
+ * transitions to a signed-in confirmation. The auth lifecycle (signing-in /
+ * signed-in / error) is the pure `authReducer`; this component is the glue.
  */
-function SignInPanel({ authMethods }: { authMethods: AuthMethod[] }): JSX.Element | null {
-  const view = selectAuthView({ authState: 'not-signed-in', authMethods })
-  if (view.kind !== 'sign-in') return null
+function SignInPanel({
+  agentId,
+  authMethods,
+}: {
+  agentId: string
+  authMethods: AuthMethod[]
+}): JSX.Element {
+  const [state, dispatch] = useReducer(authReducer, authMethods, initialAuthViewState)
+  // Generation counter: bumped on every attempt start and on cancel. The
+  // delegated `complete` long-poll can't be aborted over ACP, so a cancelled (or
+  // superseded) attempt's eventual result must be ignored rather than clobber
+  // the panel — we only apply a result whose generation is still current.
+  const attemptRef = useRef(0)
+  const view = selectAuthView(state)
+
+  async function signIn(methodId: string): Promise<void> {
+    const attempt = ++attemptRef.current
+    dispatch({ type: 'sign-in-start' })
+    const result = await window.api.signIn({ agentId, methodId })
+    if (attempt !== attemptRef.current) return // cancelled/superseded — drop the stale result
+    if (result.ok && result.authState === 'signed-in') {
+      dispatch({ type: 'sign-in-success' })
+    } else {
+      dispatch({
+        type: 'sign-in-error',
+        message: result.ok ? 'Sign-in did not complete. Please try again.' : result.error,
+      })
+    }
+  }
+
+  function cancel(): void {
+    attemptRef.current++ // invalidate the in-flight attempt; its result is dropped
+    dispatch({ type: 'sign-in-cancel' })
+  }
+
+  if (view.kind === 'none') {
+    // Reaching `none` in this panel means we just signed in. This terminal
+    // confirmation is #12's end state; opening a Thread from here (routing
+    // Open-project through sign-in) is #13.
+    return (
+      <div className="signin signin--done">
+        <div className="signin__title">Signed in to Mistral Vibe</div>
+      </div>
+    )
+  }
+
+  if (view.kind === 'signing-in') {
+    return (
+      <div className="signin">
+        <div className="signin__title">Signing in…</div>
+        <div className="signin__message">Complete sign-in in your browser, then return here.</div>
+        <button className="btn btn--ghost signin__action" onClick={cancel}>
+          Cancel
+        </button>
+      </div>
+    )
+  }
+
+  // sign-in or error: both render the (clickable) Sign-in button so the error
+  // state stays recoverable.
   return (
     <div className="signin">
       <div className="signin__title">Not signed in to Mistral Vibe</div>
-      {view.description && <div className="signin__message">{view.description}</div>}
-      <button className="btn signin__action" onClick={() => {}}>
-        {view.methodName}
+      {view.kind === 'sign-in' && view.description && (
+        <div className="signin__message">{view.description}</div>
+      )}
+      {view.kind === 'error' && <div className="signin__error">{view.message}</div>}
+      <button className="btn signin__action" onClick={() => void signIn(view.methodId)}>
+        {view.kind === 'error' ? `Retry — ${view.methodName}` : view.methodName}
       </button>
     </div>
   )
