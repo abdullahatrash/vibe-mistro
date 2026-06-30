@@ -19,12 +19,13 @@ import {
   agentIdOf,
   connectedWorkspaceIds,
   connectionsReducer,
-  currentConfigValue,
   initialConnections,
   selectedConnection,
   shouldConnect,
 } from './connection/connections'
 import {
+  configFor,
+  currentConfigValue,
   initialWorkspaceThreads,
   workspaceThreadsReducer,
   workspaceThreadStateFor,
@@ -160,11 +161,21 @@ export function App(): JSX.Element {
   function applyConnectResult(workspaceId: string, state: ConnectState, focus: boolean): void {
     connDispatch({ type: 'set', workspaceId, state })
     if (state.status !== 'connected') return
+    // Seed the connect-time (primary) Thread's controls per-Thread (#70) from the
+    // connection's `session/new` values — every sibling Thread later seeds its own on
+    // `bind`. NOTE (deferred follow-up): caching a non-default selection across a
+    // session loss + re-asserting it after `session/load` (ADR-0007) is a separate
+    // slice; today a reopened/continued Thread shows its resumed (default) config.
     wtDispatch({
       type: 'connect',
       workspaceId,
       threadId: state.thread.threadId,
       sessionId: state.thread.sessionId,
+      controls: {
+        modes: state.thread.modes,
+        models: state.thread.models,
+        reasoningEffort: state.thread.reasoningEffort,
+      },
     })
     if (focus || selectionRef.current === workspaceId) {
       navDispatch({ type: 'select-thread', workspaceId, threadId: state.thread.threadId })
@@ -184,27 +195,29 @@ export function App(): JSX.Element {
   }
 
   /**
-   * Change an agent control (#66, ADR-0007): reflect the pick OPTIMISTICALLY on the
-   * connection (a change emits no notification, so the `{}` result is the only
-   * signal), fire the IPC, and on an `{ok:false}` REVERT to the value shown before —
-   * leaving the control displaying the agent's real state — and surface the error.
-   * Reads the prior value from the connection up front so the revert is exact.
+   * Change an agent control for ONE Thread (#66/#70, ADR-0007): reflect the pick
+   * OPTIMISTICALLY on THAT Thread's per-Thread config (keyed by `threadId` in the
+   * workspace-threads store — a change emits no notification, so the `{}` result is
+   * the only signal), fire the IPC, and on an `{ok:false}` REVERT to the value shown
+   * before — leaving the control displaying the agent's real state — and surface the
+   * error. Reads the prior value from the per-Thread config up front so the revert is
+   * exact; a sibling Thread's controls are never touched.
    */
   function changeThreadConfig(
     workspaceId: string,
     agentId: string,
+    threadId: string,
     axis: ThreadConfigAxis,
     value: string,
     sessionId: string,
   ): void {
-    const conn = connections[workspaceId]
-    const prev = conn?.status === 'connected' ? currentConfigValue(conn.thread, axis) : null
+    const prev = currentConfigValue(workspaceThreads, workspaceId, threadId, axis)
     if (prev === value) return // already current — no optimistic churn, no IPC round-trip
-    connDispatch({ type: 'set-config', workspaceId, axis, value })
+    wtDispatch({ type: 'set-config', workspaceId, threadId, axis, value })
     void window.api.setThreadConfig({ agentId, sessionId, axis, value }).then((res) => {
       if (res.ok) return
       console.error(`Failed to set ${axis} to "${value}": ${res.error}`)
-      if (prev !== null) connDispatch({ type: 'set-config', workspaceId, axis, value: prev })
+      if (prev !== null) wtDispatch({ type: 'set-config', workspaceId, threadId, axis, value: prev })
     })
   }
 
@@ -478,11 +491,12 @@ export function App(): JSX.Element {
           activeThread={activeThread}
           isLive={isLive}
           seedSessionId={seed}
+          controls={configFor(workspaceThreads, conn.workspaceId, activeThread.id)}
           onSetConfig={(axis, value, sessionId) =>
-            changeThreadConfig(conn.workspaceId, conn.agentId, axis, value, sessionId)
+            changeThreadConfig(conn.workspaceId, conn.agentId, activeThread.id, axis, value, sessionId)
           }
-          onBound={(sessionId) =>
-            wtDispatch({ type: 'bind', workspaceId: conn.workspaceId, threadId: activeThread.id, sessionId })
+          onBound={(sessionId, controls) =>
+            wtDispatch({ type: 'bind', workspaceId: conn.workspaceId, threadId: activeThread.id, sessionId, controls })
           }
           onContinue={() => {
             wtDispatch({ type: 'open', workspaceId: conn.workspaceId, threadId: activeThread.id })

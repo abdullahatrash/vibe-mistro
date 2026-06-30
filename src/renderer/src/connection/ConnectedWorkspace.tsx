@@ -1,5 +1,11 @@
 import { type JSX } from 'react'
-import type { AuthMethod, ThreadConfigAxis, ThreadConnection, ThreadMeta } from '../../../shared/ipc'
+import type {
+  AuthMethod,
+  ThreadAgentControls,
+  ThreadConfigAxis,
+  ThreadConnection,
+  ThreadMeta,
+} from '../../../shared/ipc'
 import { ColdThread } from '../conversation/ColdThread'
 import { Conversation } from '../conversation/Conversation'
 
@@ -17,12 +23,19 @@ import { Conversation } from '../conversation/Conversation'
  * The sidebar's per-Thread streaming / needs-attention indicators no longer depend
  * on this view reporting up: main pushes per-Thread status for ALL live Threads
  * (#53), so a background Workspace's blocked permission surfaces without it.
+ *
+ * Agent controls (#70): the active Thread's OWN Mode/Model/Reasoning-effort come in
+ * as `controls`, sourced PER Thread from `workspace-threads` (seeded on connect/bind,
+ * keyed by `threadId`). This removes the #66 primary-Thread gate — EVERY live Thread
+ * (the auto-opened one, a New-thread draft #58, a continued Thread #33) now shows and
+ * changes its own controls, with no risk of a sibling displaying the primary's values.
  */
 export function ConnectedWorkspace({
   connection,
   activeThread,
   isLive,
   seedSessionId,
+  controls,
   onSetConfig,
   onBound,
   onContinue,
@@ -36,10 +49,12 @@ export function ConnectedWorkspace({
   isLive: boolean
   /** The session to seed a live view with (bound-this-session wins over the cursor). */
   seedSessionId: string | null
-  /** Change an agent control on the active Thread's bound session (#66, ADR-0007). */
+  /** The active Thread's OWN agent-controls (#70), or null when none are seeded yet. */
+  controls: ThreadAgentControls | null
+  /** Change an agent control on the active Thread's bound session (#66/#70, ADR-0007). */
   onSetConfig: (axis: ThreadConfigAxis, value: string, sessionId: string) => void
-  /** A draft's first prompt bound its session — lift it to App's live-state. */
-  onBound: (sessionId: string) => void
+  /** A draft's first prompt bound its session — lift it (and its controls) to App. */
+  onBound: (sessionId: string, controls: ThreadAgentControls | null) => void
   /** Promote the (cold) active Thread to live (Continue) — App hosts + reselects it. */
   onContinue: () => void
   /** Back out of a cold view to the connection's primary live Thread. */
@@ -47,14 +62,6 @@ export function ConnectedWorkspace({
   /** Mid-session expiry (-32000): route to in-place re-auth with these methods. */
   onAuthExpired: (authMethods: AuthMethod[]) => void
 }): JSX.Element {
-  // The connection carries exactly ONE Thread's Agent-controls values — the
-  // connect-time `session/new` Thread (`connection.threadId`). Show the picker ONLY
-  // when the active Thread IS that primary one, so a sibling live Thread (New-thread
-  // / Continue) never displays the primary's Mode/Model as if they were its own (a
-  // trust-relevant lie, since Mode gates write-approval). Per-Thread sourcing +
-  // post-`session/load` population (so every live Thread gets its own correct
-  // controls) is the tracked follow-up; until then a non-primary Thread shows none.
-  const showControls = activeThread.id === connection.threadId
   return (
     <div className="workspace">
       {isLive ? (
@@ -67,9 +74,9 @@ export function ConnectedWorkspace({
             sessionId: seedSessionId,
             title: activeThread.title,
           }}
-          modes={showControls ? connection.modes : null}
-          models={showControls ? connection.models : null}
-          reasoningEffort={showControls ? connection.reasoningEffort : null}
+          modes={controls?.modes ?? null}
+          models={controls?.models ?? null}
+          reasoningEffort={controls?.reasoningEffort ?? null}
           onSetConfig={onSetConfig}
           onAuthExpired={onAuthExpired}
           onBound={onBound}

@@ -1,16 +1,44 @@
 import { describe, it, expect } from 'vitest'
 import {
+  configFor,
+  currentConfigValue,
   initialWorkspaceThreads,
   workspaceThreadsReducer,
   workspaceThreadStateFor,
   type WorkspaceThreadsState,
 } from './workspace-threads'
+import type { ThreadAgentControls } from '../../../shared/ipc'
 
 /**
  * Per-Workspace, per-session Thread state lifted out of ConnectedWorkspace (TB3
- * #48): the live set, bound sessions, and the active (kept-mounted) Thread, keyed
- * by Workspace so several warm Workspaces coexist. Pure reducer + derivation.
+ * #48): the live set, bound sessions, the active (kept-mounted) Thread, and (TB #70)
+ * each live Thread's OWN agent-controls — keyed by Workspace so several warm
+ * Workspaces coexist. Pure reducer + derivations.
  */
+
+/** A full agent-controls bundle for the per-Thread config tests (#70). */
+function controls(modeId = 'default', modelId = 'mistral-medium-3.5', effort = 'high'): ThreadAgentControls {
+  return {
+    modes: {
+      currentModeId: modeId,
+      availableModes: [
+        { id: 'default', name: 'Default' },
+        { id: 'plan', name: 'Plan' },
+      ],
+    },
+    models: {
+      currentModelId: modelId,
+      availableModels: [
+        { modelId: 'mistral-medium-3.5', name: 'mistral-medium-3.5' },
+        { modelId: 'devstral-small', name: 'devstral-small' },
+      ],
+    },
+    reasoningEffort: {
+      current: effort,
+      options: [{ value: 'low' }, { value: 'high' }, { value: 'max' }],
+    },
+  }
+}
 
 describe('workspaceThreadsReducer', () => {
   it('connect seeds the live set + active with the auto-opened Thread', () => {
@@ -19,6 +47,7 @@ describe('workspaceThreadsReducer', () => {
       workspaceId: 'w1',
       threadId: 't-open',
       sessionId: 's1',
+      controls: null,
     })
     expect([...s.w1.live]).toEqual(['t-open'])
     expect(s.w1.bound).toEqual({ 't-open': 's1' })
@@ -31,6 +60,7 @@ describe('workspaceThreadsReducer', () => {
       workspaceId: 'w1',
       threadId: 't-cont',
       sessionId: null,
+      controls: null,
     })
     expect(s.w1.bound).toEqual({})
     expect([...s.w1.live]).toEqual(['t-cont'])
@@ -42,9 +72,10 @@ describe('workspaceThreadsReducer', () => {
       workspaceId: 'w1',
       threadId: 't-open',
       sessionId: 's1',
+      controls: null,
     })
     s = workspaceThreadsReducer(s, { type: 'open', workspaceId: 'w1', threadId: 'draft' })
-    s = workspaceThreadsReducer(s, { type: 'connect', workspaceId: 'w1', threadId: 't-new', sessionId: 's2' })
+    s = workspaceThreadsReducer(s, { type: 'connect', workspaceId: 'w1', threadId: 't-new', sessionId: 's2', controls: null })
     expect([...s.w1.live]).toEqual(['t-new']) // 'draft' gone with the old agent
     expect(s.w1.active).toBe('t-new')
   })
@@ -55,6 +86,7 @@ describe('workspaceThreadsReducer', () => {
       workspaceId: 'w1',
       threadId: 't-open',
       sessionId: null,
+      controls: null,
     })
     s = workspaceThreadsReducer(s, { type: 'open', workspaceId: 'w1', threadId: 'draft' })
     expect([...s.w1.live].sort()).toEqual(['draft', 't-open'])
@@ -76,6 +108,7 @@ describe('workspaceThreadsReducer', () => {
       workspaceId: 'w1',
       threadId: 't-open',
       sessionId: null,
+      controls: null,
     })
     s = workspaceThreadsReducer(s, { type: 'open', workspaceId: 'w1', threadId: 'draft' })
     s = workspaceThreadsReducer(s, { type: 'select', workspaceId: 'w1', threadId: 't-open' })
@@ -89,6 +122,7 @@ describe('workspaceThreadsReducer', () => {
       workspaceId: 'w1',
       threadId: 't-open',
       sessionId: null,
+      controls: null,
     })
     expect(workspaceThreadsReducer(s, { type: 'select', workspaceId: 'w1', threadId: 't-open' })).toBe(s)
   })
@@ -99,20 +133,24 @@ describe('workspaceThreadsReducer', () => {
       workspaceId: 'w1',
       threadId: 't-open',
       sessionId: null,
+      controls: null,
     })
     s = workspaceThreadsReducer(s, { type: 'open', workspaceId: 'w1', threadId: 'draft' })
-    s = workspaceThreadsReducer(s, { type: 'bind', workspaceId: 'w1', threadId: 'draft', sessionId: 'sD' })
+    s = workspaceThreadsReducer(s, { type: 'bind', workspaceId: 'w1', threadId: 'draft', sessionId: 'sD', controls: null })
     expect(s.w1.bound).toEqual({ draft: 'sD' })
   })
 
-  it('bind with an unchanged session returns the same state reference', () => {
+  it('bind with an unchanged session AND null controls returns the same state reference', () => {
     const s = workspaceThreadsReducer(initialWorkspaceThreads, {
       type: 'connect',
       workspaceId: 'w1',
       threadId: 't-open',
       sessionId: 's1',
+      controls: null,
     })
-    expect(workspaceThreadsReducer(s, { type: 'bind', workspaceId: 'w1', threadId: 't-open', sessionId: 's1' })).toBe(s)
+    expect(
+      workspaceThreadsReducer(s, { type: 'bind', workspaceId: 'w1', threadId: 't-open', sessionId: 's1', controls: null }),
+    ).toBe(s)
   })
 
   it('remove drops a live Thread + its bound session (delete teardown)', () => {
@@ -121,9 +159,10 @@ describe('workspaceThreadsReducer', () => {
       workspaceId: 'w1',
       threadId: 't-open',
       sessionId: 's1',
+      controls: null,
     })
     s = workspaceThreadsReducer(s, { type: 'open', workspaceId: 'w1', threadId: 'draft' })
-    s = workspaceThreadsReducer(s, { type: 'bind', workspaceId: 'w1', threadId: 'draft', sessionId: 'sD' })
+    s = workspaceThreadsReducer(s, { type: 'bind', workspaceId: 'w1', threadId: 'draft', sessionId: 'sD', controls: null })
     s = workspaceThreadsReducer(s, { type: 'remove', workspaceId: 'w1', threadId: 'draft' })
     expect([...s.w1.live]).toEqual(['t-open'])
     expect(s.w1.bound).toEqual({ 't-open': 's1' })
@@ -135,6 +174,7 @@ describe('workspaceThreadsReducer', () => {
       workspaceId: 'w1',
       threadId: 't-open',
       sessionId: null,
+      controls: null,
     })
     expect(workspaceThreadsReducer(s, { type: 'remove', workspaceId: 'w1', threadId: 'cold' })).toBe(s)
   })
@@ -145,16 +185,184 @@ describe('workspaceThreadsReducer', () => {
       workspaceId: 'w1',
       threadId: 't1',
       sessionId: null,
+      controls: null,
     })
-    s = workspaceThreadsReducer(s, { type: 'connect', workspaceId: 'w2', threadId: 't2', sessionId: null })
+    s = workspaceThreadsReducer(s, { type: 'connect', workspaceId: 'w2', threadId: 't2', sessionId: null, controls: null })
     expect(Object.keys(s).sort()).toEqual(['w1', 'w2'])
     expect(s.w1.active).toBe('t1')
   })
 })
 
+describe('per-Thread agent-controls config (#70)', () => {
+  it('connect seeds config for the primary Thread (none when controls are null)', () => {
+    const withControls = workspaceThreadsReducer(initialWorkspaceThreads, {
+      type: 'connect',
+      workspaceId: 'w1',
+      threadId: 't-open',
+      sessionId: 's1',
+      controls: controls('plan'),
+    })
+    expect(withControls.w1.config['t-open']?.modes?.currentModeId).toBe('plan')
+
+    const without = workspaceThreadsReducer(initialWorkspaceThreads, {
+      type: 'connect',
+      workspaceId: 'w1',
+      threadId: 't-open',
+      sessionId: 's1',
+      controls: null,
+    })
+    expect(without.w1.config).toEqual({})
+  })
+
+  it('bind seeds the bound Thread its OWN config without touching the primary', () => {
+    let s = workspaceThreadsReducer(initialWorkspaceThreads, {
+      type: 'connect',
+      workspaceId: 'w1',
+      threadId: 't-open',
+      sessionId: 's1',
+      controls: controls('default'),
+    })
+    s = workspaceThreadsReducer(s, { type: 'open', workspaceId: 'w1', threadId: 'draft' })
+    s = workspaceThreadsReducer(s, {
+      type: 'bind',
+      workspaceId: 'w1',
+      threadId: 'draft',
+      sessionId: 'sD',
+      controls: controls('plan', 'devstral-small'),
+    })
+    expect(s.w1.config['draft']?.modes?.currentModeId).toBe('plan')
+    expect(s.w1.config['draft']?.models?.currentModelId).toBe('devstral-small')
+    // The primary Thread's controls are untouched — per-Thread isolation.
+    expect(s.w1.config['t-open']?.modes?.currentModeId).toBe('default')
+    expect(s.w1.config['t-open']?.models?.currentModelId).toBe('mistral-medium-3.5')
+  })
+
+  it('bind with null controls leaves an existing entry (no clobber), updating only the session', () => {
+    let s = workspaceThreadsReducer(initialWorkspaceThreads, {
+      type: 'connect',
+      workspaceId: 'w1',
+      threadId: 't-open',
+      sessionId: null,
+      controls: controls('plan'),
+    })
+    s = workspaceThreadsReducer(s, { type: 'bind', workspaceId: 'w1', threadId: 't-open', sessionId: 's1', controls: null })
+    expect(s.w1.bound['t-open']).toBe('s1')
+    expect(s.w1.config['t-open']?.modes?.currentModeId).toBe('plan') // kept
+  })
+
+  it('bind delivers controls even when the session is unchanged (resumed Thread)', () => {
+    // A continued Thread: connect seeds the cursor; its first prompt resumes the
+    // SAME session and `thread:bound` brings the resumed config — the same-session
+    // path must still seed config (it no longer short-circuits before that).
+    let s = workspaceThreadsReducer(initialWorkspaceThreads, {
+      type: 'connect',
+      workspaceId: 'w1',
+      threadId: 't-cont',
+      sessionId: 'cursor',
+      controls: null,
+    })
+    s = workspaceThreadsReducer(s, {
+      type: 'bind',
+      workspaceId: 'w1',
+      threadId: 't-cont',
+      sessionId: 'cursor',
+      controls: controls('default'),
+    })
+    expect(s.w1.config['t-cont']?.modes?.currentModeId).toBe('default')
+  })
+
+  it('set-config optimistically updates one axis for one Thread, leaving siblings + axes untouched', () => {
+    let s = workspaceThreadsReducer(initialWorkspaceThreads, {
+      type: 'connect',
+      workspaceId: 'w1',
+      threadId: 't-open',
+      sessionId: 's1',
+      controls: controls('default'),
+    })
+    s = workspaceThreadsReducer(s, { type: 'open', workspaceId: 'w1', threadId: 'draft' })
+    s = workspaceThreadsReducer(s, {
+      type: 'bind',
+      workspaceId: 'w1',
+      threadId: 'draft',
+      sessionId: 'sD',
+      controls: controls('default'),
+    })
+    s = workspaceThreadsReducer(s, { type: 'set-config', workspaceId: 'w1', threadId: 'draft', axis: 'mode', value: 'plan' })
+    expect(s.w1.config['draft']?.modes?.currentModeId).toBe('plan')
+    expect(s.w1.config['draft']?.models?.currentModelId).toBe('mistral-medium-3.5') // axis untouched
+    expect(s.w1.config['t-open']?.modes?.currentModeId).toBe('default') // sibling untouched
+  })
+
+  it('set-config reverts cleanly by re-dispatching the prior value (ADR-0007 revert)', () => {
+    const s = workspaceThreadsReducer(initialWorkspaceThreads, {
+      type: 'connect',
+      workspaceId: 'w1',
+      threadId: 't-open',
+      sessionId: 's1',
+      controls: controls('default'),
+    })
+    const optimistic = workspaceThreadsReducer(s, { type: 'set-config', workspaceId: 'w1', threadId: 't-open', axis: 'mode', value: 'plan' })
+    const reverted = workspaceThreadsReducer(optimistic, { type: 'set-config', workspaceId: 'w1', threadId: 't-open', axis: 'mode', value: 'default' })
+    expect(reverted.w1.config['t-open']?.modes?.currentModeId).toBe('default')
+  })
+
+  it('set-config does not mutate the input state', () => {
+    const before = workspaceThreadsReducer(initialWorkspaceThreads, {
+      type: 'connect',
+      workspaceId: 'w1',
+      threadId: 't-open',
+      sessionId: 's1',
+      controls: controls('default'),
+    })
+    workspaceThreadsReducer(before, { type: 'set-config', workspaceId: 'w1', threadId: 't-open', axis: 'mode', value: 'plan' })
+    expect(before.w1.config['t-open']?.modes?.currentModeId).toBe('default')
+  })
+
+  it('set-config is a no-op (same ref) for an unchanged value, missing axis, missing Thread, or missing Workspace', () => {
+    const s = workspaceThreadsReducer(initialWorkspaceThreads, {
+      type: 'connect',
+      workspaceId: 'w1',
+      threadId: 't-open',
+      sessionId: 's1',
+      controls: controls('default'),
+    })
+    // unchanged value
+    expect(workspaceThreadsReducer(s, { type: 'set-config', workspaceId: 'w1', threadId: 't-open', axis: 'mode', value: 'default' })).toBe(s)
+    // a Thread with no seeded config
+    expect(workspaceThreadsReducer(s, { type: 'set-config', workspaceId: 'w1', threadId: 'no-config', axis: 'mode', value: 'plan' })).toBe(s)
+    // an absent Workspace
+    expect(workspaceThreadsReducer(s, { type: 'set-config', workspaceId: 'absent', threadId: 't-open', axis: 'mode', value: 'plan' })).toBe(s)
+
+    // an unadvertised axis (null modes/models/effort)
+    const bare = workspaceThreadsReducer(initialWorkspaceThreads, {
+      type: 'connect',
+      workspaceId: 'w1',
+      threadId: 't-open',
+      sessionId: 's1',
+      controls: { modes: null, models: null, reasoningEffort: null },
+    })
+    expect(workspaceThreadsReducer(bare, { type: 'set-config', workspaceId: 'w1', threadId: 't-open', axis: 'model', value: 'x' })).toBe(bare)
+  })
+
+  it('remove drops a Thread config entry too', () => {
+    let s = workspaceThreadsReducer(initialWorkspaceThreads, {
+      type: 'connect',
+      workspaceId: 'w1',
+      threadId: 't-open',
+      sessionId: 's1',
+      controls: controls('default'),
+    })
+    s = workspaceThreadsReducer(s, { type: 'open', workspaceId: 'w1', threadId: 'draft' })
+    s = workspaceThreadsReducer(s, { type: 'bind', workspaceId: 'w1', threadId: 'draft', sessionId: 'sD', controls: controls('plan') })
+    s = workspaceThreadsReducer(s, { type: 'remove', workspaceId: 'w1', threadId: 'draft' })
+    expect(s.w1.config['draft']).toBeUndefined()
+    expect(s.w1.config['t-open']?.modes?.currentModeId).toBe('default') // primary kept
+  })
+})
+
 describe('workspaceThreadStateFor', () => {
   const state: WorkspaceThreadsState = {
-    w1: { live: new Set(['t1']), bound: {}, active: 't1' },
+    w1: { live: new Set(['t1']), bound: {}, active: 't1', config: {} },
   }
   it('returns a Workspace live-state', () => {
     expect(workspaceThreadStateFor(state, 'w1')?.active).toBe('t1')
@@ -162,5 +370,49 @@ describe('workspaceThreadStateFor', () => {
   it('returns null for an unconnected or unselected Workspace', () => {
     expect(workspaceThreadStateFor(state, 'w2')).toBeNull()
     expect(workspaceThreadStateFor(state, null)).toBeNull()
+  })
+})
+
+describe('configFor (#70)', () => {
+  const state = workspaceThreadsReducer(initialWorkspaceThreads, {
+    type: 'connect',
+    workspaceId: 'w1',
+    threadId: 't-open',
+    sessionId: 's1',
+    controls: controls('plan'),
+  })
+  it('returns a Thread its own controls', () => {
+    expect(configFor(state, 'w1', 't-open')?.modes?.currentModeId).toBe('plan')
+  })
+  it('returns null for a Thread with no seeded config, an absent Workspace, or null workspaceId', () => {
+    expect(configFor(state, 'w1', 'no-config')).toBeNull()
+    expect(configFor(state, 'absent', 't-open')).toBeNull()
+    expect(configFor(state, null, 't-open')).toBeNull()
+  })
+})
+
+describe('currentConfigValue (#70)', () => {
+  const state = workspaceThreadsReducer(initialWorkspaceThreads, {
+    type: 'connect',
+    workspaceId: 'w1',
+    threadId: 't-open',
+    sessionId: 's1',
+    controls: controls('default', 'devstral-small', 'max'),
+  })
+  it('reads the current value per axis', () => {
+    expect(currentConfigValue(state, 'w1', 't-open', 'mode')).toBe('default')
+    expect(currentConfigValue(state, 'w1', 't-open', 'model')).toBe('devstral-small')
+    expect(currentConfigValue(state, 'w1', 't-open', 'reasoningEffort')).toBe('max')
+  })
+  it('returns null when no controls are seeded, or the axis is unadvertised', () => {
+    expect(currentConfigValue(state, 'w1', 'no-config', 'mode')).toBeNull()
+    const bare = workspaceThreadsReducer(initialWorkspaceThreads, {
+      type: 'connect',
+      workspaceId: 'w1',
+      threadId: 't-open',
+      sessionId: 's1',
+      controls: { modes: null, models: null, reasoningEffort: null },
+    })
+    expect(currentConfigValue(bare, 'w1', 't-open', 'mode')).toBeNull()
   })
 })

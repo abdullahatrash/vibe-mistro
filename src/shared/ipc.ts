@@ -154,6 +154,20 @@ export interface ThreadReasoningEffort {
   options: { value: string; name?: string }[]
 }
 
+/**
+ * A Thread's full agent-controls bundle (#66 axes, #70 per-Thread): the current
+ * values + options for Mode / Model / Reasoning effort, as a session reports them
+ * from `session/new` (a fresh mint) or `session/load` (a resume). Each axis is null
+ * when the agent advertises none. Carried to the renderer on `thread:bound` so EVERY
+ * live Thread sources its OWN controls, keyed by its `threadId` — not the single
+ * connect-time Thread's values (the #66 limitation this removes).
+ */
+export interface ThreadAgentControls {
+  modes: ThreadModes | null
+  models: ThreadModels | null
+  reasoningEffort: ThreadReasoningEffort | null
+}
+
 /** A connected Thread, mapped onto the ACP `sessionId` from `session/new`. */
 export interface ThreadInfo {
   /** The ACP session id this Thread is bound to (debug-visible only). */
@@ -248,6 +262,14 @@ export interface ThreadBoundEvent {
    * one-time "agent context reset" notice; absent/false on a normal draft mint.
    */
   rebound?: boolean
+  /**
+   * The just-bound session's agent-controls (#70), so THIS Thread's picker sources
+   * its OWN Mode/Model/Reasoning effort rather than inheriting the connect-time
+   * Thread's. Non-null whenever the bind produced a fresh `session/new`/`session/load`
+   * result (mint, re-bind, or resume); null on a plain reuse of an already-hosted
+   * session (no fresh result — the renderer keeps whatever it already holds).
+   */
+  controls: ThreadAgentControls | null
 }
 
 /**

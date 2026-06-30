@@ -1,3 +1,5 @@
+import type { ThreadAgentControls, ThreadConfigAxis } from '../../../shared/ipc'
+
 /**
  * Per-Workspace, per-session Thread state (ADR-0006, TB3 #48) — lifted OUT of
  * `ConnectedWorkspace` so the sidebar (and the nav reducer) is the single source
@@ -14,6 +16,12 @@
  * - `active`: the Thread this Workspace is currently showing. Lifted so a
  *   BACKGROUND (hidden) Workspace keeps its in-flight Thread mounted/streaming
  *   while the user looks elsewhere — the keep-mounted outlet renders `active`.
+ * - `config`: each live Thread's OWN agent-controls (#70), keyed by `threadId`.
+ *   The home migrated here from the single connect-time `ThreadConnection` (#66
+ *   sourced ALL Threads' picker from one Thread's values) — seeded per Thread on
+ *   `connect` (the primary) and `bind` (drafts/continued), and updated
+ *   OPTIMISTICALLY per Thread on a `set-config` (a change emits no notification,
+ *   ADR-0007). So EVERY live Thread shows + changes its own Mode/Model/effort.
  *
  * A pure reducer + derivation (no React, no IPC), like the nav/connection reducers.
  */
@@ -21,6 +29,7 @@ export interface WorkspaceThreadState {
   live: ReadonlySet<string>
   bound: Readonly<Record<string, string>>
   active: string
+  config: Readonly<Record<string, ThreadAgentControls>>
 }
 
 export type WorkspaceThreadsState = Readonly<Record<string, WorkspaceThreadState>>
@@ -28,16 +37,37 @@ export type WorkspaceThreadsState = Readonly<Record<string, WorkspaceThreadState
 export type WorkspaceThreadsAction =
   // A Workspace (re)connected: reset its live-state to the agent's auto-opened
   // Thread. Fired once per connection — a reconnect (new agent) deliberately drops
-  // the prior session's drafts (their sessions died with the old process).
-  | { type: 'connect'; workspaceId: string; threadId: string; sessionId: string | null }
+  // the prior session's drafts (their sessions died with the old process). Carries
+  // the connect-time Thread's controls (#70) so its picker is seeded up front.
+  | {
+      type: 'connect'
+      workspaceId: string
+      threadId: string
+      sessionId: string | null
+      controls: ThreadAgentControls | null
+    }
   // A draft was minted or a cold Thread continued: host it live and make it active.
   | { type: 'open'; workspaceId: string; threadId: string }
   // Switch which Thread the Workspace is showing (kept mounted when backgrounded).
   | { type: 'select'; workspaceId: string; threadId: string }
-  // A draft's first prompt bound its session (`thread:bound`) — record it.
-  | { type: 'bind'; workspaceId: string; threadId: string; sessionId: string }
-  // A live Thread was deleted (TB6): drop it from the live set + its bound session.
+  // A draft's first prompt bound its session (`thread:bound`) — record it, and seed
+  // THIS Thread's controls (#70) from the bind payload (null on a reuse — keep what's
+  // there, don't clobber with null).
+  | {
+      type: 'bind'
+      workspaceId: string
+      threadId: string
+      sessionId: string
+      controls: ThreadAgentControls | null
+    }
+  // A live Thread was deleted (TB6): drop it from the live set + its bound session
+  // + its config entry.
   | { type: 'remove'; workspaceId: string; threadId: string }
+  // Optimistically reflect a per-Thread agent-control change (#70, ADR-0007): a
+  // change emits no notification, so the renderer updates THIS Thread's displayed
+  // current value the instant the user picks, then reverts (re-dispatching the prior
+  // value) on an IPC failure. Keyed by `threadId` so a sibling Thread is untouched.
+  | { type: 'set-config'; workspaceId: string; threadId: string; axis: ThreadConfigAxis; value: string }
 
 export const initialWorkspaceThreads: WorkspaceThreadsState = {}
 
@@ -53,6 +83,7 @@ export function workspaceThreadsReducer(
           live: new Set([action.threadId]),
           bound: action.sessionId ? { [action.threadId]: action.sessionId } : {},
           active: action.threadId,
+          config: action.controls ? { [action.threadId]: action.controls } : {},
         },
       }
     case 'open': {
@@ -69,12 +100,20 @@ export function workspaceThreadsReducer(
     }
     case 'bind': {
       const cur = state[action.workspaceId]
-      if (!cur || cur.bound[action.threadId] === action.sessionId) return state
+      if (!cur) return state
+      const boundUnchanged = cur.bound[action.threadId] === action.sessionId
+      // Seed this Thread's controls (#70) from the bind payload; a null payload
+      // (reuse — no fresh result) leaves any existing entry untouched (no clobber).
+      const config = action.controls
+        ? { ...cur.config, [action.threadId]: action.controls }
+        : cur.config
+      if (boundUnchanged && config === cur.config) return state
       return {
         ...state,
         [action.workspaceId]: {
           ...cur,
-          bound: { ...cur.bound, [action.threadId]: action.sessionId },
+          bound: boundUnchanged ? cur.bound : { ...cur.bound, [action.threadId]: action.sessionId },
+          config,
         },
       }
     }
@@ -85,10 +124,52 @@ export function workspaceThreadsReducer(
       live.delete(action.threadId)
       const bound = { ...cur.bound }
       delete bound[action.threadId]
+      const config = { ...cur.config }
+      delete config[action.threadId]
       // `active` is left to the caller: deleting the active Thread is paired with a
       // `select` back to the connection's primary Thread (which is never deletable).
-      return { ...state, [action.workspaceId]: { ...cur, live, bound } }
+      return { ...state, [action.workspaceId]: { ...cur, live, bound, config } }
     }
+    case 'set-config': {
+      // Optimistic per-Thread update (#70, ADR-0007). Same-ref-on-noop discipline:
+      // no Workspace, no config entry for the Thread, an unadvertised axis, or an
+      // unchanged value all return the SAME ref so a redundant pick (or a revert to
+      // the value already shown) drives no re-render. Sibling Threads are untouched.
+      const cur = state[action.workspaceId]
+      const controls = cur?.config[action.threadId]
+      if (!cur || !controls) return state
+      const next = applyConfig(controls, action.axis, action.value)
+      if (next === controls) return state
+      return {
+        ...state,
+        [action.workspaceId]: { ...cur, config: { ...cur.config, [action.threadId]: next } },
+      }
+    }
+  }
+}
+
+/**
+ * Apply an agent-control change to a Thread's controls bundle (#70), returning a
+ * NEW `ThreadAgentControls` with only the targeted nested current updated — or the
+ * SAME ref when the axis isn't advertised (null) or the value is already current, so
+ * a no-op pick can't churn the reducer. (Migrated from the per-Workspace #66 home in
+ * `connections.ts`, now keyed per Thread.)
+ */
+function applyConfig(
+  controls: ThreadAgentControls,
+  axis: ThreadConfigAxis,
+  value: string,
+): ThreadAgentControls {
+  switch (axis) {
+    case 'mode':
+      if (!controls.modes || controls.modes.currentModeId === value) return controls
+      return { ...controls, modes: { ...controls.modes, currentModeId: value } }
+    case 'model':
+      if (!controls.models || controls.models.currentModelId === value) return controls
+      return { ...controls, models: { ...controls.models, currentModelId: value } }
+    case 'reasoningEffort':
+      if (!controls.reasoningEffort || controls.reasoningEffort.current === value) return controls
+      return { ...controls, reasoningEffort: { ...controls.reasoningEffort, current: value } }
   }
 }
 
@@ -99,4 +180,42 @@ export function workspaceThreadStateFor(
 ): WorkspaceThreadState | null {
   if (!workspaceId) return null
   return state[workspaceId] ?? null
+}
+
+/**
+ * One live Thread's agent-controls (#70), or null when none are seeded for it yet —
+ * a Thread whose session hasn't bound (a never-prompted draft), or a reopened Thread
+ * before its first prompt resumes. App feeds this to the active Thread's picker so it
+ * sources its OWN Mode/Model/effort.
+ */
+export function configFor(
+  state: WorkspaceThreadsState,
+  workspaceId: string | null,
+  threadId: string,
+): ThreadAgentControls | null {
+  if (!workspaceId) return null
+  return state[workspaceId]?.config[threadId] ?? null
+}
+
+/**
+ * A Thread's CURRENT value for an agent-control axis (#70), or null when the axis
+ * isn't advertised (or no controls are seeded). App reads this BEFORE an optimistic
+ * `set-config` so it can revert to the prior value if the IPC change fails (ADR-0007).
+ */
+export function currentConfigValue(
+  state: WorkspaceThreadsState,
+  workspaceId: string,
+  threadId: string,
+  axis: ThreadConfigAxis,
+): string | null {
+  const controls = state[workspaceId]?.config[threadId]
+  if (!controls) return null
+  switch (axis) {
+    case 'mode':
+      return controls.modes?.currentModeId ?? null
+    case 'model':
+      return controls.models?.currentModelId ?? null
+    case 'reasoningEffort':
+      return controls.reasoningEffort?.current ?? null
+  }
 }
