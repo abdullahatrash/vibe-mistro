@@ -559,7 +559,14 @@ export function App(): JSX.Element {
           controls={
             // A bound Thread sources its OWN live config (#70); a draft (no config
             // seeded) shows the connection's option lists + defaults, overlaid with any
-            // cached pre-pick (#75).
+            // cached pre-pick (#75). CAVEAT: a CONTINUED (reopened, not-yet-bound) Thread
+            // also has no config, so it shows the connection DEFAULTS too — honest for
+            // Mode (session/load resets it to default) but the MODEL can persist across
+            // a resume (acp-capture §10), so a reopened Thread may briefly show the
+            // default model until its first prompt's bind reports the real one and
+            // self-corrects. We don't eagerly resume to learn it (#33 defers load to the
+            // first prompt); Model isn't trust-relevant (it doesn't gate writes), so the
+            // transient pre-prompt mismatch is accepted.
             configFor(workspaceThreads, conn.workspaceId, activeThread.id) ??
             draftControls(connectionControlsOf(conn), selectedFor(workspaceThreads, conn.workspaceId, activeThread.id))
           }
