@@ -59,6 +59,80 @@ const pool = new AgentPool({
 })
 
 /**
+ * Warm-pool bounds (ADR-0006 decision 3, TB5 #50). Defaults chosen for a desktop
+ * orchestrator where a Workspace's child is cheap to re-warm (history is in our
+ * store, ADR-0005) but holding many idle `vibe-acp` processes leaks memory:
+ *  - `IDLE_EVICT_MS` (15 min): a Workspace untouched this long is almost certainly
+ *    abandoned for now; releasing its child reclaims memory and a re-select
+ *    re-warms in well under a second.
+ *  - `MAX_WARM_AGENTS` (4): a generous ceiling for how many Workspaces a user
+ *    actively juggles at once — past it the least-recently-used is trimmed. This
+ *    also bounds the live `acp:event` listener fan-out (the #53 prerequisite).
+ *  - `SWEEP_INTERVAL_MS` (1 min): coarse enough to be near-free, fine enough that
+ *    eviction lands within a minute of crossing the idle line.
+ * Protection (the selected + any mid-turn agent) overrides BOTH bounds (#50).
+ */
+const IDLE_EVICT_MS = 15 * 60 * 1000
+const MAX_WARM_AGENTS = 4
+const SWEEP_INTERVAL_MS = 60 * 1000
+
+/**
+ * The agentId of the Workspace currently ON SCREEN (TB5 #50), reported by the
+ * renderer via `setActiveAgent`. Protected from eviction so the Workspace the user
+ * is looking at is never trimmed by the idle/cap policy. Null when the selection
+ * has no warm agent (idle/connecting/error) — nothing to protect.
+ */
+let activeAgentId: string | null = null
+
+/**
+ * Agents with a prompt turn IN FLIGHT (TB5 #50), by agentId -> open-turn count.
+ * An agent mid-turn is protected from eviction so a streaming Workspace is never
+ * disposed under the user. A count (not a flag) tolerates overlapping prompts; the
+ * entry is removed when it hits zero so the map can't leak.
+ */
+const inFlightTurns = new Map<string, number>()
+
+function beginTurn(agentId: string): void {
+  inFlightTurns.set(agentId, (inFlightTurns.get(agentId) ?? 0) + 1)
+}
+
+function endTurn(agentId: string): void {
+  const next = (inFlightTurns.get(agentId) ?? 0) - 1
+  if (next > 0) inFlightTurns.set(agentId, next)
+  else inFlightTurns.delete(agentId)
+}
+
+/**
+ * The eviction-protection predicate (TB5 #50) handed to the pool's pure policies:
+ * NEVER evict the on-screen Workspace's agent, nor one with a prompt turn in
+ * flight. This is the load-bearing guarantee — proof that idle/cap can't dispose
+ * the selected or streaming Workspace lives entirely here.
+ */
+function isAgentProtected(agentId: string): boolean {
+  return agentId === activeAgentId || (inFlightTurns.get(agentId) ?? 0) > 0
+}
+
+/** The periodic idle-evict sweep timer (cleared on quit). */
+let sweepTimer: ReturnType<typeof setInterval> | null = null
+
+/**
+ * Push an eviction notice to every renderer (TB5 #50) so it drops the now-dead
+ * agents' Workspace connections and re-warms them lazily on next select. Also
+ * clears the agents' transcript-bridge entries so the `agentId -> threadId` map
+ * can't leak across evictions. A no-op when nothing was evicted.
+ */
+function notifyAgentsEvicted(agentIds: string[]): void {
+  if (agentIds.length === 0) return
+  for (const agentId of agentIds) {
+    inFlightTurns.delete(agentId)
+    transcriptThreads.delete(agentId)
+  }
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.webContents.isDestroyed()) win.webContents.send(IPC.agentEvicted, { agentIds })
+  }
+}
+
+/**
  * The single-writer metadata index (ADR-0005). Assigned at app-ready (needs
  * `userData`) and loaded before the first window so the renderer's cold list
  * fetch sees the persisted state. A failed load degrades to empty, never throws.
@@ -301,6 +375,77 @@ function wireAgentEvents(agentId: string, agent: WorkspaceAgent, sender: WebCont
   })
 }
 
+/**
+ * Run one prompt turn: bind-on-first-prompt, tee the input, send `session/prompt`,
+ * and map the outcome to a `SendPromptResult`. Extracted from the IPC handler so
+ * the handler stays a thin eviction-protection wrapper (TB5 #50) — the turn's
+ * lifecycle is unchanged from TB4/TB5 (#33/#46). `sender` is the request's
+ * webContents (for the up-front `thread:bound` signal).
+ */
+async function runPromptTurn(
+  sender: WebContents,
+  agent: WorkspaceAgent,
+  args: SendPromptArgs,
+): Promise<SendPromptResult> {
+  // Bind on first prompt (ADR-0005, TB5): a draft (sessionId null) mints its
+  // session via `session/new` NOW and binds it onto this Thread id; an
+  // already-bound Thread reuses its session — no second `session/new`. A
+  // binding failure surfaces WITHOUT teeing: nothing was logged yet, so a
+  // failed first prompt leaves no transcript residue.
+  let sessionId: string
+  let rebound: boolean
+  try {
+    const bound = await bindThreadSession(agent, args)
+    sessionId = bound.sessionId
+    rebound = bound.rebound
+    // Tell the renderer its draft is now bound, the INSTANT `session/new`
+    // returns and BEFORE `agent.prompt` streams any event below (same
+    // webContents, so ordered ahead of those `acp:event`s). This binds the
+    // draft's live view to its OWN session up front, so it never infers a
+    // session from an arbitrary (possibly sibling) event. `rebound` (TB4 #33)
+    // carries a NEW session for a reopened Thread whose resume failed — the
+    // renderer rebinds its live view to it AND renders the "context reset" notice.
+    if (bound.minted && !sender.isDestroyed()) {
+      sender.send(IPC.threadBound, { threadId: args.threadId, sessionId, rebound })
+    }
+  } catch (err) {
+    if (err instanceof WorkspaceAgentError && err.authState === 'not-signed-in') {
+      return { ok: false, kind: 'not-signed-in', agentId: args.agentId, authMethods: agent.authMethods }
+    }
+    return { ok: false, kind: 'error', error: err instanceof Error ? err.message : String(err) }
+  }
+
+  // Tee the user's prompt (the conversation INPUT) to THIS Thread's log before
+  // sending it, so it precedes the streamed events it triggers. We hold the
+  // Thread id, so no bridge lookup — a draft's first prompt can't misroute to
+  // another Thread. Main has no renderer item id, so mint an opaque replay key.
+  teeTranscript(args.threadId, userPromptEntry(randomUUID(), args.text))
+  // On a re-bind (TB4 #33), persist the "context reset" notice right AFTER the
+  // user's prompt and BEFORE the turn's events — so a later reopen replays it
+  // in the same position the live view rendered it (`thread:bound` -> notice).
+  if (rebound) teeTranscript(args.threadId, agentReboundEntry())
+  try {
+    const result = await agent.prompt(sessionId, args.text)
+    // Tee the clean turn end: this signal lives ONLY in this IPC response
+    // (never an `acp:event`), so without it a replay leaves `isProcessing`
+    // stuck true. Serialized after the turn's events (TranscriptStore chain).
+    teeTranscript(args.threadId, turnCompleteEntry())
+    return { ok: true, result, sessionId }
+  } catch (err) {
+    // Mid-session expiry (-32000): keep the agent alive so the renderer can
+    // re-auth in place on the same agent; don't stop it. This is a re-auth
+    // flow, NOT a conversation error — tee `turn-complete` (the renderer
+    // synthesizes no ErrorItem here either), so replay isn't left processing.
+    if (err instanceof WorkspaceAgentError && err.authState === 'not-signed-in') {
+      teeTranscript(args.threadId, turnCompleteEntry())
+      return { ok: false, kind: 'not-signed-in', agentId: args.agentId, authMethods: agent.authMethods }
+    }
+    const message = err instanceof Error ? err.message : String(err)
+    teeTranscript(args.threadId, turnErrorEntry(message))
+    return { ok: false, kind: 'error', error: message }
+  }
+}
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1280,
@@ -351,6 +496,12 @@ function registerIpc(): void {
     const { agentId, agent, created } = pool.acquire(args.workspaceDir)
     if (created) wireAgentEvents(agentId, agent, event.sender)
 
+    // Enforce the warm-count cap right after warming this Workspace (TB5 #50): if
+    // we're now over MAX_WARM_AGENTS, trim the least-recently-active UNPROTECTED
+    // agent and tell the renderer to re-warm it lazily on next select. The agent we
+    // just acquired is most-recently-active, so it's never the one trimmed.
+    notifyAgentsEvicted(pool.enforceCap({ maxWarm: MAX_WARM_AGENTS, isProtected: isAgentProtected }))
+
     // Persist the Workspace open up front (ADR-0005), so even a not-signed-in
     // Workspace shows in the cold list. Best-effort — must not reject connect.
     await recordWorkspaceOpen(args.workspaceDir)
@@ -389,6 +540,7 @@ function registerIpc(): void {
     // in-place re-auth). Reuses the retained agent — no re-spawn.
     const agent = pool.get(args.agentId)
     if (!agent) return { ok: false, kind: 'error', error: `No active agent for id ${args.agentId}.`, hint: null }
+    pool.touch(args.agentId) // opening a Thread is activity — outrank idle peers (TB5 #50)
     try {
       const thread = await agent.openThread()
       const ids = await recordThread(args.agentId, agent.workspaceDir, thread)
@@ -404,62 +556,17 @@ function registerIpc(): void {
       const agent = pool.get(args.agentId)
       if (!agent) return { ok: false, kind: 'error', error: `No active agent for id ${args.agentId}.` }
 
-      // Bind on first prompt (ADR-0005, TB5): a draft (sessionId null) mints its
-      // session via `session/new` NOW and binds it onto this Thread id; an
-      // already-bound Thread reuses its session — no second `session/new`. A
-      // binding failure surfaces WITHOUT teeing: nothing was logged yet, so a
-      // failed first prompt leaves no transcript residue.
-      let sessionId: string
-      let rebound: boolean
+      // Activity + eviction protection (TB5 #50): a prompt is real activity, so
+      // touch the agent (it outranks idle peers under the idle/cap policy), and
+      // mark a turn IN FLIGHT for the call's duration so the sweep/cap can't evict
+      // a streaming Workspace out from under the user. `endTurn` runs no matter how
+      // the turn settles (success, error, or a thrown bind), so the flag can't leak.
+      pool.touch(args.agentId)
+      beginTurn(args.agentId)
       try {
-        const bound = await bindThreadSession(agent, args)
-        sessionId = bound.sessionId
-        rebound = bound.rebound
-        // Tell the renderer its draft is now bound, the INSTANT `session/new`
-        // returns and BEFORE `agent.prompt` streams any event below (same
-        // webContents, so ordered ahead of those `acp:event`s). This binds the
-        // draft's live view to its OWN session up front, so it never infers a
-        // session from an arbitrary (possibly sibling) event. `rebound` (TB4 #33)
-        // carries a NEW session for a reopened Thread whose resume failed — the
-        // renderer rebinds its live view to it AND renders the "context reset" notice.
-        if (bound.minted && !event.sender.isDestroyed()) {
-          event.sender.send(IPC.threadBound, { threadId: args.threadId, sessionId, rebound })
-        }
-      } catch (err) {
-        if (err instanceof WorkspaceAgentError && err.authState === 'not-signed-in') {
-          return { ok: false, kind: 'not-signed-in', agentId: args.agentId, authMethods: agent.authMethods }
-        }
-        return { ok: false, kind: 'error', error: err instanceof Error ? err.message : String(err) }
-      }
-
-      // Tee the user's prompt (the conversation INPUT) to THIS Thread's log before
-      // sending it, so it precedes the streamed events it triggers. We hold the
-      // Thread id, so no bridge lookup — a draft's first prompt can't misroute to
-      // another Thread. Main has no renderer item id, so mint an opaque replay key.
-      teeTranscript(args.threadId, userPromptEntry(randomUUID(), args.text))
-      // On a re-bind (TB4 #33), persist the "context reset" notice right AFTER the
-      // user's prompt and BEFORE the turn's events — so a later reopen replays it
-      // in the same position the live view rendered it (`thread:bound` -> notice).
-      if (rebound) teeTranscript(args.threadId, agentReboundEntry())
-      try {
-        const result = await agent.prompt(sessionId, args.text)
-        // Tee the clean turn end: this signal lives ONLY in this IPC response
-        // (never an `acp:event`), so without it a replay leaves `isProcessing`
-        // stuck true. Serialized after the turn's events (TranscriptStore chain).
-        teeTranscript(args.threadId, turnCompleteEntry())
-        return { ok: true, result, sessionId }
-      } catch (err) {
-        // Mid-session expiry (-32000): keep the agent alive so the renderer can
-        // re-auth in place on the same agent; don't stop it. This is a re-auth
-        // flow, NOT a conversation error — tee `turn-complete` (the renderer
-        // synthesizes no ErrorItem here either), so replay isn't left processing.
-        if (err instanceof WorkspaceAgentError && err.authState === 'not-signed-in') {
-          teeTranscript(args.threadId, turnCompleteEntry())
-          return { ok: false, kind: 'not-signed-in', agentId: args.agentId, authMethods: agent.authMethods }
-        }
-        const message = err instanceof Error ? err.message : String(err)
-        teeTranscript(args.threadId, turnErrorEntry(message))
-        return { ok: false, kind: 'error', error: message }
+        return await runPromptTurn(event.sender, agent, args)
+      } finally {
+        endTurn(args.agentId)
       }
     },
   )
@@ -473,8 +580,16 @@ function registerIpc(): void {
     // last-prompted map: answering Thread A's permission after switching+prompting
     // a sibling B must land in A's log, not B's.
     const agent = pool.get(args.agentId)
+    pool.touch(args.agentId) // answering a permission is activity (TB5 #50)
     teeTranscript(args.threadId, resolvePermissionEntry(args.requestId, args.optionId))
     agent?.respondPermission(args.requestId, args.optionId)
+  })
+
+  ipcMain.handle(IPC.setActiveAgent, (_event, agentId: string | null) => {
+    // The renderer reports which Workspace agent is currently ON SCREEN (TB5 #50).
+    // Tracked so `isAgentProtected` shields it from idle/cap eviction — the
+    // Workspace the user is looking at is never trimmed out from under them.
+    activeAgentId = agentId
   })
 
   ipcMain.handle(IPC.signIn, async (_event, args: SignInArgs): Promise<SignInResult> => {
@@ -587,6 +702,17 @@ app.whenReady().then(async () => {
   registerIpc()
   createWindow()
 
+  // The periodic idle-evict sweep (TB5 #50): release any agent untouched past
+  // IDLE_EVICT_MS, except the protected (on-screen / mid-turn) ones, and notify
+  // the renderer to re-warm them lazily on next select. Started once here; the
+  // interval is `unref`'d so it never keeps the process alive on its own, and is
+  // cleared on quit. Resilient across the macOS window-close/reopen cycle — after
+  // `disposeAll` the pool is empty, so the sweep simply no-ops until re-warmed.
+  sweepTimer = setInterval(() => {
+    notifyAgentsEvicted(pool.evictIdle({ idleMs: IDLE_EVICT_MS, isProtected: isAgentProtected }))
+  }, SWEEP_INTERVAL_MS)
+  sweepTimer.unref?.()
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -597,4 +723,13 @@ app.on('window-all-closed', () => {
   // A future multi-window slice should scope the pool per window.
   pool.disposeAll()
   if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('will-quit', () => {
+  // Stop the idle-evict sweep so no timer outlives the app (TB5 #50). The pool's
+  // own teardown is `window-all-closed`'s `disposeAll`; this just clears the timer.
+  if (sweepTimer) {
+    clearInterval(sweepTimer)
+    sweepTimer = null
+  }
 })

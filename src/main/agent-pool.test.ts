@@ -34,12 +34,21 @@ function fakeFactory(): { create: (workspaceDir: string) => FakeAgent; spawns: n
 }
 
 /** A pool over the fake factory, with a deterministic id sequence for assertions. */
-function makePool(): { pool: AgentPool<FakeAgent>; factory: ReturnType<typeof fakeFactory> } {
+function makePool(now?: () => number): { pool: AgentPool<FakeAgent>; factory: ReturnType<typeof fakeFactory> } {
   const factory = fakeFactory()
   let n = 0
-  const pool = new AgentPool<FakeAgent>({ createAgent: factory.create, mintId: () => `a${++n}` })
+  const pool = new AgentPool<FakeAgent>({ createAgent: factory.create, mintId: () => `a${++n}`, now })
   return { pool, factory }
 }
+
+/** A mutable injected clock (TB5 #50): advance it to age agents — no real timers. */
+function fakeClock(start = 0): { now: () => number; set: (t: number) => void } {
+  let t = start
+  return { now: () => t, set: (next) => void (t = next) }
+}
+
+/** Never protect any agent — the default policy input when protection isn't under test. */
+const UNPROTECTED = (): boolean => false
 
 describe('AgentPool — lazy-spawn-once + reuse-by-Workspace', () => {
   it('spawns an agent on first acquire and returns a minted id (created=true)', () => {
@@ -151,5 +160,150 @@ describe('AgentPool — explicit dispose (the TB5 eviction seam)', () => {
     expect(a.stops).toBe(1)
     expect(b.stops).toBe(1)
     expect(pool.agents()).toHaveLength(0)
+  })
+})
+
+/**
+ * Idle-evict (TB5 #50): the periodic sweep disposes an agent with no activity for
+ * the configured timeout, EXCEPT the protected (on-screen / mid-turn) ones —
+ * exercised with an INJECTED clock so no real timer or process is involved.
+ */
+describe('AgentPool — idle eviction (TB5 #50)', () => {
+  it('stamps lastActiveAt on spawn and evicts only the stale, unprotected agent (returning its id)', () => {
+    const clock = fakeClock(0)
+    const { pool, factory } = makePool(clock.now)
+
+    const a = pool.acquire('/proj/a') // active at t=0
+    clock.set(8_000)
+    pool.acquire('/proj/b') // active at t=8_000
+
+    clock.set(10_000)
+    // idleMs 5_000 -> cutoff 5_000: a (t=0) is stale, b (t=8_000) is fresh.
+    const evicted = pool.evictIdle({ idleMs: 5_000, isProtected: UNPROTECTED })
+
+    expect(evicted).toEqual([a.agentId])
+    expect(a.agent.stops).toBe(1)
+    expect(pool.getByWorkspace('/proj/a')).toBeNull()
+    expect(pool.getByWorkspace('/proj/b')).not.toBeNull()
+    // A re-select of the evicted Workspace re-warms transparently (fresh spawn).
+    clock.set(11_000)
+    const rewarmed = pool.acquire('/proj/a')
+    expect(factory.spawns).toBe(3)
+    expect(rewarmed.created).toBe(true)
+    expect(rewarmed.agent).not.toBe(a.agent)
+  })
+
+  it('REUSE refreshes lastActiveAt, so a re-selected Workspace is not evicted as idle', () => {
+    const clock = fakeClock(0)
+    const { pool } = makePool(clock.now)
+
+    const a = pool.acquire('/proj/a') // t=0
+    clock.set(8_000)
+    pool.acquire('/proj/a') // reuse -> refreshes to t=8_000
+
+    clock.set(10_000)
+    const evicted = pool.evictIdle({ idleMs: 5_000, isProtected: UNPROTECTED })
+
+    expect(evicted).toEqual([])
+    expect(a.agent.stops).toBe(0)
+  })
+
+  it('touch refreshes lastActiveAt (an unknown id is a no-op)', () => {
+    const clock = fakeClock(0)
+    const { pool } = makePool(clock.now)
+
+    const a = pool.acquire('/proj/a') // t=0
+    clock.set(8_000)
+    pool.touch(a.agentId)
+    expect(() => pool.touch('nope')).not.toThrow()
+
+    clock.set(10_000)
+    expect(pool.evictIdle({ idleMs: 5_000, isProtected: UNPROTECTED })).toEqual([])
+    expect(a.agent.stops).toBe(0)
+  })
+
+  it('NEVER evicts a protected (selected / mid-turn) agent, even when stale', () => {
+    const clock = fakeClock(0)
+    const { pool } = makePool(clock.now)
+
+    const a = pool.acquire('/proj/a') // t=0, will be stale but protected
+    clock.set(20_000)
+
+    const evicted = pool.evictIdle({ idleMs: 5_000, isProtected: (id) => id === a.agentId })
+
+    expect(evicted).toEqual([])
+    expect(a.agent.stops).toBe(0)
+    expect(pool.getByWorkspace('/proj/a')).not.toBeNull()
+  })
+})
+
+/**
+ * Warm-count cap (TB5 #50): exceeding M warm agents disposes the LEAST-recently-
+ * active one — never a protected (on-screen / mid-turn) agent, even when honoring
+ * that means staying over cap. The just-acquired agent is most-recent, so the cap
+ * trims a background Workspace, never the one the user just selected.
+ */
+describe('AgentPool — warm-count cap (TB5 #50)', () => {
+  it('evicts the LRU non-protected agent when over cap (returning its id)', () => {
+    const clock = fakeClock(0)
+    const { pool } = makePool(clock.now)
+
+    const a = pool.acquire('/proj/a') // t=0  (LRU)
+    clock.set(1_000)
+    pool.acquire('/proj/b') // t=1_000
+    clock.set(2_000)
+    pool.acquire('/proj/c') // t=2_000
+
+    const evicted = pool.enforceCap({ maxWarm: 2, isProtected: UNPROTECTED })
+
+    expect(evicted).toEqual([a.agentId]) // the least-recently-active
+    expect(a.agent.stops).toBe(1)
+    expect(pool.agents()).toHaveLength(2)
+    expect(pool.getByWorkspace('/proj/b')).not.toBeNull()
+    expect(pool.getByWorkspace('/proj/c')).not.toBeNull()
+  })
+
+  it('is a no-op while at or under the cap', () => {
+    const { pool } = makePool()
+    pool.acquire('/proj/a')
+    pool.acquire('/proj/b')
+
+    expect(pool.enforceCap({ maxWarm: 2, isProtected: UNPROTECTED })).toEqual([])
+    expect(pool.agents()).toHaveLength(2)
+  })
+
+  it('SKIPS a protected LRU and trims the next non-protected agent instead', () => {
+    const clock = fakeClock(0)
+    const { pool } = makePool(clock.now)
+
+    const a = pool.acquire('/proj/a') // t=0   (LRU, but protected — mid-turn)
+    clock.set(1_000)
+    const b = pool.acquire('/proj/b') // t=1_000 (next LRU, unprotected)
+    clock.set(2_000)
+    pool.acquire('/proj/c') // t=2_000
+
+    const evicted = pool.enforceCap({ maxWarm: 2, isProtected: (id) => id === a.agentId })
+
+    expect(evicted).toEqual([b.agentId]) // protected a survived; b trimmed
+    expect(a.agent.stops).toBe(0)
+    expect(b.agent.stops).toBe(1)
+    expect(pool.getByWorkspace('/proj/a')).not.toBeNull()
+  })
+
+  it('STAYS over cap rather than evict a protected agent (protection wins)', () => {
+    const clock = fakeClock(0)
+    const { pool } = makePool(clock.now)
+
+    const a = pool.acquire('/proj/a')
+    clock.set(1_000)
+    const b = pool.acquire('/proj/b')
+    clock.set(2_000)
+    const c = pool.acquire('/proj/c')
+    const allProtected = new Set([a.agentId, b.agentId, c.agentId])
+
+    const evicted = pool.enforceCap({ maxWarm: 2, isProtected: (id) => allProtected.has(id) })
+
+    expect(evicted).toEqual([]) // nothing killable — left over cap
+    expect(pool.agents()).toHaveLength(3)
   })
 })

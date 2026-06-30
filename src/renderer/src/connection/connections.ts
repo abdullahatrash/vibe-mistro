@@ -14,6 +14,7 @@ export type ConnectionMap = Readonly<Record<string, ConnectState>>
 export type ConnectionAction =
   | { type: 'set'; workspaceId: string; state: ConnectState }
   | { type: 'clear'; workspaceId: string }
+  | { type: 'evict'; agentIds: ReadonlySet<string> }
 
 export const initialConnections: ConnectionMap = {}
 
@@ -27,7 +28,33 @@ export function connectionsReducer(state: ConnectionMap, action: ConnectionActio
       delete next[action.workspaceId]
       return next
     }
+    case 'evict': {
+      // The pool evicted these agents (TB5 #50): drop the Workspaces holding them
+      // so the next select re-warms lazily (a re-connect, history from the store).
+      // Returns the SAME ref when no connection referenced an evicted agent, so a
+      // sweep that evicted nothing the renderer tracks drives no re-render.
+      const doomed = Object.keys(state).filter((id) => {
+        const agentId = agentIdOf(state[id])
+        return agentId !== null && action.agentIds.has(agentId)
+      })
+      if (doomed.length === 0) return state
+      const next = { ...state }
+      for (const id of doomed) delete next[id]
+      return next
+    }
   }
+}
+
+/**
+ * The pool agentId a ConnectState holds, when any (TB5 #50): a connected state
+ * carries it on its `thread`, a not-signed-in state inline; the transient
+ * idle/connecting/error states have no agent yet. Used to map a pool eviction
+ * (by agentId) back to the Workspace connection to drop.
+ */
+export function agentIdOf(state: ConnectState): string | null {
+  if (state.status === 'connected') return state.thread.agentId
+  if (state.status === 'not-signed-in') return state.agentId
+  return null
 }
 
 /**

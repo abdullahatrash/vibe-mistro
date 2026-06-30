@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import {
   IPC,
   type AcpEvent,
+  type AgentEvictedEvent,
   type CreateDraftArgs,
   type CreateDraftResult,
   type ListMetadataResult,
@@ -34,6 +35,8 @@ const api = {
   signIn: (args: SignInArgs): Promise<SignInResult> => ipcRenderer.invoke(IPC.signIn, args),
   signOut: (args: SignOutArgs): Promise<SignOutResult> => ipcRenderer.invoke(IPC.signOut, args),
   stopAgent: (agentId: string): Promise<void> => ipcRenderer.invoke(IPC.stopAgent, agentId),
+  setActiveAgent: (agentId: string | null): Promise<void> =>
+    ipcRenderer.invoke(IPC.setActiveAgent, agentId),
   listMetadata: (): Promise<ListMetadataResult> => ipcRenderer.invoke(IPC.listMetadata),
   createDraft: (args: CreateDraftArgs): Promise<CreateDraftResult> =>
     ipcRenderer.invoke(IPC.createDraft, args),
@@ -50,6 +53,11 @@ const api = {
     const handler = (_e: unknown, payload: ThreadBoundEvent): void => listener(payload)
     ipcRenderer.on(IPC.threadBound, handler)
     return () => ipcRenderer.removeListener(IPC.threadBound, handler)
+  },
+  onAgentEvicted: (listener: (event: AgentEvictedEvent) => void): (() => void) => {
+    const handler = (_e: unknown, payload: AgentEvictedEvent): void => listener(payload)
+    ipcRenderer.on(IPC.agentEvicted, handler)
+    return () => ipcRenderer.removeListener(IPC.agentEvicted, handler)
   },
 }
 

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  agentIdOf,
   connectedWorkspaceIds,
   connectionsReducer,
   initialConnections,
@@ -62,6 +63,36 @@ describe('connectionsReducer', () => {
 
     const same = connectionsReducer(a, { type: 'clear', workspaceId: 'absent' })
     expect(same).toBe(a) // unchanged reference: no spurious re-render
+  })
+
+  it('evict drops the Workspaces holding pool-evicted agents (re-warm on next select), TB5 #50', () => {
+    const map: ConnectionMap = {
+      w1: connected('w1', 'a1'),
+      w2: connected('w2', 'a2'),
+      w3: { status: 'not-signed-in', agentId: 'a3', workspaceDir: '/proj/w3', authMethods: AUTH_METHODS },
+    }
+    // The pool evicted a1 (connected) and a3 (not-signed-in) — both Workspaces drop.
+    const next = connectionsReducer(map, { type: 'evict', agentIds: new Set(['a1', 'a3']) })
+    expect(Object.keys(next)).toEqual(['w2']) // w2 (a2) untouched
+  })
+
+  it('evict is a no-op (same ref) when no connection holds an evicted agent', () => {
+    const map: ConnectionMap = { w1: connected('w1', 'a1') }
+    // a connecting/idle Workspace has no agent yet, so an unrelated eviction is inert.
+    const same = connectionsReducer(map, { type: 'evict', agentIds: new Set(['a-unknown']) })
+    expect(same).toBe(map)
+  })
+})
+
+describe('agentIdOf', () => {
+  it('extracts the pool agentId from a connected / not-signed-in state, null otherwise', () => {
+    expect(agentIdOf(connected('w1', 'a1'))).toBe('a1')
+    expect(
+      agentIdOf({ status: 'not-signed-in', agentId: 'a4', workspaceDir: '/proj/w4', authMethods: AUTH_METHODS }),
+    ).toBe('a4')
+    expect(agentIdOf({ status: 'idle' })).toBeNull()
+    expect(agentIdOf({ status: 'connecting', workspaceDir: '/proj/w1' })).toBeNull()
+    expect(agentIdOf({ status: 'error', message: 'boom', hint: null })).toBeNull()
   })
 })
 

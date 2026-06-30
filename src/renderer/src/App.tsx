@@ -15,6 +15,7 @@ import {
 } from './auth/auth-view'
 import { routeThreadResult, type ConnectState } from './connection/routing'
 import {
+  agentIdOf,
   connectedWorkspaceIds,
   connectionsReducer,
   initialConnections,
@@ -205,6 +206,19 @@ export function App(): JSX.Element {
     void refreshRecents()
   }, [])
 
+  // Pool eviction (TB5 #50): when main evicts a warm agent (idle timeout or the
+  // warm-count cap), drop the Workspaces holding those now-dead agentIds so the
+  // next select re-warms lazily (a normal re-connect; history from the store, no
+  // user-visible error). By contract the evicted agent is never the selected or
+  // mid-turn one, so nothing the user is looking at vanishes. This also caps the
+  // `acp:event` listener fan-out (bounded by MAX_WARM_AGENTS) — the prerequisite
+  // #53 was waiting on; #53 itself (mounting all live siblings) is NOT done here.
+  useEffect(() => {
+    return window.api.onAgentEvicted((e) => {
+      connDispatch({ type: 'evict', agentIds: new Set(e.agentIds) })
+    })
+  }, [])
+
   /**
    * Select a Workspace from the sidebar: pin it in the nav reducer and
    * connect-OR-REUSE its warm agent. A never-connected (or errored) Workspace
@@ -335,6 +349,15 @@ export function App(): JSX.Element {
   const connectedIds = connectedWorkspaceIds(connections)
   const selectedWs = nav.selectedWorkspaceId
   const selected = selectedConnection(connections, selectedWs)
+
+  // Tell main which agent backs the ON-SCREEN Workspace (TB5 #50) so the pool
+  // protects it from idle/cap eviction — the Workspace the user is looking at is
+  // never evicted out from under them. Null when the selection has no warm agent
+  // (idle/connecting/error); main also protects any mid-turn agent independently.
+  const selectedAgentId = agentIdOf(selected)
+  useEffect(() => {
+    void window.api.setActiveAgent(selectedAgentId)
+  }, [selectedAgentId])
 
   // Per-Workspace rolled-up live status for the switcher badges — what flags a
   // BACKGROUND Workspace blocked on a permission prompt (the deferred TB2 finding).
