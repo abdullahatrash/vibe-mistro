@@ -34,13 +34,21 @@ export async function gitCommit(
 ): Promise<GitCommitResult> {
   try {
     if (paths.length > 0) {
+      // A pre-staged RENAME shows in #84's status as ONE `R` row whose path is the NEW
+      // name only (the deleted source isn't a selectable row). `git reset -q` decomposes
+      // that staged rename into a `.D <orig>` + `? <new>`, so a plain `add -- <new>` would
+      // stage ONLY the add and DROP the deletion — committing both files. So FIRST collect
+      // the origins of any selected staged-renames (read before the reset destroys them)
+      // and stage BOTH halves below. (Best-effort: a failed status read yields no origins.)
+      const renameOrigins = await collectRenameOrigins(cwd, paths, run)
       // Mixed reset (keeps the working tree) so the index starts from HEAD, then stage
       // exactly the selection — any other previously-staged path drops out of the index.
       const reset = await run(['reset', '-q'], cwd)
       if (reset.code !== 0) return fail(reset)
-      // `add -- <paths>` stages modifications, untracked adds, AND deletions of the
-      // selected tracked paths (git ≥2.0 default), so a deleted selected file commits too.
-      const add = await run(['add', '--', ...paths], cwd)
+      // `add -- <paths + rename-origins>` stages modifications, untracked adds, deletions
+      // of the selected tracked paths (git ≥2.0 default), AND a selected rename's deleted
+      // source — so a deleted/renamed selected file commits whole.
+      const add = await run(['add', '--', ...paths, ...renameOrigins], cwd)
       if (add.code !== 0) return fail(add)
     } else {
       // Commit-all: stage everything (incl. untracked + deletions).
@@ -54,6 +62,43 @@ export async function gitCommit(
     // A truly unexpected throw (a runner that rejects) still degrades to a result.
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
+}
+
+/**
+ * The deleted-source paths of any SELECTED staged renames (#86 review fold). Reads
+ * `git status --porcelain=2` BEFORE the commit's reset (which would decompose the
+ * rename) and, for each `2`-entry (`<XY> <sub> <m…> <h…> <Xscore> <new>\t<orig>`)
+ * whose NEW path is in the selection, returns its `<orig>` so both halves get staged.
+ * Best-effort: a non-zero status read returns `[]` (the commit proceeds without it,
+ * degrading to the original add-the-new-only behaviour — never throws/blocks).
+ */
+async function collectRenameOrigins(cwd: string, paths: string[], run: GitRun): Promise<string[]> {
+  const selected = new Set(paths)
+  const res = await run(['-c', 'core.quotePath=false', 'status', '--porcelain=2'], cwd)
+  if (res.code !== 0) return []
+  const origins: string[] = []
+  for (const line of res.stdout.split('\n')) {
+    if (!line.startsWith('2 ')) continue // `2` = rename/copy entry
+    // The pathnames follow 9 space-delimited fields, as `<new>\t<orig>`.
+    const rest = afterFields(line, 9)
+    const tab = rest.indexOf('\t')
+    if (tab < 0) continue
+    const newPath = rest.slice(0, tab)
+    const orig = rest.slice(tab + 1)
+    if (orig && selected.has(newPath)) origins.push(orig)
+  }
+  return origins
+}
+
+/** Drop the first `n` space-delimited fields of a line, returning the remainder verbatim. */
+function afterFields(line: string, n: number): string {
+  let i = 0
+  for (let f = 0; f < n; f++) {
+    const sp = line.indexOf(' ', i)
+    if (sp < 0) return ''
+    i = sp + 1
+  }
+  return line.slice(i)
 }
 
 /**

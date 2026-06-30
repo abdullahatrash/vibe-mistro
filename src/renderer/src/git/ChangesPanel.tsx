@@ -97,16 +97,21 @@ export function ChangesPanel({
     if (!canCommit) return
     setCommitting(true)
     setCommitError(null)
-    const result = await window.api.gitCommit({ workspaceDir, message: message.trim(), paths: selectedPaths })
-    setCommitting(false)
-    if (result.ok) {
-      // The committed files drop off via the status refresh main triggers; clear the
-      // message so the next commit starts fresh. The deselection set reconciles itself
-      // as the now-committed paths vanish from the next snapshot.
-      setMessage('')
-    } else {
-      // Recoverable: surface git's actual reason inline; the user can edit + retry.
-      setCommitError(result.error)
+    try {
+      const result = await window.api.gitCommit({ workspaceDir, message: message.trim(), paths: selectedPaths })
+      if (result.ok) {
+        // The committed files drop off via the status refresh main triggers; clear the
+        // message so the next commit starts fresh. The deselection set reconciles itself
+        // as the now-committed paths vanish from the next snapshot.
+        setMessage('')
+      } else {
+        // Recoverable: surface git's actual reason inline; the user can edit + retry.
+        setCommitError(result.error)
+      }
+    } finally {
+      // Always re-enable the button — even if the IPC unexpectedly rejects, it can't
+      // stick on "Committing…".
+      setCommitting(false)
     }
   }
 

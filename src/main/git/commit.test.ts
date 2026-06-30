@@ -22,18 +22,29 @@ function fakeRun(
 }
 
 describe('gitCommit', () => {
-  it('subset: reset -q → add -- <paths> → commit -m, then {ok:true}', async () => {
+  it('subset: status (rename scan) → reset -q → add -- <paths> → commit -m, then {ok:true}', async () => {
     const seen: string[][] = []
     const result = await gitCommit('/repo', 'msg', ['a.txt', 'b.txt'], fakeRun(seen))
     expect(result).toEqual({ ok: true })
     expect(seen).toEqual([
+      ['-c', 'core.quotePath=false', 'status', '--porcelain=2'],
       ['reset', '-q'],
       ['add', '--', 'a.txt', 'b.txt'],
       ['-c', 'core.quotePath=false', 'commit', '-m', 'msg'],
     ])
   })
 
-  it('all (empty paths): add -A → commit -m (NO reset), then {ok:true}', async () => {
+  it('subset with a selected staged RENAME stages BOTH the new path and its deleted origin', async () => {
+    const seen: string[][] = []
+    // porcelain-2 `2` rename entry: 9 leading fields then `<new>\t<orig>`.
+    const porcelain = '2 R. N... 100644 100644 100644 1111111 2222222 R100 moved.txt\torig.txt\n'
+    const result = await gitCommit('/repo', 'msg', ['moved.txt'], fakeRun(seen, [{ stdout: porcelain, code: 0 }]))
+    expect(result).toEqual({ ok: true })
+    // The add stages the new name AND the rename's deleted source — not just the add half.
+    expect(seen).toContainEqual(['add', '--', 'moved.txt', 'orig.txt'])
+  })
+
+  it('all (empty paths): add -A → commit -m (NO reset / NO status scan), then {ok:true}', async () => {
     const seen: string[][] = []
     const result = await gitCommit('/repo', 'msg', [], fakeRun(seen))
     expect(result).toEqual({ ok: true })
@@ -46,7 +57,8 @@ describe('gitCommit', () => {
   it('passes a path containing spaces as a SINGLE argv element', async () => {
     const seen: string[][] = []
     await gitCommit('/repo', 'msg', ['my file.txt'], fakeRun(seen))
-    expect(seen[1]).toEqual(['add', '--', 'my file.txt'])
+    // [0]=status scan, [1]=reset, [2]=add.
+    expect(seen[2]).toEqual(['add', '--', 'my file.txt'])
   })
 
   it('failing commit → {ok:false} carrying git’s reason (from stdout)', async () => {
@@ -67,8 +79,8 @@ describe('gitCommit', () => {
       '/repo',
       'msg',
       ['a.txt'],
-      // reset ok, add ok, commit fails with a hook error on STDERR.
-      fakeRun(seen, [{ code: 0 }, { code: 0 }, { stderr: 'pre-commit hook failed', code: 1 }]),
+      // status ok (no renames), reset ok, add ok, commit fails with a hook error on STDERR.
+      fakeRun(seen, [{ code: 0 }, { code: 0 }, { code: 0 }, { stderr: 'pre-commit hook failed', code: 1 }]),
     )
     expect(result).toEqual({ ok: false, error: 'pre-commit hook failed' })
   })
@@ -79,10 +91,10 @@ describe('gitCommit', () => {
       '/repo',
       'msg',
       ['a.txt'],
-      // reset fails — never reaches add / commit.
-      fakeRun(seen, [{ stderr: 'fatal: could not reset', code: 128 }]),
+      // status ok (rename scan), then reset fails — never reaches add / commit.
+      fakeRun(seen, [{ code: 0 }, { stderr: 'fatal: could not reset', code: 128 }]),
     )
     expect(result).toEqual({ ok: false, error: 'fatal: could not reset' })
-    expect(seen).toEqual([['reset', '-q']])
+    expect(seen).toEqual([['-c', 'core.quotePath=false', 'status', '--porcelain=2'], ['reset', '-q']])
   })
 })
