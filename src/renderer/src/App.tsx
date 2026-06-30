@@ -934,6 +934,28 @@ function SignInPanel({
     dispatch({ type: 'sign-in-cancel' })
   }
 
+  // #79: OBSERVE current auth state without re-running the browser flow — recovers
+  // an out-of-band `vibe` CLI sign-in, the blocking fallback, or a delegated
+  // `complete` whose result we lost. Bumps the attempt generation so any stale
+  // in-flight sign-in result is dropped (same guard as `signIn`/`cancel`).
+  async function checkStatus(): Promise<void> {
+    const attempt = ++attemptRef.current
+    dispatch({ type: 'check-start' })
+    const result = await window.api.checkAuthStatus({ agentId })
+    if (attempt !== attemptRef.current) return // superseded — drop the stale result
+    if (result.ok && result.authState === 'signed-in') {
+      dispatch({ type: 'sign-in-success' })
+      onSignedIn() // continue to a connected Thread on the same agent
+    } else if (result.ok) {
+      dispatch({
+        type: 'sign-in-error',
+        message: 'Still not signed in. Finish signing in (in your browser or via `vibe`), then check again.',
+      })
+    } else {
+      dispatch({ type: 'sign-in-error', message: result.error })
+    }
+  }
+
   if (view.kind === 'signed-in') {
     return (
       <div className="signin signin--done">
@@ -962,8 +984,17 @@ function SignInPanel({
     )
   }
 
+  if (view.kind === 'checking') {
+    return (
+      <div className="signin">
+        <div className="signin__title">Checking sign-in status…</div>
+      </div>
+    )
+  }
+
   // sign-in or error: both render the (clickable) Sign-in button so the error
-  // state stays recoverable.
+  // state stays recoverable, plus a re-check that OBSERVES auth state without
+  // re-running the browser flow (#79) — for an out-of-band `vibe` CLI sign-in.
   return (
     <div className="signin">
       <div className="signin__title">Not signed in to Mistral Vibe</div>
@@ -973,6 +1004,9 @@ function SignInPanel({
       {view.kind === 'error' && <div className="signin__error">{view.message}</div>}
       <button className="btn signin__action" onClick={() => void signIn(view.methodId)}>
         {view.kind === 'error' ? `Retry — ${view.methodName}` : view.methodName}
+      </button>
+      <button className="btn btn--ghost signin__action" onClick={() => void checkStatus()}>
+        Already signed in? Check status
       </button>
     </div>
   )

@@ -225,6 +225,63 @@ describe('WorkspaceAgent — auth detection (_auth/status)', () => {
   })
 })
 
+describe('WorkspaceAgent.refreshAuthStatus() (#79)', () => {
+  it('re-queries _auth/status and folds signed_out → signed-in (observe, no re-sign-in)', async () => {
+    const fake = makeCapturingFake()
+    const agent = await startWithAuthStatus(fake, {
+      authenticated: false,
+      authState: 'signed_out',
+      signOutAvailable: false,
+    })
+    expect(agent.authState).toBe('not-signed-in')
+
+    // Simulates an out-of-band `vibe` CLI sign-in: a fresh _auth/status now reports
+    // authenticated, with no `authenticate` round-trip in between.
+    const refreshed = agent.refreshAuthStatus()
+    await new Promise((r) => setTimeout(r, 0))
+    const statusReqs = sent(fake).filter((m) => m.method === '_auth/status')
+    // No sign-in flow was driven — only the start-time detect + this re-check.
+    expect(statusReqs.length).toBe(2)
+    expect(sent(fake).some((m) => m.method === 'authenticate')).toBe(false)
+    fake.feed(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: statusReqs[statusReqs.length - 1]?.id,
+        result: { authenticated: true, authState: 'os_keyring', signOutAvailable: true },
+      }) + '\n',
+    )
+
+    expect(await refreshed).toBe('signed-in')
+    expect(agent.authState).toBe('signed-in')
+    expect(agent.signOutAvailable).toBe(true)
+  })
+
+  it('rejects (no wedge) when the re-query fails', async () => {
+    const fake = makeCapturingFake()
+    const agent = await startWithAuthStatus(fake, {
+      authenticated: false,
+      authState: 'signed_out',
+      signOutAvailable: false,
+    })
+
+    const refreshed = agent.refreshAuthStatus()
+    const settled = refreshed.catch((e: unknown) => e)
+    await new Promise((r) => setTimeout(r, 0))
+    const statusReqs = sent(fake).filter((m) => m.method === '_auth/status')
+    fake.feed(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: statusReqs[statusReqs.length - 1]?.id,
+        error: { code: -32603, message: 'internal' },
+      }) + '\n',
+    )
+
+    await settled
+    // The failed re-check leaves the cached state untouched — never wedged.
+    expect(agent.authState).toBe('not-signed-in')
+  })
+})
+
 // --- TB3: browser-auth-delegated sign-in ------------------------------------
 
 interface InitParams {

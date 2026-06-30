@@ -88,6 +88,33 @@ describe('authReducer', () => {
     expect(state.phase).toBe('signed-in')
     expect(state.error).toBe('Sign-out failed.')
   })
+
+  it('re-checks: not-signed-in → checking on check-start (#79)', () => {
+    const state = authReducer(initialAuthViewState([DELEGATED]), { type: 'check-start' })
+    expect(state.phase).toBe('checking')
+    expect(state.error).toBeNull()
+  })
+
+  it('re-check that finds signed-in folds to signed-in (#79)', () => {
+    let state = authReducer(initialAuthViewState([DELEGATED]), { type: 'check-start' })
+    state = authReducer(state, { type: 'sign-in-success' })
+    expect(state.phase).toBe('signed-in')
+  })
+
+  it('re-check that is still not signed in stays recoverable (error w/ note, #79)', () => {
+    let state = authReducer(initialAuthViewState([DELEGATED]), { type: 'check-start' })
+    state = authReducer(state, { type: 'sign-in-error', message: 'Still not signed in.' })
+    expect(state.phase).toBe('error')
+    expect(state.error).toBe('Still not signed in.')
+    // check-start adds no state fields — the credential-shape guard still holds.
+    expect(Object.keys(state).sort()).toEqual([
+      'authMethods',
+      'error',
+      'identity',
+      'phase',
+      'signOutAvailable',
+    ])
+  })
 })
 
 describe('selectAuthView', () => {
@@ -124,6 +151,11 @@ describe('selectAuthView', () => {
   it('shows a signing-in view during the browser step', () => {
     const state = authReducer(initialAuthViewState([DELEGATED]), { type: 'sign-in-start' })
     expect(selectAuthView(state)).toEqual({ kind: 'signing-in' })
+  })
+
+  it('shows a checking view during the re-check step (#79)', () => {
+    const state = authReducer(initialAuthViewState([DELEGATED]), { type: 'check-start' })
+    expect(selectAuthView(state)).toEqual({ kind: 'checking' })
   })
 
   it('shows a signed-in indicator with the sign-out control gated on signOutAvailable', () => {

@@ -13,7 +13,13 @@ import { BLOCKING_AUTH_METHOD_ID, DELEGATED_AUTH_METHOD_ID, type AuthMethod } fr
  * signed in (shows the indicator + sign-out); `signing-out` is the in-flight
  * sign-out; `error` is a recoverable sign-in failure the user can retry from.
  */
-export type AuthPhase = 'not-signed-in' | 'signing-in' | 'signed-in' | 'signing-out' | 'error'
+export type AuthPhase =
+  | 'not-signed-in'
+  | 'signing-in'
+  | 'checking'
+  | 'signed-in'
+  | 'signing-out'
+  | 'error'
 
 /** Pure view state for the auth panel/indicator — folded by `authReducer`. */
 export interface AuthViewState {
@@ -50,6 +56,7 @@ export type AuthAction =
   | { type: 'sign-in-success' }
   | { type: 'sign-in-error'; message: string }
   | { type: 'sign-in-cancel' }
+  | { type: 'check-start' }
   | { type: 'sign-out-start' }
   | { type: 'sign-out-success' }
   | { type: 'sign-out-error'; message: string }
@@ -62,6 +69,9 @@ export type AuthAction =
  * (the browser long-poll can't be aborted — see SignInPanel). `sign-out-success`
  * returns to `not-signed-in` so the same panel can sign a different account back
  * in (account switch); `sign-out-error` keeps the user signed-in (recoverable).
+ * `check-start` is the in-flight re-check (#79): from `not-signed-in`/`error` it
+ * OBSERVES auth state without re-running sign-in — resolving to `sign-in-success`
+ * (signed in) or back to `sign-in-error` (still not, recoverable, with a note).
  */
 export function authReducer(state: AuthViewState, action: AuthAction): AuthViewState {
   switch (action.type) {
@@ -73,6 +83,8 @@ export function authReducer(state: AuthViewState, action: AuthAction): AuthViewS
       return { ...state, phase: 'error', error: action.message }
     case 'sign-in-cancel':
       return { ...state, phase: 'not-signed-in', error: null }
+    case 'check-start':
+      return { ...state, phase: 'checking', error: null }
     case 'sign-out-start':
       return { ...state, phase: 'signing-out', error: null }
     case 'sign-out-success':
@@ -93,6 +105,11 @@ export interface SignInView {
 /** Render the in-flight browser step (a spinner / progress, no button). */
 export interface SigningInView {
   kind: 'signing-in'
+}
+
+/** Render the in-flight re-check (`_auth/status` re-query) step (#79). */
+export interface CheckingView {
+  kind: 'checking'
 }
 
 /**
@@ -123,6 +140,7 @@ export interface SignInErrorView {
 export type AuthView =
   | SignInView
   | SigningInView
+  | CheckingView
   | SignedInView
   | SigningOutView
   | SignInErrorView
@@ -156,6 +174,8 @@ export function selectAuthView(state: AuthViewState): AuthView {
       return { kind: 'sign-in', methodId: method.id, methodName: method.name, description: method.description }
     case 'signing-in':
       return { kind: 'signing-in' }
+    case 'checking':
+      return { kind: 'checking' }
     case 'error':
       return { kind: 'error', message: state.error ?? 'Sign-in failed.', methodId: method.id, methodName: method.name }
     case 'signed-in':

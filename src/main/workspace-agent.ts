@@ -311,6 +311,22 @@ export class WorkspaceAgent extends EventEmitter {
   }
 
   /**
+   * Re-query `_auth/status` and fold it into the cached auth state + sign-out gate
+   * (#79). The renderer's "Check sign-in status" affordance calls this to OBSERVE
+   * auth state without re-running the sign-in flow — e.g. after an out-of-band
+   * `vibe` CLI sign-in, the blocking fallback, or a delegated `complete` whose
+   * result we lost. Resolves the fresh `AuthState`; rejects (no wedge — relies on
+   * `AcpClient.rejectAllPending` on exit/stop) on an RPC failure or early exit.
+   */
+  async refreshAuthStatus(): Promise<AuthState> {
+    if (!this.initialized) {
+      throw new WorkspaceAgentError('Agent is not initialized; call start() first.')
+    }
+    const status = await this.client.request('_auth/status')
+    return this.applyAuthStatus(status)
+  }
+
+  /**
    * Drive Vibe's browser sign-in, dispatching on the advertised `methodId`
    * (acp-capture §8). Two captured modes (ADR-0003):
    *   - `browser-auth-delegated` (primary): the client-driven two-step
