@@ -11,6 +11,8 @@ import {
   type RespondPermissionArgs,
   type SendPromptArgs,
   type SendPromptResult,
+  type CheckAuthStatusArgs,
+  type CheckAuthStatusResult,
   type SetThreadConfigArgs,
   type SetThreadConfigResult,
   type SignInArgs,
@@ -735,6 +737,27 @@ function registerIpc(): void {
       return { ok: false, error }
     }
   })
+
+  ipcMain.handle(
+    IPC.checkAuthStatus,
+    async (_event, args: CheckAuthStatusArgs): Promise<CheckAuthStatusResult> => {
+      // Re-query `_auth/status` to OBSERVE current auth state without re-running
+      // the sign-in flow (#79) — recovers an out-of-band `vibe` CLI sign-in, the
+      // blocking fallback, or a delegated `complete` whose result we lost. A quick
+      // round-trip, so a `touch` suffices (no eviction protection like signIn).
+      const agent = pool.get(args.agentId)
+      if (!agent) return { ok: false, error: `No active agent for id ${args.agentId}.` }
+      pool.touch(args.agentId)
+      try {
+        const authState = await agent.refreshAuthStatus()
+        return { ok: true, authState, signOutAvailable: agent.signOutAvailable }
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err)
+        console.error(`[vibe-mistro:auth] status check failed (agent ${args.agentId}): ${error}`)
+        return { ok: false, error }
+      }
+    },
+  )
 
   ipcMain.handle(IPC.stopAgent, (_event, agentId: string) => {
     // Explicit close: the pool stops the child and drops it; the Workspace

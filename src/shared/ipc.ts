@@ -22,6 +22,8 @@ export const IPC = {
   signIn: 'auth:sign-in',
   /** Sign out the agent's session (`_auth/signOut`). */
   signOut: 'auth:sign-out',
+  /** Re-query an agent's `_auth/status` without re-running sign-in (#79). */
+  checkAuthStatus: 'auth:check-status',
   /** Main -> renderer: streamed ACP event tagged by the owning agent. */
   acpEvent: 'acp:event',
   /**
@@ -382,6 +384,24 @@ export interface SignOutArgs {
  */
 export type SignOutResult =
   | { ok: true; authState: AuthState; authMethods: AuthMethod[] }
+  | { ok: false; error: string }
+
+/**
+ * Re-query an agent's current `_auth/status` without re-running sign-in (#79).
+ * Lets the panel OBSERVE auth state — picking up an out-of-band `vibe` CLI
+ * sign-in, the blocking fallback, or a delegated `complete` whose result we lost.
+ */
+export interface CheckAuthStatusArgs {
+  /** Id of the Workspace agent to re-query. */
+  agentId: string
+}
+
+/**
+ * Result of a re-check. `signOutAvailable` seeds the signed-in indicator when the
+ * check lands signed-in (mirrors `SignOutResult`'s gate). Failures are recoverable.
+ */
+export type CheckAuthStatusResult =
+  | { ok: true; authState: AuthState; signOutAvailable: boolean }
   | { ok: false; error: string }
 
 /** Which agent control a `setThreadConfig` change targets (#66). */

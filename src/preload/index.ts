@@ -10,6 +10,8 @@ import {
   type OpenThreadArgs,
   type SendPromptArgs,
   type SendPromptResult,
+  type CheckAuthStatusArgs,
+  type CheckAuthStatusResult,
   type SetThreadConfigArgs,
   type SetThreadConfigResult,
   type SignInArgs,
@@ -36,6 +38,8 @@ const api = {
     ipcRenderer.invoke(IPC.respondPermission, args),
   signIn: (args: SignInArgs): Promise<SignInResult> => ipcRenderer.invoke(IPC.signIn, args),
   signOut: (args: SignOutArgs): Promise<SignOutResult> => ipcRenderer.invoke(IPC.signOut, args),
+  checkAuthStatus: (args: CheckAuthStatusArgs): Promise<CheckAuthStatusResult> =>
+    ipcRenderer.invoke(IPC.checkAuthStatus, args),
   stopAgent: (agentId: string): Promise<void> => ipcRenderer.invoke(IPC.stopAgent, agentId),
   setActiveAgent: (agentId: string | null): Promise<void> =>
     ipcRenderer.invoke(IPC.setActiveAgent, agentId),
