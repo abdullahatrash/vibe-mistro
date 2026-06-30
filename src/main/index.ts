@@ -20,6 +20,7 @@ import {
   type StartThreadResult,
   type ThreadConnection,
   type ThreadInfo,
+  type ThreadStatusEvent,
 } from '../shared/ipc'
 import { detectVibe } from './vibe-detect'
 import { getShellEnv } from './shell-env'
@@ -41,6 +42,7 @@ import { isProtected } from './agent-protection'
 import { ensureBoundSession, resolveContinueTarget } from './thread-binding'
 import { createThreadDraft } from './persistence/drafts'
 import { deleteThread } from './persistence/delete-thread'
+import { permissionRequestIdOf, ThreadStatusTracker, type ThreadStatusChange } from './thread-status'
 
 /**
  * The warm-agent pool (ADR-0006 decision 3, TB2 #47): one `vibe-acp` agent per
@@ -104,6 +106,33 @@ let activeAgentId: string | null = null
  */
 const inFlightTurns = new Map<string, number>()
 
+/**
+ * Per-THREAD live status, the single source of truth for the sidebar's
+ * `streaming` / `needsAttention` indicators (#53). Distinct from `inFlightTurns`
+ * (which is per-AGENT, for eviction protection): this keys off our durable
+ * `threadId` so a NON-active live Thread's turn or blocked permission surfaces in
+ * the sidebar even though only the active Thread's `Conversation` is mounted. Fed
+ * from the lifecycle signals main already sees — turn begin/end, a forwarded
+ * `session/request_permission` out/answered, agent evict — and pushed to the
+ * renderer (`emitThreadStatus`) on every change.
+ */
+const threadStatus = new ThreadStatusTracker()
+
+/**
+ * Push one or more per-Thread status changes to every renderer (#53). A null /
+ * empty change (the flag didn't actually flip) is a no-op, so main never floods the
+ * channel; the renderer also folds an unchanged status to the same map reference.
+ */
+function emitThreadStatus(changes: ThreadStatusChange | ThreadStatusChange[] | null): void {
+  if (!changes) return
+  const list = Array.isArray(changes) ? changes : [changes]
+  if (list.length === 0) return
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.webContents.isDestroyed()) continue
+    for (const change of list) win.webContents.send(IPC.threadStatus, change satisfies ThreadStatusEvent)
+  }
+}
+
 function beginTurn(agentId: string): void {
   inFlightTurns.set(agentId, (inFlightTurns.get(agentId) ?? 0) + 1)
 }
@@ -157,6 +186,10 @@ function notifyAgentsEvicted(agentIds: string[]): void {
   for (const agentId of agentIds) {
     inFlightTurns.delete(agentId)
     transcriptThreads.delete(agentId)
+    // Clear any streaming/pending status the evicted agent's Threads held (#53) so
+    // a torn-down agent leaves no stale indicator behind (protection keeps a busy
+    // agent from idle/cap eviction, but an explicit stop/dispose can still land).
+    emitThreadStatus(threadStatus.evictAgent(agentId))
   }
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.webContents.isDestroyed()) win.webContents.send(IPC.agentEvicted, { agentIds })
@@ -399,7 +432,17 @@ function threadFailureResult(agentId: string, agent: WorkspaceAgent, err: unknow
  */
 function wireAgentEvents(agentId: string, agent: WorkspaceAgent, sender: WebContents): void {
   agent.on('event', (payload: unknown) => {
-    teeTranscript(threadIdForTee(agentId, sessionIdFromPayload(payload)), acpEventEntry(payload))
+    const sessionId = sessionIdFromPayload(payload)
+    teeTranscript(threadIdForTee(agentId, sessionId), acpEventEntry(payload))
+    // A forwarded `session/request_permission` blocks the turn until the renderer
+    // answers — surface it as the Thread's `needsAttention` (#53). Resolve its
+    // Thread the same way the tee does (the event's OWN sessionId via the store,
+    // falling back to the agent's active Thread); skip when unattributable.
+    const requestId = permissionRequestIdOf(payload)
+    if (requestId !== null) {
+      const threadId = threadIdForTee(agentId, sessionId)
+      if (threadId) emitThreadStatus(threadStatus.addPermission(agentId, threadId, requestId))
+    }
     if (!sender.isDestroyed()) {
       sender.send(IPC.acpEvent, { agentId, payload })
     }
@@ -594,10 +637,19 @@ function registerIpc(): void {
       // the turn settles (success, error, or a thrown bind), so the flag can't leak.
       pool.touch(args.agentId)
       beginTurn(args.agentId)
+      // Per-THREAD streaming (#53): mark THIS Thread streaming for the whole turn
+      // (covering the bind), so a non-active live Thread's in-flight turn shows in
+      // the sidebar. Cleared in the same `finally` as the per-agent protection.
+      emitThreadStatus(threadStatus.beginTurn(args.agentId, args.threadId))
       try {
         return await runPromptTurn(event.sender, agent, args)
       } finally {
         endTurn(args.agentId)
+        // Clear streaming, then sweep any permission left unanswered when the turn
+        // settled abnormally (error / -32000) — the agent isn't blocking anymore,
+        // so no `needsAttention` should linger past the turn (#53).
+        emitThreadStatus(threadStatus.endTurn(args.agentId, args.threadId))
+        emitThreadStatus(threadStatus.clearThread(args.threadId))
       }
     },
   )
@@ -613,6 +665,8 @@ function registerIpc(): void {
     const agent = pool.get(args.agentId)
     pool.touch(args.agentId) // answering a permission is activity (TB5 #50)
     teeTranscript(args.threadId, resolvePermissionEntry(args.requestId, args.optionId))
+    // Clear the Thread's `needsAttention` (#53): the blocking permission is answered.
+    emitThreadStatus(threadStatus.resolvePermission(args.agentId, args.requestId))
     agent?.respondPermission(args.requestId, args.optionId)
   })
 
@@ -663,6 +717,11 @@ function registerIpc(): void {
     // Explicit close: the pool stops the child and drops it; the Workspace
     // re-warms transparently on its next select (metadata + JSONL survive).
     pool.dispose(agentId)
+    // Drop the agent's per-Thread status + transcript bridge so an explicit stop
+    // leaves no stale indicator (#53) — mirrors the eviction cleanup.
+    transcriptThreads.delete(agentId)
+    inFlightTurns.delete(agentId)
+    emitThreadStatus(threadStatus.evictAgent(agentId))
   })
 
   ipcMain.handle(IPC.createDraft, async (_event, args: CreateDraftArgs): Promise<CreateDraftResult> => {

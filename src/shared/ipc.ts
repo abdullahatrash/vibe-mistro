@@ -44,6 +44,14 @@ export const IPC = {
    * is bound before its own events arrive — it never infers its session from one.
    */
   threadBound: 'thread:bound',
+  /**
+   * Main -> renderer: a Thread's live status (`streaming` / `needsAttention`)
+   * changed (#53). Main owns the authoritative turn + permission lifecycle, so it
+   * pushes the two sidebar flags PER Thread — covering NON-active live Threads the
+   * renderer doesn't mount. The single source of truth for the sidebar indicators;
+   * the renderer folds these into its status registry (same-ref fold, no loop).
+   */
+  threadStatus: 'thread:status',
   /** List persisted Workspaces + their Threads for the cold launch list (ADR-0005). */
   listMetadata: 'metadata:list',
   /** Read a Thread's persisted JSONL transcript for a process-free reopen (TB3). */
@@ -210,6 +218,22 @@ export interface ThreadBoundEvent {
    * one-time "agent context reset" notice; absent/false on a normal draft mint.
    */
   rebound?: boolean
+}
+
+/**
+ * Main -> renderer per-Thread status update (#53): the `streaming` (a `sendPrompt`
+ * turn in flight) and `needsAttention` (a forwarded `session/request_permission`
+ * unanswered) flags for one Thread, keyed by our durable `threadId`. Main tracks
+ * these authoritatively (it sees every turn-start/-end and permission-request/
+ * -answer) and pushes a change whenever a flag flips — so the unified sidebar shows
+ * the indicators for ALL live Threads, active or not. The renderer folds it into
+ * its status registry; a terminal transition (turn end, answer, evict) pushes the
+ * flag back to false, so nothing lingers stale.
+ */
+export interface ThreadStatusEvent {
+  threadId: string
+  streaming: boolean
+  needsAttention: boolean
 }
 
 /** Token usage for a completed turn (`session/prompt` response). */

@@ -18,6 +18,7 @@ import {
   type StartThreadArgs,
   type StartThreadResult,
   type ThreadBoundEvent,
+  type ThreadStatusEvent,
   type VibeDetectResult,
 } from '../shared/ipc'
 
@@ -53,6 +54,11 @@ const api = {
     const handler = (_e: unknown, payload: ThreadBoundEvent): void => listener(payload)
     ipcRenderer.on(IPC.threadBound, handler)
     return () => ipcRenderer.removeListener(IPC.threadBound, handler)
+  },
+  onThreadStatus: (listener: (event: ThreadStatusEvent) => void): (() => void) => {
+    const handler = (_e: unknown, payload: ThreadStatusEvent): void => listener(payload)
+    ipcRenderer.on(IPC.threadStatus, handler)
+    return () => ipcRenderer.removeListener(IPC.threadStatus, handler)
   },
   onAgentEvicted: (listener: (event: AgentEvictedEvent) => void): (() => void) => {
     const handler = (_e: unknown, payload: AgentEvictedEvent): void => listener(payload)
