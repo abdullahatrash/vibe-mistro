@@ -101,14 +101,65 @@ body {
   max-width: 420px;
 }
 
+/* First-run / empty outlet (#49): Open-project nudge, or the env status surfaced
+   prominently when the toolchain's missing. */
+.empty {
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.empty__title {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+/* A centered, cohesive inline connecting panel for the selected Workspace (#49) —
+   replaces the bare hint so it reads as an intentional outlet state. */
+.connecting {
+  max-width: 420px;
+  margin: 56px auto 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+}
+
+.connecting__title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.connecting__message {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .shell__top {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
+/* Open-project + the settings gear share the top row; Open-project takes the slack. */
+.shell__top-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .shell__open {
-  align-self: flex-start;
+  flex: 1;
+}
+
+.shell__settings {
+  flex: none;
+  padding: 6px 10px;
+  line-height: 1;
 }
 
 .env {
@@ -521,6 +572,12 @@ body {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.4;
+}
+
+/* Retry affordance on the inline error panel (#49) — re-triggers the connect. */
+.alert__action {
+  align-self: flex-start;
+  margin-top: 4px;
 }
 
 .signin {

@@ -37,6 +37,7 @@ import {
   type ThreadStatusMap,
 } from './conversation/thread-status'
 import { Shell, type WorkspaceFlags } from './shell/Shell'
+import { firstRunState, type FirstRunState } from './shell/first-run'
 import { findSelectedThread, initialNavState, navReducer } from './shell/nav-reducer'
 import { deriveUnifiedThreads, workspaceFlags, type UnifiedThreadRow } from './shell/unified-threads'
 
@@ -64,6 +65,10 @@ export function App(): JSX.Element {
   const [detect, setDetect] = useState<VibeDetectResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [opening, setOpening] = useState(false)
+  // Whether the on-demand environment/settings panel is open in the sidebar. The
+  // env check is no longer a permanent top-level card (#49) — it's reachable here,
+  // and surfaced prominently in the outlet only when it matters (first-run).
+  const [showSettings, setShowSettings] = useState(false)
   // Navigation (decision 2): WHICH Workspace/Thread the user is looking at —
   // lifted here so the connect flow (Open project, Continue, sign-in) can drive it.
   const [nav, navDispatch] = useReducer(navReducer, initialNavState)
@@ -301,13 +306,29 @@ export function App(): JSX.Element {
     connDispatch({ type: 'set', workspaceId, state: { status: 'not-signed-in', agentId, workspaceDir, authMethods } })
   }
 
-  // The sidebar's pinned top: the environment check + the Open-project control.
+  // The sidebar's pinned top: the Open-project control + a settings affordance that
+  // reveals the environment status on demand (#49). The env card is no longer pinned
+  // permanently — it lives behind this gear once everything's installed, and is
+  // surfaced prominently in the outlet's first-run state when something's missing.
   const sidebarTop = (
     <div className="shell__top">
-      <Environment detect={detect} loading={loading} onRecheck={() => void runDetect()} />
-      <button className="btn shell__open" onClick={() => void openProject()} disabled={opening}>
-        {opening ? 'Connecting…' : 'Open project'}
-      </button>
+      <div className="shell__top-row">
+        <button className="btn shell__open" onClick={() => void openProject()} disabled={opening}>
+          {opening ? 'Connecting…' : 'Open project'}
+        </button>
+        <button
+          className="btn btn--ghost shell__settings"
+          aria-label="Environment & settings"
+          title="Environment & settings"
+          aria-expanded={showSettings}
+          onClick={() => setShowSettings((s) => !s)}
+        >
+          ⚙
+        </button>
+      </div>
+      {showSettings && (
+        <Environment detect={detect} loading={loading} onRecheck={() => void runDetect()} />
+      )}
     </div>
   )
 
@@ -425,11 +446,24 @@ export function App(): JSX.Element {
         : selected.status !== 'idle'
           ? renderTransientOutlet(selected, {
               continueToThread: (agentId) => void continueToThread(selectedWs ?? '', agentId),
+              onRetry: () => selectedWs && void connectWorkspace(selectedWs),
             })
-          : renderColdOutlet(recents, nav, {
-              onClose: () => navDispatch({ type: 'clear' }),
-              onContinue: (thread) => void continueColdThread(thread),
-            })}
+          : renderColdOutlet(
+              recents,
+              nav,
+              {
+                onClose: () => navDispatch({ type: 'clear' }),
+                onContinue: (thread) => void continueColdThread(thread),
+              },
+              <EmptyState
+                state={firstRunState(detect, recents)}
+                detect={detect}
+                loading={loading}
+                opening={opening}
+                onRecheck={() => void runDetect()}
+                onOpenProject={() => void openProject()}
+              />,
+            )}
     </>
   )
 
@@ -523,15 +557,19 @@ function agentIdOfResult(result: StartThreadResult): string | null {
  */
 function renderTransientOutlet(
   connect: ConnectState,
-  handlers: { continueToThread: (agentId: string) => void },
+  handlers: { continueToThread: (agentId: string) => void; onRetry: () => void },
 ): ReactNode {
   switch (connect.status) {
     case 'connecting':
       return (
-        <p className="hint">
-          Launching <code>vibe-acp</code> in <code>{connect.workspaceDir}</code> and running the ACP
-          handshake…
-        </p>
+        <div className="connecting">
+          <span className="dot dot--pending" aria-hidden />
+          <div className="connecting__title">Connecting…</div>
+          <div className="connecting__message">
+            Launching <code>vibe-acp</code> in <code>{connect.workspaceDir}</code> and running the
+            ACP handshake.
+          </div>
+        </div>
       )
     case 'not-signed-in':
       return (
@@ -548,6 +586,9 @@ function renderTransientOutlet(
           <div className="alert__title">Couldn’t connect</div>
           <div className="alert__message">{connect.message}</div>
           {connect.hint && <div className="alert__hint">{connect.hint}</div>}
+          <button className="btn alert__action" onClick={handlers.onRetry}>
+            Retry
+          </button>
         </div>
       )
     default:
@@ -565,17 +606,10 @@ function renderColdOutlet(
   recents: ListMetadataResult,
   nav: { selectedWorkspaceId: string | null; selectedThreadId: string | null },
   handlers: { onClose: () => void; onContinue: (thread: ThreadMeta) => void },
+  empty: ReactNode,
 ): ReactNode {
   const selectedThread = findSelectedThread(recents, nav)
-  if (!selectedThread) {
-    return (
-      <div className="shell__empty">
-        <p className="hint">
-          Select a thread from the sidebar to view it, or open a project to start a live agent.
-        </p>
-      </div>
-    )
-  }
+  if (!selectedThread) return empty
   return (
     <ColdThread
       key={selectedThread.id}
@@ -583,6 +617,60 @@ function renderColdOutlet(
       onClose={handlers.onClose}
       onContinue={() => handlers.onContinue(selectedThread)}
     />
+  )
+}
+
+/**
+ * The first-run / empty outlet shown when nothing is connected or selected (#49).
+ * Driven by the pure `firstRunState`: when `vibe` / `vibe-acp` is missing the env
+ * status is surfaced PROMINENTLY here (the user can't proceed until it's installed);
+ * when the toolchain's present but no Workspaces exist it nudges Open-project; once
+ * everything's set up it's a neutral placeholder (env tucked behind settings).
+ */
+function EmptyState({
+  state,
+  detect,
+  loading,
+  opening,
+  onRecheck,
+  onOpenProject,
+}: {
+  state: FirstRunState
+  detect: VibeDetectResult | null
+  loading: boolean
+  opening: boolean
+  onRecheck: () => void
+  onOpenProject: () => void
+}): JSX.Element {
+  if (state === 'needs-install') {
+    return (
+      <div className="empty empty--install">
+        <div className="empty__title">Install Mistral Vibe to get started</div>
+        <p className="hint">
+          vibe-mistro drives the <code>vibe-acp</code> ACP server. Install the Mistral Vibe CLI and{' '}
+          <code>vibe-acp</code>, then re-check below.
+        </p>
+        <Environment detect={detect} loading={loading} onRecheck={onRecheck} />
+      </div>
+    )
+  }
+  if (state === 'no-workspaces') {
+    return (
+      <div className="empty">
+        <div className="empty__title">No workspaces yet</div>
+        <p className="hint">Open a project to spawn its agent and start a thread.</p>
+        <button className="btn" onClick={onOpenProject} disabled={opening}>
+          {opening ? 'Connecting…' : 'Open project'}
+        </button>
+      </div>
+    )
+  }
+  return (
+    <div className="shell__empty">
+      <p className="hint">
+        Select a thread from the sidebar to view it, or open a project to start a live agent.
+      </p>
+    </div>
   )
 }
 
