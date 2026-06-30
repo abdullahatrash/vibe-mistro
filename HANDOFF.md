@@ -3,7 +3,7 @@
 > You are picking up an in-flight project. Read this top to bottom once, then keep it open.
 > It tells you **what this is**, **how we work**, **what exists**, **what's next**, and **where the
 > authoritative information lives** (in-repo docs + three local reference repos). Last updated
-> 2026-06-30, `main` @ `f0c07a5`, **337 tests**, **1 open issue (#72)**.
+> 2026-06-30, `main` @ `b1daadd`, **359 tests**, **0 open issues** (backlog empty — pick a roadmap item).
 
 ---
 
@@ -16,10 +16,12 @@
   GitHub: `https://github.com/abdullahatrash/vibe-mistro` (owner `abdullahatrash`, host `github.com`).
 - **State:** MVP works end-to-end (open project → prompt → streamed reasoning → tool calls with approval).
   Merged: Auth, fs-hardening, the **persistence epic**, the **UI/layout-shell epic**, **composer drafts**
-  (#60), the **t3code UI stack** (#61: Tailwind v4 + base-ui + lucide + react-markdown), and the
-  **Agent controls** feature (Mode/Model/Reasoning-effort picker, per-Thread — #65 spike → #66 → #70).
-  Backlog is **one issue: #72** (re-assert a non-default agent-control selection after `session/load`).
-  Then a deferred roadmap (see §6).
+  (#60), the **t3code UI stack** (#61: Tailwind v4 + base-ui + lucide + react-markdown), the full
+  **Agent controls** feature (Mode/Model/Reasoning-effort — #65 spike → #66 picker → #70 per-Thread →
+  #72 re-assert-after-load → #75 draft pre-select; **live-verified** in `bun run dev`), and **sign-in
+  resilience** (#78 preserve failure reason + RPC code + stderr log; #80 a "Check status" re-query
+  recovery — static-verified, live re-check smoke still pending). **Backlog is empty.** Pick a roadmap
+  item (see §6).
 - **How we work:** PRD → tracer-bullet issues → **per-slice agent team** (implement → independent
   verify → adversarial review → fold fixes → **user merges**). TDD, vertical slices. Details in §3.
 
@@ -214,42 +216,53 @@ renders assistant + reasoning text as GFM markdown — **no `rehype-raw`** (untr
 markdown's default escaping + `defaultUrlTransform` neutralize `javascript:` hrefs). Plain CSS coexists;
 per-area migration is follow-up.
 
-**Agent controls (#65 spike → #66 → #70)** — per-Thread **Mode / Model / Reasoning effort** picker in
-the composer (CONTEXT.md "Agent controls"; ADR-0007). The #65 spike captured the change methods live
-(acp-capture §10): Mode `session/set_mode {sessionId,modeId}`, Model `session/set_model {sessionId,
-modelId}` (⚠️ false-accepts any string — only send `availableModels` ids), Reasoning effort
-`session/set_config_option {sessionId,configId,value}` (`configId`, NOT `id`). A change emits **no**
-notification → the renderer updates **optimistically** (revert on error). Mode is **not** preserved
-across `session/load` (resets to `default`). UI: `AgentControls.tsx` (base-ui menus, disabled while
-streaming / pre-session). Per-Thread config lives in `connection/workspace-threads.ts` (`config` map),
-seeded on `connect`/`bind` from each session's controls (plumbed via `ThreadAgentControls` on
-`thread:bound`); optimistic `set-config` keyed by `threadId`. Probe: `scripts/spike-config-option.ts`.
+**Agent controls (#65 spike → #66 → #70 → #72 → #75)** — per-Thread **Mode / Model / Reasoning effort**
+picker in the composer (CONTEXT.md "Agent controls"; ADR-0007). **Live-verified** in `bun run dev`
+(draft pre-select, the pre-pick running the first turn in `plan`, per-Thread isolation). The #65 spike
+captured the change methods live (acp-capture §10): Mode `session/set_mode {sessionId,modeId}`, Model
+`session/set_model {sessionId,modelId}` (⚠️ false-accepts any string — only send `availableModels` ids),
+Reasoning effort `session/set_config_option {sessionId,configId,value}` (`configId`, NOT `id`). A change
+emits **no** notification → the renderer updates **optimistically** (revert on error). Mode is **not**
+preserved across `session/load` (resets to `default`). UI: `AgentControls.tsx` (base-ui menus, disabled
+only while a turn streams). Per-Thread state lives in `connection/workspace-threads.ts`: `config` (live
+values, seeded on `connect`/`bind` from each session's controls, plumbed via `ThreadAgentControls` on
+`thread:bound`) + `selected` (the user's confirmed picks, **survives `connect`-reset** for re-assert).
+**#72** caches a pick on IPC-success and re-asserts it after a `session/load` resume
+(`reassertAfterResume`). **#75** shows + enables the pickers on a pre-prompt DRAFT (`draftControls`
+projects the connection's option lists + defaults; a draft pick caches with NO IPC, applied on first
+bind by #72). Probe: `scripts/spike-config-option.ts`.
+
+**Sign-in resilience (#76 → #78 + #80)** — fixed the intermittent delegated-sign-in bug's diagnosability +
+recovery. **#78:** `WorkspaceAgentError` gains `code`; `toSignInError`/`toSignOutError` preserve Vibe's
+reason + JSON-RPC code (`rpcErrorParts`/`formatAuthFailure`); auth IPC handlers log `[vibe-mistro:auth]`
+to main stderr. **#80:** `WorkspaceAgent.refreshAuthStatus()` + typed IPC `auth:check-status` + an
+"Already signed in? Check status" button (`authReducer` `checking` phase) that re-queries `_auth/status`
+without re-running the browser flow — recovers an out-of-band `vibe` CLI sign-in / blocking fallback / a
+lost `complete`. Static-verified; **live re-check smoke still pending** (needs a real sign-out). Deferred:
+background auth polling.
 
 ---
 
 ## 6. What's next
 
-**Open backlog (1):**
-- **#72 — Agent controls: cache + re-assert a non-default selection after `session/load`**
-  (`ready-for-agent`, not started). The last ADR-0007 piece: #65 found Vibe resets Mode to `default` on
-  `session/load`, so a Thread that loses its session and resumes silently reverts. Cache the user's last
-  Mode/Model/Reasoning-effort **per Thread** in a store that survives BOTH agent eviction AND the
-  `connect`-reset, and on a successful resume re-assert it via the existing `thread:set-config` IPC if it
-  differs from the resumed (default) value. Narrow **within-session** edge (a cold-reopen-after-restart
-  has no cache; ADR-0007 keeps it out of the durable store). See the deferred-comment markers in
-  `App.tsx applyConnectResult` and `index.ts runPromptTurn`. → `start 72`, full team loop in §3.
+**Backlog is empty** — the Agent-controls and sign-in epics are fully shipped. The next move is a
+roadmap pick; the user chose "verify + housekeeping first" (this refresh) before a new feature.
 
-**Recommended before more features:** a **manual `bun run dev` smoke** of the Agent controls feature
-(#66 + #70 shipped with static/unit verification only — neither was driven against a live agent, since
-`vibe-acp` can't be driven headless): open a workspace, change Mode/Model/effort, start a 2nd Thread,
-confirm each shows its own values + changes don't bleed, force an error to see the optimistic revert.
+**Still-pending verification:** the **sign-in re-check (#80)** has not been smoked live (needs a real
+sign-out → "Check status" → out-of-band `vibe` CLI sign-in → "Check status" lands connected). The
+Agent-controls feature IS live-verified. Do the #80 smoke when convenient.
 
-**Deferred roadmap (no issues yet — propose as PRDs/tracer bullets when the user picks one up):**
-remaining **composer extras** (attachments/image paste, queue-vs-steer, `$`/`/`/`@` autocomplete),
-git/GitHub panel, file tree + prompt library, terminal dock (node-pty — see opencode), app updates +
-packaging (electron-updater/electron-builder — see opencode), and **per-area base-ui/Tailwind component
-migration** onto the #61 foundation (composer/sidebar/conversation/auth). Parity target:
-`docs/codexmonitor-reference.md`.
+**Deferred roadmap (no issues yet — propose as a PRD / grill-with-docs → tracer-bullet issues when the
+user picks one up; rough CodexMonitor build order):**
+- **Composer extras** — image attachments/paste, queue-vs-steer follow-ups, `$`/`/`/`@` autocomplete
+  (model picker + drafts already done).
+- **Git & GitHub panel** — diffs, stage/unstage/commit, branches, `gh` issues/PRs (shell out from main).
+- **File tree + prompt library.**
+- **Terminal dock** (node-pty — see opencode), then **settings / usage meter / in-app updates /
+  packaging** (electron-updater/electron-builder — see opencode), then remote backend (deferred).
+- **Per-area base-ui/Tailwind component migration** onto the #61 foundation (composer/sidebar/
+  conversation/auth).
+Parity target: `docs/codexmonitor-reference.md`.
 
 ---
 
@@ -278,11 +291,11 @@ user's call; don't just diverge.
 1. Read this file, then skim `docs/acp-capture.md` and the memory file `vibe-monitor-project.md`.
 2. Confirm the baseline: `cd /Users/abdullahatrash/mistral/vibe-mistro` (on `main`), run the gates
    (`export PATH=...nvm...; bun run lint && bun run typecheck && bun run build && bun run test`) →
-   expect **337 tests green**.
-3. Check the backlog: `GH_HOST=github.com gh issue list --state open` → expect **#72**
-   (the last Agent-controls piece — re-assert after `session/load`). A `bun run dev` smoke of the
-   Agent-controls feature (§6) is also recommended before more features.
-4. When the user says "start 72" (or picks a roadmap item), run the **team loop in §3** — manual
+   expect **359 tests green**.
+3. Check the backlog: `GH_HOST=github.com gh issue list --state open` → expect **empty**. The next move
+   is a roadmap pick (§6) — propose it as a grill-with-docs → PRD → tracer-bullet issues. One verification
+   debt remains: the #80 sign-in re-check hasn't been smoked live (§6).
+4. When the user picks a roadmap item (or says "start <N>"), run the **team loop in §3** — manual
    worktree (real `bun install`, NOT a node_modules symlink — §2), implementer agent, your independent
    verify, adversarial reviewer, fold (targeted `git add`, never `-A`), push, **user merges**, cleanup,
    re-run gates on `main`, update memory.
