@@ -126,9 +126,14 @@ export function App(): JSX.Element {
    * deleted Thread is the active/selected one of a CONNECTED Workspace, reselect the
    * connection's (always-live) primary Thread. The `wt remove` (drop from live-state)
    * runs ONLY when it was live; its stale status entry is cleared either way.
+   *
+   * Main re-validates streaming authoritatively and can REFUSE a delete that raced a
+   * just-started turn (`{ok:false, reason:'streaming'}`, #53); we bail and leave the
+   * row in place so the UI never drops a Thread main still hosts mid-stream.
    */
   async function deleteThread(thread: ThreadMeta): Promise<void> {
-    await window.api.deleteThread(thread.id)
+    const result = await window.api.deleteThread(thread.id)
+    if (!result.ok) return
     const wts = workspaceThreadStateFor(workspaceThreads, thread.workspaceId)
     if (wts?.live.has(thread.id)) {
       wtDispatch({ type: 'remove', workspaceId: thread.workspaceId, threadId: thread.id })
@@ -222,12 +227,30 @@ export function App(): JSX.Element {
   // live Threads (active or not, since main doesn't depend on a mounted view).
   // Fold each update into the registry; the same-ref guard means a redundant push
   // can't trigger a render, so there's no status->render->report loop.
+  //
+  // Subscribe FIRST, then pull the current statuses once (a renderer that mounts /
+  // dev-reloads mid-turn would otherwise miss an in-flight turn until the next
+  // flip). The pull only ADDS a Thread the live channel hasn't already spoken for
+  // (`threadId in prev`), so a stale snapshot can't revert a turn-end the push
+  // already delivered during the round trip.
   useEffect(() => {
-    return window.api.onThreadStatus((e) => {
+    const off = window.api.onThreadStatus((e) => {
       setStatuses((prev) =>
         setThreadStatus(prev, e.threadId, { streaming: e.streaming, needsAttention: e.needsAttention }),
       )
     })
+    void window.api.getThreadStatuses().then((list) => {
+      setStatuses((prev) =>
+        list.reduce(
+          (map, e) =>
+            e.threadId in map
+              ? map
+              : setThreadStatus(map, e.threadId, { streaming: e.streaming, needsAttention: e.needsAttention }),
+          prev,
+        ),
+      )
+    })
+    return off
   }, [])
 
   /**

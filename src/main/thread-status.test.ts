@@ -135,11 +135,61 @@ describe('ThreadStatusTracker — evictAgent (no leaks on stop/evict)', () => {
   })
 })
 
+describe('ThreadStatusTracker — statusFor (the main-side delete-streaming guard)', () => {
+  it('reports streaming for a Thread mid-turn and idle once it ends', () => {
+    // The `deleteThread` handler refuses a delete while `statusFor(id).streaming` is
+    // true (#53), so a click-race can't tear down a mid-turn session; once the turn
+    // ends the Thread is idle and deletes cleanly.
+    const t = new ThreadStatusTracker()
+    t.beginTurn('a1', 't1')
+    expect(t.statusFor('t1').streaming).toBe(true) // delete refused
+    t.endTurn('a1', 't1')
+    expect(t.statusFor('t1').streaming).toBe(false) // delete allowed
+  })
+
+  it('reports a never-touched (genuinely idle live) Thread as not streaming', () => {
+    expect(new ThreadStatusTracker().statusFor('t1').streaming).toBe(false)
+  })
+})
+
+describe('ThreadStatusTracker — snapshot (mount re-seed)', () => {
+  it('returns only the Threads with a non-default status', () => {
+    const t = new ThreadStatusTracker()
+    t.beginTurn('a1', 't1')
+    t.addPermission('a1', 't2', 7)
+    t.beginTurn('a1', 't3')
+    t.endTurn('a1', 't3') // t3 back to idle — must be omitted
+    expect(t.snapshot().sort((x, y) => x.threadId.localeCompare(y.threadId))).toEqual([
+      { threadId: 't1', streaming: true, needsAttention: false },
+      { threadId: 't2', streaming: false, needsAttention: true },
+    ])
+  })
+
+  it('is empty when nothing is in flight', () => {
+    expect(new ThreadStatusTracker().snapshot()).toEqual([])
+  })
+
+  it('reports a Thread that is BOTH streaming and pending once', () => {
+    const t = new ThreadStatusTracker()
+    t.beginTurn('a1', 't1')
+    t.addPermission('a1', 't1', 7)
+    expect(t.snapshot()).toEqual([{ threadId: 't1', streaming: true, needsAttention: true }])
+  })
+})
+
 describe('permissionRequestIdOf', () => {
   it('extracts the request id of a session/request_permission server request', () => {
     expect(
       permissionRequestIdOf({ id: 42, method: 'session/request_permission', params: { sessionId: 's1' } }),
     ).toBe(42)
+  })
+
+  it('accepts a request id of 0 (the realistic first JSON-RPC id, acp-capture §6)', () => {
+    // `0` is falsy but a valid id — the probe must key off `id !== undefined`, not
+    // truthiness, or the first permission of a session would never raise attention.
+    expect(
+      permissionRequestIdOf({ id: 0, method: 'session/request_permission', params: { sessionId: 's1' } }),
+    ).toBe(0)
   })
 
   it('returns null for a notification (no id) or any other method', () => {

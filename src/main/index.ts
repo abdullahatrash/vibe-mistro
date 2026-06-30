@@ -6,6 +6,7 @@ import {
   IPC,
   type CreateDraftArgs,
   type CreateDraftResult,
+  type DeleteThreadResult,
   type ListMetadataResult,
   type OpenThreadArgs,
   type ReadTranscriptResult,
@@ -647,7 +648,10 @@ function registerIpc(): void {
         endTurn(args.agentId)
         // Clear streaming, then sweep any permission left unanswered when the turn
         // settled abnormally (error / -32000) — the agent isn't blocking anymore,
-        // so no `needsAttention` should linger past the turn (#53).
+        // so no `needsAttention` should linger past the turn (#53). The blanket
+        // `clearThread` is safe because the renderer's single-prompt gate guarantees
+        // ONE in-flight turn per Thread, so it can't strand a concurrent turn's
+        // permission (see `ThreadStatusTracker.clearThread`).
         emitThreadStatus(threadStatus.endTurn(args.agentId, args.threadId))
         emitThreadStatus(threadStatus.clearThread(args.threadId))
       }
@@ -738,22 +742,27 @@ function registerIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.deleteThread, async (_event, threadId: string): Promise<void> => {
+  ipcMain.handle(IPC.deleteThread, async (_event, threadId: string): Promise<DeleteThreadResult> => {
     // Delete a Thread end-to-end (ADR-0005, TB6 #35): best-effort close its live
     // ACP session (if one is hosted), then remove OUR records — the metadata entry
     // and the JSONL transcript. Every step is best-effort: an absent store skips
     // the record drop, a null transcript skips the file drop, no live session
     // skips the close — never a throw, so a misclick-deleted draft can't wedge.
-    if (!metadataStore) return
+    //
+    // AUTHORITATIVE streaming guard (#53): delete is now wired into the live Thread
+    // list (an idle live Thread is deletable). Main owns `threadStatus`, so re-check
+    // it here and REFUSE a delete on a Thread whose turn is still in flight —
+    // defense-in-depth against the click-race where the renderer's async delete gate
+    // fired just as `beginTurn` streamed out. A genuinely idle live Thread holds no
+    // tracker state, so it passes and deletes cleanly via `bestEffortCloseFor` +
+    // the renderer's `wt remove`; only a mid-turn one is bounced (`reason:'streaming'`).
+    if (threadStatus.statusFor(threadId).streaming) return { ok: false, reason: 'streaming' }
+    if (!metadataStore) return { ok: true }
     // Clear any transcript-bridge entry pointing at this Thread BEFORE the
-    // orchestration, to shrink (not close) the window in which a fresh tee could
-    // re-create its JSONL. NOTE: this is a window-shrink, not a guarantee — an
-    // `appendFile` already in flight (flag 'a' recreates the file post-unlink) can
-    // still resurrect the log, and `bestEffortCloseFor` reads the bound session
-    // from the metadata snapshot (not this bridge), so clearing first is safe.
-    // Acceptable only because delete is COLD-LIST-ONLY: no live agent is streaming
-    // appends to a cold-list Thread. MUST be revisited before wiring delete into
-    // the live `ConnectedWorkspace` thread list.
+    // orchestration, to shrink the window in which a fresh tee could re-create its
+    // JSONL. With the streaming guard above no live turn is appending to a deletable
+    // Thread, so this clear plus `bestEffortCloseFor` (which reads the bound session
+    // from the metadata snapshot, not this bridge) tears the session down safely.
     for (const [agentId, bound] of transcriptThreads) {
       if (bound === threadId) transcriptThreads.delete(agentId)
     }
@@ -763,6 +772,15 @@ function registerIpc(): void {
       transcript: transcriptStore ?? { delete: () => Promise.resolve() },
       closeSession: bestEffortCloseFor(threadId),
     })
+    return { ok: true }
+  })
+
+  ipcMain.handle(IPC.getThreadStatuses, (): ThreadStatusEvent[] => {
+    // One-shot re-seed for a renderer that mounts MID-turn (#53): main pushes
+    // `thread:status` only on a change, so a fresh/reloaded window would otherwise
+    // miss an in-flight turn or pending permission until the next flip. Return the
+    // current non-default statuses; the renderer folds them into its registry.
+    return threadStatus.snapshot()
   })
 
   ipcMain.handle(IPC.listMetadata, (): ListMetadataResult => {

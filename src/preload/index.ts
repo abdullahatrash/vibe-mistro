@@ -5,6 +5,7 @@ import {
   type AgentEvictedEvent,
   type CreateDraftArgs,
   type CreateDraftResult,
+  type DeleteThreadResult,
   type ListMetadataResult,
   type ReadTranscriptResult,
   type RespondPermissionArgs,
@@ -41,8 +42,9 @@ const api = {
   listMetadata: (): Promise<ListMetadataResult> => ipcRenderer.invoke(IPC.listMetadata),
   createDraft: (args: CreateDraftArgs): Promise<CreateDraftResult> =>
     ipcRenderer.invoke(IPC.createDraft, args),
-  deleteThread: (threadId: string): Promise<void> =>
+  deleteThread: (threadId: string): Promise<DeleteThreadResult> =>
     ipcRenderer.invoke(IPC.deleteThread, threadId),
+  getThreadStatuses: (): Promise<ThreadStatusEvent[]> => ipcRenderer.invoke(IPC.getThreadStatuses),
   readTranscript: (threadId: string): Promise<ReadTranscriptResult> =>
     ipcRenderer.invoke(IPC.readTranscript, threadId),
   onAcpEvent: (listener: (event: AcpEvent) => void): (() => void) => {

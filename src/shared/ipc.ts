@@ -62,8 +62,17 @@ export const IPC = {
    * Delete a Thread (TB6): remove its metadata record + JSONL transcript, and
    * best-effort close its live ACP session if one is bound. It vanishes from the
    * next `listMetadata`. Best-effort — Vibe-side cleanup never blocks ours (ADR-0005).
+   * Re-validates per-Thread streaming in main first (#53), so a click-race can't
+   * tear down a mid-turn session — replies `{ok:false, reason:'streaming'}` then.
    */
   deleteThread: 'thread:delete',
+  /**
+   * Renderer -> main: the current NON-default per-Thread statuses (#53), pulled
+   * once on mount so a renderer that loads (or dev-reloads) MID-turn re-seeds its
+   * status registry instead of waiting for the next flip. Main only pushes on a
+   * change (`thread:status`), so without this a fresh window misses in-flight state.
+   */
+  getThreadStatuses: 'thread:statuses',
 } as const
 
 /**
@@ -290,6 +299,15 @@ export interface CreateDraftArgs {
 export type CreateDraftResult =
   | { ok: true; thread: ThreadMeta }
   | { ok: false; error: string }
+
+/**
+ * The `deleteThread` reply (#53). `ok` when the records came down (or there was
+ * nothing to delete). `{ok:false, reason:'streaming'}` when main's authoritative
+ * per-Thread status shows a turn in flight — a defense-in-depth refusal against the
+ * click-race where the renderer's (async, possibly-stale) delete gate let a delete
+ * through just as a turn began; the renderer leaves the row in place.
+ */
+export type DeleteThreadResult = { ok: true } | { ok: false; reason: 'streaming' }
 
 /** Reply to an agent `session/request_permission` with the user's choice. */
 export interface RespondPermissionArgs {
