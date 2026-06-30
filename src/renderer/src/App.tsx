@@ -2,6 +2,7 @@ import { useEffect, useReducer, useRef, useState, type JSX, type ReactNode } fro
 import type {
   AuthMethod,
   ListMetadataResult,
+  StartThreadResult,
   ThreadConnection,
   ThreadMeta,
   VibeDetectResult,
@@ -55,6 +56,10 @@ export function App(): JSX.Element {
   // Persisted Workspaces + Threads (ADR-0005), listed cold on launch from
   // metadata alone — no agent spawned, no transcript loaded.
   const [recents, setRecents] = useState<ListMetadataResult>([])
+  // Workspaces with a connect IN FLIGHT, tracked synchronously so a fast double-
+  // select can't fire two `startThread`s (the `connections` closure is stale
+  // within a render frame, so a state check alone would let both through).
+  const connectingRef = useRef<Set<string>>(new Set())
 
   async function runDetect(): Promise<void> {
     setLoading(true)
@@ -93,6 +98,9 @@ export function App(): JSX.Element {
    */
   function selectWorkspace(workspaceId: string): void {
     navDispatch({ type: 'select-workspace', workspaceId })
+    // Ignore a select while this Workspace's connect is already in flight (a fast
+    // double-click) — the ref read is synchronous, so both clicks see it.
+    if (connectingRef.current.has(workspaceId)) return
     if (shouldConnect(connections[workspaceId])) void connectWorkspace(workspaceId)
   }
 
@@ -100,15 +108,28 @@ export function App(): JSX.Element {
   async function connectWorkspace(workspaceId: string): Promise<void> {
     const workspace = recents.find((w) => w.id === workspaceId)
     if (!workspace) return
+    connectingRef.current.add(workspaceId)
     connDispatch({ type: 'set', workspaceId, state: { status: 'connecting', workspaceDir: workspace.dir } })
-    const result = await window.api.startThread({ workspaceDir: workspace.dir })
-    connDispatch({ type: 'set', workspaceId, state: routeThreadResult(result) })
-    void refreshRecents()
+    try {
+      const result = await window.api.startThread({ workspaceDir: workspace.dir })
+      connDispatch({ type: 'set', workspaceId, state: routeThreadResult(result) })
+      void refreshRecents()
+    } finally {
+      connectingRef.current.delete(workspaceId)
+    }
   }
 
   async function openProject(): Promise<void> {
     const workspaceDir = await window.api.openWorkspaceDialog()
     if (!workspaceDir) return
+    // Already warm + connected? REUSE it — just select it. Re-opening would mint a
+    // junk empty Thread on the (unchanged-agentId) ConnectedWorkspace, which won't
+    // remount to show it.
+    const warm = recents.find((w) => w.dir === workspaceDir)
+    if (warm && connections[warm.id]?.status === 'connected') {
+      navDispatch({ type: 'select-workspace', workspaceId: warm.id })
+      return
+    }
     setOpening(true)
     try {
       const result = await window.api.startThread({ workspaceDir })
@@ -118,7 +139,14 @@ export function App(): JSX.Element {
       const list = await window.api.listMetadata()
       setRecents(list)
       const ws = list.find((w) => w.dir === workspaceDir)
-      if (!ws) return // degraded (no store) — nothing to key/select
+      if (!ws) {
+        // Degraded (no store / failed list): we can't key or select this
+        // connection, so dispose the just-spawned agent rather than leak a warm
+        // connected child the renderer can never reach until quit.
+        const agentId = agentIdOfResult(result)
+        if (agentId) void window.api.stopAgent(agentId)
+        return
+      }
       connDispatch({ type: 'set', workspaceId: ws.id, state: routeThreadResult(result) })
       navDispatch({ type: 'select-workspace', workspaceId: ws.id })
     } finally {
@@ -246,6 +274,18 @@ export function App(): JSX.Element {
       />
     </div>
   )
+}
+
+/**
+ * The pool-minted `agentId` a `startThread` result carries, when any — present on
+ * a connected (`thread.agentId`) or not-signed-in (`agentId`) result, absent on a
+ * non-auth error (main already disposed that agent). Used to dispose a warm agent
+ * the renderer can't key in degraded mode (no store).
+ */
+function agentIdOfResult(result: StartThreadResult): string | null {
+  if (result.ok) return result.thread.agentId
+  if (result.kind === 'not-signed-in') return result.agentId
+  return null
 }
 
 /**

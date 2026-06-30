@@ -1096,3 +1096,42 @@ describe('WorkspaceAgent.loadThread() — resume (TB4 #33)', () => {
     expect(withoutCap.loadSessionAvailable).toBe(false)
   })
 })
+
+// --- TB2: concurrent + idempotent start() (#47) -----------------------------
+
+describe('WorkspaceAgent.start() — concurrent + idempotent (TB2 #47)', () => {
+  it('shares ONE handshake across concurrent start() calls (child spawned once, no double-start throw)', async () => {
+    const fake = makeCapturingFake()
+    let spawns = 0
+    const agent = new WorkspaceAgent({
+      workspaceDir: '/abs/workspace',
+      spawn: () => {
+        spawns++
+        return fake.child
+      },
+    })
+
+    // Two starts race BEFORE the handshake completes — the bug: the warm pool
+    // dedups the agent object, but without a shared in-flight start the second
+    // hits `AcpClient.start()`'s "already started" throw and stops the child the
+    // first is still handshaking on.
+    const a = agent.start()
+    const b = agent.start()
+
+    // Drive the SINGLE handshake: initialize (id 1) then _auth/status (id 2).
+    fake.feed(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { protocolVersion: 1 } }) + '\n')
+    await new Promise((r) => setTimeout(r, 0))
+    fake.feed(
+      JSON.stringify({ jsonrpc: '2.0', id: 2, result: { authenticated: true, authState: 'os_keyring' } }) + '\n',
+    )
+
+    await expect(Promise.all([a, b])).resolves.toEqual([undefined, undefined])
+    expect(spawns).toBe(1) // one child, not two
+    expect(sent(fake).filter((m) => m.method === 'initialize')).toHaveLength(1) // one handshake
+
+    // A post-success start() is a no-op: no second spawn, no second initialize.
+    await agent.start()
+    expect(spawns).toBe(1)
+    expect(sent(fake).filter((m) => m.method === 'initialize')).toHaveLength(1)
+  })
+})
