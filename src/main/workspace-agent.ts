@@ -129,6 +129,16 @@ export class WorkspaceAgent extends EventEmitter {
    * the replay would DOUBLE the conversation. Cleared when the load settles.
    */
   private readonly loadingSessions = new Set<string>()
+  /**
+   * The in-flight `start()` handshake, memoized so concurrent callers share ONE
+   * (TB2 #47): the warm pool dedups the agent OBJECT, but two `startThread`s for
+   * the same Workspace before the first handshake completes would otherwise both
+   * run start() — and the second would hit `AcpClient.start()`'s "already started"
+   * throw, disposing the child the first is still handshaking on. Null until a
+   * start begins and again once it settles; on success `initialized` makes later
+   * calls no-op, on failure clearing it lets a retry re-attempt from scratch.
+   */
+  private startPromise: Promise<void> | null = null
 
   constructor(options: WorkspaceAgentOptions) {
     super()
@@ -160,10 +170,25 @@ export class WorkspaceAgent extends EventEmitter {
    * Spawn vibe-acp and complete `initialize`. The `initialize` response is the
    * readiness signal; start is raced against an early process error/exit so a
    * failed spawn rejects instead of hanging.
+   *
+   * Concurrency-safe (TB2 #47): an already-initialized agent no-ops, and
+   * overlapping callers SHARE one in-flight handshake (`startPromise`) so the
+   * child is spawned exactly once — never a second `AcpClient.start()` racing the
+   * first. The memo clears when the handshake settles (success keeps the agent
+   * initialized; a failure lets a later call retry).
    */
-  async start(): Promise<void> {
-    if (this.initialized) return
+  start(): Promise<void> {
+    if (this.initialized) return Promise.resolve()
+    if (!this.startPromise) {
+      this.startPromise = this.runStart().finally(() => {
+        this.startPromise = null
+      })
+    }
+    return this.startPromise
+  }
 
+  /** The actual handshake — run at most once concurrently via `start()`'s memo. */
+  private async runStart(): Promise<void> {
     let onError!: (err: Error) => void
     let onExit!: (info: { code: number | null; signal: NodeJS.Signals | null }) => void
 
