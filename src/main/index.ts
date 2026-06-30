@@ -19,6 +19,7 @@ import {
   type SignOutResult,
   type StartThreadArgs,
   type StartThreadResult,
+  type ThreadAgentControls,
   type ThreadConnection,
   type ThreadInfo,
   type ThreadStatusEvent,
@@ -40,7 +41,7 @@ import {
 import { WorkspaceAgent, WorkspaceAgentError } from './workspace-agent'
 import { AgentPool } from './agent-pool'
 import { isProtected } from './agent-protection'
-import { ensureBoundSession, resolveContinueTarget } from './thread-binding'
+import { controlsOf, ensureBoundSession, resolveContinueTarget } from './thread-binding'
 import { deleteThread } from './persistence/delete-thread'
 import { permissionRequestIdOf, ThreadStatusTracker, type ThreadStatusChange } from './thread-status'
 
@@ -314,7 +315,7 @@ async function recordThread(agentId: string, workspaceDir: string, thread: Threa
 async function bindThreadSession(
   agent: WorkspaceAgent,
   args: SendPromptArgs,
-): Promise<{ sessionId: string; minted: boolean; rebound: boolean }> {
+): Promise<{ sessionId: string; minted: boolean; rebound: boolean; controls: ThreadAgentControls | null }> {
   // Point the bridge at the Thread being prompted, so a session-less lifecycle
   // event tees to the ACTIVE Thread when several share an agent — refreshed every
   // prompt (last-write-wins, and only the active Thread prompts at a time).
@@ -327,13 +328,15 @@ async function bindThreadSession(
       workspaceId: args.workspaceId,
       sessionId: args.sessionId,
     })
-    return { sessionId: bound.sessionId, minted: bound.minted, rebound: bound.rebound }
+    return { sessionId: bound.sessionId, minted: bound.minted, rebound: bound.rebound, controls: bound.controls }
   }
+  // Degraded (no store): a reused session brings no fresh result (null controls);
+  // a freshly opened one carries its `session/new` controls (#70).
   if (args.sessionId && agent.hasSession(args.sessionId)) {
-    return { sessionId: args.sessionId, minted: false, rebound: false }
+    return { sessionId: args.sessionId, minted: false, rebound: false, controls: null }
   }
   const thread = await agent.openThread()
-  return { sessionId: thread.sessionId, minted: true, rebound: false }
+  return { sessionId: thread.sessionId, minted: true, rebound: false, controls: controlsOf(thread) }
 }
 
 /**
@@ -473,15 +476,25 @@ async function runPromptTurn(
     const bound = await bindThreadSession(agent, args)
     sessionId = bound.sessionId
     rebound = bound.rebound
-    // Tell the renderer its draft is now bound, the INSTANT `session/new`
-    // returns and BEFORE `agent.prompt` streams any event below (same
-    // webContents, so ordered ahead of those `acp:event`s). This binds the
-    // draft's live view to its OWN session up front, so it never infers a
+    // Tell the renderer this Thread is now bound, the INSTANT `session/new` /
+    // `session/load` returns and BEFORE `agent.prompt` streams any event below
+    // (same webContents, so ordered ahead of those `acp:event`s). This binds the
+    // Thread's live view to its OWN session up front, so it never infers a
     // session from an arbitrary (possibly sibling) event. `rebound` (TB4 #33)
     // carries a NEW session for a reopened Thread whose resume failed — the
     // renderer rebinds its live view to it AND renders the "context reset" notice.
-    if (bound.minted && !sender.isDestroyed()) {
-      sender.send(IPC.threadBound, { threadId: args.threadId, sessionId, rebound })
+    //
+    // We emit whenever the bind produced a fresh result with `controls` (#70) — a
+    // mint, a re-bind, OR a successful resume — so the Thread's picker sources its
+    // OWN Mode/Model/effort from THIS session (the #66 single-Thread limitation this
+    // removes). A plain reuse of an already-hosted session brings null controls and
+    // no re-emit (the renderer keeps what it holds). NOTE (deferred follow-up): we
+    // hand the renderer the session's REPORTED controls only; caching a user's prior
+    // non-default selection and re-asserting it after a `session/load` resume
+    // (ADR-0007) is a separate slice — today a reopened Thread shows its resumed
+    // (default) config, not the choice it last carried.
+    if (bound.controls && !sender.isDestroyed()) {
+      sender.send(IPC.threadBound, { threadId: args.threadId, sessionId, rebound, controls: bound.controls })
     }
   } catch (err) {
     if (err instanceof WorkspaceAgentError && err.authState === 'not-signed-in') {

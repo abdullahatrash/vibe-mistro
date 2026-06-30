@@ -1,6 +1,15 @@
-import type { ThreadInfo } from '../shared/ipc'
+import type { ThreadAgentControls, ThreadInfo } from '../shared/ipc'
 import { WorkspaceAgentError } from './workspace-agent'
 import type { ThreadRecord } from './persistence/metadata-store'
+
+/**
+ * Project a `session/new` / `session/load` `ThreadInfo` onto its agent-controls
+ * bundle (#70) — the per-Thread Mode/Model/Reasoning-effort the renderer sources
+ * its picker from. Each axis stays null when the agent advertises none.
+ */
+export function controlsOf(thread: ThreadInfo): ThreadAgentControls {
+  return { modes: thread.modes, models: thread.models, reasoningEffort: thread.reasoningEffort }
+}
 
 /**
  * The minimal agent surface for binding: open a new ACP session (`session/new`).
@@ -86,6 +95,13 @@ export interface BoundSession {
    * and re-emits `thread:bound` with the NEW sessionId; `minted` is also true.
    */
   rebound: boolean
+  /**
+   * The bound session's agent-controls (#70), so the renderer's `thread:bound`
+   * handler can seed THIS Thread's picker with its OWN Mode/Model/effort. Carried
+   * from the fresh `session/new` (mint/re-bind) or `session/load` (resume) result;
+   * null on a plain reuse of an already-hosted session (case iii — no fresh result).
+   */
+  controls: ThreadAgentControls | null
 }
 
 /**
@@ -118,16 +134,17 @@ export async function ensureBoundSession(args: {
   // (i) draft: mint a fresh session and bind it.
   if (!args.sessionId) return mintAndBind(args)
 
-  // (iii) already hosted this run: reuse with no load/new.
+  // (iii) already hosted this run: reuse with no load/new — no fresh result, so no
+  // controls to hand the renderer (it keeps whatever it already holds for this Thread).
   if (args.agent.hasSession(args.sessionId)) {
-    return { sessionId: args.sessionId, minted: false, title: null, resumed: false, rebound: false }
+    return { sessionId: args.sessionId, minted: false, title: null, resumed: false, rebound: false, controls: null }
   }
 
   // (ii) reopened: resume via session/load if advertised, else re-bind.
   if (args.agent.loadSessionAvailable) {
     try {
       const resumed = await args.agent.loadThread(args.sessionId)
-      return { sessionId: resumed.sessionId, minted: false, title: null, resumed: true, rebound: false }
+      return { sessionId: resumed.sessionId, minted: false, title: null, resumed: true, rebound: false, controls: controlsOf(resumed) }
     } catch (err) {
       // A mid-session auth expiry (-32000) isn't a resume failure — let the caller
       // route to sign-in rather than re-binding (which would just fail the same way).
@@ -152,5 +169,5 @@ async function mintAndBind(args: {
     workspaceId: args.workspaceId,
     sessionId: thread.sessionId,
   })
-  return { sessionId: thread.sessionId, minted: true, title: thread.title, resumed: false, rebound: false }
+  return { sessionId: thread.sessionId, minted: true, title: thread.title, resumed: false, rebound: false, controls: controlsOf(thread) }
 }

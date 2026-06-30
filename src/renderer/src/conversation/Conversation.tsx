@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef, useState, type JSX, type KeyboardEvent } from 'react'
 import type {
   AuthMethod,
+  ThreadAgentControls,
   ThreadConfigAxis,
   ThreadModes,
   ThreadModels,
@@ -79,8 +80,11 @@ export function Conversation({
   /** Mid-session expiry (-32000): route to in-place re-auth with these methods. */
   onAuthExpired: (authMethods: AuthMethod[]) => void
   /** The Thread's session once bound (TB5) — lifts it so a switch-away-and-back
-   *  re-seeds the bound session instead of re-minting it. */
-  onBound?: (sessionId: string) => void
+   *  re-seeds the bound session instead of re-minting it. Carries the session's
+   *  agent-controls (#70) from `thread:bound` so App seeds THIS Thread's picker;
+   *  null on the `sendPrompt`-result path (the result carries no controls — the
+   *  `thread:bound` that fired ahead of the stream already delivered them). */
+  onBound?: (sessionId: string, controls: ThreadAgentControls | null) => void
 }): JSX.Element {
   const [state, dispatch] = useReducer(conversationReducer, initialConversationState)
   // The composer's unsent text, persisted per-Thread to localStorage (#60) so it
@@ -134,7 +138,7 @@ export function Conversation({
       if (e.threadId !== thread.threadId) return
       boundRef.current = e.sessionId
       setBoundSessionId(e.sessionId)
-      onBoundRef.current?.(e.sessionId)
+      onBoundRef.current?.(e.sessionId, e.controls)
       // A re-bind (TB4 #33): the agent couldn't resume this reopened Thread, so
       // main minted a fresh session. Weave the honest "context reset" notice in
       // NOW — main emits `thread:bound` before the prompt streams, so it lands
@@ -183,7 +187,9 @@ export function Conversation({
         // already set this for a fresh draft; this also covers the no-store path.
         boundRef.current = result.sessionId
         setBoundSessionId(result.sessionId)
-        onBound?.(result.sessionId)
+        // The result carries no controls — `thread:bound` (emitted ahead of the
+        // stream) already delivered them for a fresh mint/resume; pass null here.
+        onBound?.(result.sessionId, null)
       } else if (result.kind === 'not-signed-in') {
         // Mid-session expiry: route to in-place re-auth (the agent stays alive).
         onAuthExpired(result.authMethods)
