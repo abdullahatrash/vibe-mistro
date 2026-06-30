@@ -50,9 +50,17 @@ function readMap(storage: DraftStorage | null | undefined): DraftMap {
   }
 }
 
-/** Persist the draft map best-effort: a quota/security exception is swallowed. */
+/**
+ * Persist the draft map best-effort: a quota/security exception is swallowed. When
+ * the last draft is pruned the whole key is REMOVED (not stored as `'{}'`), so an
+ * emptied store leaves no dangling blob behind.
+ */
 function writeMap(storage: DraftStorage, map: DraftMap): void {
   try {
+    if (Object.keys(map).length === 0) {
+      storage.removeItem(COMPOSER_DRAFT_STORAGE_KEY)
+      return
+    }
     storage.setItem(COMPOSER_DRAFT_STORAGE_KEY, JSON.stringify(map))
   } catch {
     // Best-effort: a full/blocked storage must never throw from a keystroke.

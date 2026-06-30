@@ -65,6 +65,20 @@ describe('prune on empty / whitespace-only', () => {
     expect(getDraft(storage, 't1')).toBe('')
     expect(JSON.parse(storage.map.get(COMPOSER_DRAFT_STORAGE_KEY) ?? '{}')).toEqual({})
   })
+
+  it('removes the whole storage key once the last draft is pruned (no dangling blob)', () => {
+    const storage = fakeStorage()
+    setDraft(storage, 't1', 'something')
+    setDraft(storage, 't1', '')
+    expect(storage.map.has(COMPOSER_DRAFT_STORAGE_KEY)).toBe(false)
+  })
+
+  it('removes the whole storage key once the last draft is cleared', () => {
+    const storage = fakeStorage()
+    setDraft(storage, 't1', 'queued')
+    clearDraft(storage, 't1')
+    expect(storage.map.has(COMPOSER_DRAFT_STORAGE_KEY)).toBe(false)
+  })
 })
 
 describe('raw text fidelity (only the prune decision trims)', () => {
