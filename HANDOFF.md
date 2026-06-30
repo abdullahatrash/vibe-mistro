@@ -3,7 +3,7 @@
 > You are picking up an in-flight project. Read this top to bottom once, then keep it open.
 > It tells you **what this is**, **how we work**, **what exists**, **what's next**, and **where the
 > authoritative information lives** (in-repo docs + three local reference repos). Last updated
-> 2026-06-30, `main` @ `b1daadd`, **359 tests**, **0 open issues** (backlog empty — pick a roadmap item).
+> 2026-06-30, `main` @ `7b4ba75`, **444 tests**, **0 open issues** (backlog empty — pick a roadmap item).
 
 ---
 
@@ -20,8 +20,9 @@
   **Agent controls** feature (Mode/Model/Reasoning-effort — #65 spike → #66 picker → #70 per-Thread →
   #72 re-assert-after-load → #75 draft pre-select; **live-verified** in `bun run dev`), and **sign-in
   resilience** (#78 preserve failure reason + RPC code + stderr log; #80 a "Check status" re-query
-  recovery — static-verified, live re-check smoke still pending). **Backlog is empty.** Pick a roadmap
-  item (see §6).
+  recovery — static-verified, live re-check smoke still pending), and the full **git/GitHub epic**
+  (ADR-0008: a Changes panel = status #84 + diff #85 + commit #86 + branches #87 + gh-PR surfacing #88;
+  #84-86 live-verified, #87-88 static+unit). **Backlog is empty.** Pick a roadmap item (see §6).
 - **How we work:** PRD → tracer-bullet issues → **per-slice agent team** (implement → independent
   verify → adversarial review → fold fixes → **user merges**). TDD, vertical slices. Details in §3.
 
@@ -241,22 +242,41 @@ without re-running the browser flow — recovers an out-of-band `vibe` CLI sign-
 lost `complete`. Static-verified; **live re-check smoke still pending** (needs a real sign-out). Deferred:
 background auth polling.
 
+**git/GitHub epic (ADR-0008; #84 → #85 → #86 → #87 → #88)** — a collapsible right **"Changes" panel**
+on the connected Workspace view. Operate on the Workspace **working tree** (NOT worktree-per-Thread —
+that's a deferred isolation epic); git runs in **main** via `child_process` (no git2/iso-git); panel
+streamed for the **active Workspace only**. Slices: **#84** streamed status (`src/main/git/status.ts`
+pure `parseGitStatus` over `--porcelain=2`+numstat; `status-stream.ts` ref-counted manager — chokidar
+watcher + cached background `git fetch`; `git:subscribe-status`/`git:status` push); **#85** working-tree
+diff via **`@pierre/diffs`** (`diff.ts` raw-patch+`diffHash`; `DiffWorkerProvider`/`DiffView` `PatchDiff`,
+stacked/split; needs `worker:{format:'es'}` in `electron.vite.config.ts`); **#86** commit (`commit.ts`
+exact-selection `reset`+`add`, stages both halves of a staged rename; per-file checkboxes; disabled while
+a turn streams); **#87** branches (`branches.ts` list/checkout/create; remote checkout via
+`git switch --track`; base-ui dropdown); **#88** gh PR surfacing (`github.ts` shells `gh`; PR chip as an
+external `<a target=_blank>`; Create-PR gated on an upstream — never pushes for you). `#84-86` are
+**live-verified**; `#87-88` static+unit only (live smoke pending). Deferred: multi-repo, PR/issue
+browser, "Ask PR", worktree-per-Thread isolation.
+
 ---
 
 ## 6. What's next
 
-**Backlog is empty** — the Agent-controls and sign-in epics are fully shipped. The next move is a
-roadmap pick; the user chose "verify + housekeeping first" (this refresh) before a new feature.
+**Backlog is empty** — the Agent-controls, sign-in, and git/GitHub epics are all fully shipped. The
+next move is a roadmap pick; the user chose "verify + housekeeping first" (this refresh) before a
+new feature.
 
-**Still-pending verification:** the **sign-in re-check (#80)** has not been smoked live (needs a real
-sign-out → "Check status" → out-of-band `vibe` CLI sign-in → "Check status" lands connected). The
-Agent-controls feature IS live-verified. Do the #80 smoke when convenient.
+**Still-pending verification:** (a) the **sign-in re-check (#80)** has not been smoked live (needs a
+real sign-out → "Check status" → out-of-band `vibe` CLI sign-in → "Check status" lands connected);
+(b) **git branches (#87)** and **gh PR surfacing (#88)** shipped static+unit-verified only — smoke
+them live (branch list/switch/create; PR chip + Create-PR gated on an existing upstream). Git
+status/diff/commit (#84-86) and Agent-controls ARE live-verified. Do these smokes when convenient.
 
 **Deferred roadmap (no issues yet — propose as a PRD / grill-with-docs → tracer-bullet issues when the
 user picks one up; rough CodexMonitor build order):**
 - **Composer extras** — image attachments/paste, queue-vs-steer follow-ups, `$`/`/`/`@` autocomplete
   (model picker + drafts already done).
-- **Git & GitHub panel** — diffs, stage/unstage/commit, branches, `gh` issues/PRs (shell out from main).
+- **Git/GitHub follow-ups** (ADR-0008 deferred-tier; v1 = status/diff/commit/branches/gh-PR-surfacing
+  shipped) — multi-repo aggregation, a full PR/issue *browser*, "Ask PR", worktree-per-Thread isolation.
 - **File tree + prompt library.**
 - **Terminal dock** (node-pty — see opencode), then **settings / usage meter / in-app updates /
   packaging** (electron-updater/electron-builder — see opencode), then remote backend (deferred).
@@ -280,6 +300,10 @@ Parity target: `docs/codexmonitor-reference.md`.
   sticky per-Thread, between-turns + forward-acting; changed via `session/set_mode`/`set_model`/
   `set_config_option`; optimistic (no change-notification); cache + re-assert after `session/load`
   (Vibe resets Mode to default on resume). Status: spike #65 resolved.
+- **0008** — git integration: operate on the Workspace **working tree** (not worktree-per-Thread); git
+  in **main** via `child_process` (`git`/`gh`); diffs via **@pierre/diffs** (data contract = raw unified
+  patch + `diffHash`); **streamed status** (debounced fs watcher + cached `git fetch`); active-Workspace
+  only; v1 ladder = status #84 → diff #85 → commit #86 → branches #87 → gh-PR surfacing #88 (shipped).
 
 If a new slice needs to revisit one of these, that's an **HITL** decision — write a new ADR and get the
 user's call; don't just diverge.
@@ -291,10 +315,10 @@ user's call; don't just diverge.
 1. Read this file, then skim `docs/acp-capture.md` and the memory file `vibe-monitor-project.md`.
 2. Confirm the baseline: `cd /Users/abdullahatrash/mistral/vibe-mistro` (on `main`), run the gates
    (`export PATH=...nvm...; bun run lint && bun run typecheck && bun run build && bun run test`) →
-   expect **359 tests green**.
+   expect **444 tests green**.
 3. Check the backlog: `GH_HOST=github.com gh issue list --state open` → expect **empty**. The next move
-   is a roadmap pick (§6) — propose it as a grill-with-docs → PRD → tracer-bullet issues. One verification
-   debt remains: the #80 sign-in re-check hasn't been smoked live (§6).
+   is a roadmap pick (§6) — propose it as a grill-with-docs → PRD → tracer-bullet issues. Verification
+   debt remains: the #80 sign-in re-check and the #87/#88 git slices haven't been smoked live (§6).
 4. When the user picks a roadmap item (or says "start <N>"), run the **team loop in §3** — manual
    worktree (real `bun install`, NOT a node_modules symlink — §2), implementer agent, your independent
    verify, adversarial reviewer, fold (targeted `git add`, never `-A`), push, **user merges**, cleanup,
