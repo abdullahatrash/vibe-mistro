@@ -1,4 +1,7 @@
-node_modules/
+# Match the dir AND a `node_modules` symlink (e.g. a worktree symlinking to the
+# main checkout) — a trailing-slash pattern alone misses the symlink and let one
+# get committed (#63), pointing at itself on checkout and breaking installs.
+node_modules
 out/
 dist/
 *.log
