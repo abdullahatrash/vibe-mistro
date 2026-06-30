@@ -25,6 +25,20 @@ export const IPC = {
   /** Main -> renderer: streamed ACP event tagged by the owning agent. */
   acpEvent: 'acp:event',
   /**
+   * Renderer -> main: the agentId of the currently SELECTED (on-screen) Workspace,
+   * or null when none is connected/selected (TB5 #50). Main protects this agent
+   * from idle/cap eviction so the Workspace the user is looking at is never
+   * evicted out from under them.
+   */
+  setActiveAgent: 'agent:set-active',
+  /**
+   * Main -> renderer: agents the pool just EVICTED (TB5 #50, idle/cap policy). The
+   * renderer drops their now-dead connections so the next select re-warms lazily
+   * (history intact from the store, no user-visible error). By contract these are
+   * never the selected/streaming Workspace, so nothing vanishes mid-use.
+   */
+  agentEvicted: 'agent:evicted',
+  /**
    * Main -> renderer: a draft's session was just minted (`session/new`) and bound
    * to its Thread (TB5). Emitted BEFORE that session streams any event, so a draft
    * is bound before its own events arrive — it never infers its session from one.
@@ -168,6 +182,17 @@ export interface AcpEvent {
   agentId: string
   /** Raw ACP / JSON-RPC payload (or a serialized child lifecycle event). */
   payload: unknown
+}
+
+/**
+ * Main -> renderer notice that the pool evicted one or more warm agents (TB5 #50):
+ * the renderer resets each agent's Workspace connection to a re-warmable state so
+ * the next select lazily re-connects. Carries the agentIds (the renderer keys its
+ * connections by Workspace but each connection holds its agentId) so it can drop
+ * exactly the dead ones.
+ */
+export interface AgentEvictedEvent {
+  agentIds: string[]
 }
 
 /**
