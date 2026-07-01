@@ -16,9 +16,13 @@ import { responseRehypePlugins } from './response-rehype'
  * SECURITY: agent output is UNTRUSTED. The `rehypePlugins` below is streamdown's own default
  * `[raw, sanitize, harden]` chain, minimally reconfigured for #168 — see `response-rehype.ts` for
  * the full rationale. Each layer:
- *  - `sanitize` (`rehype-sanitize`) is the XSS wall: it drops raw HTML tags the model emits
- *    (`<script>`, `<img onerror=…>`) and STRIPS the href off `javascript:`/`data:`/`vbscript:`
- *    links before render. `skipHtml` (still set below) is belt-and-suspenders on top of it.
+ *  - `sanitize` (`rehype-sanitize`) is THE XSS wall — the only one: it drops disallowed raw
+ *    HTML elements/attributes the model emits (`<script>`, `<img onerror=…>`, `<svg onload>`)
+ *    and STRIPS the href off `javascript:`/`data:`/`vbscript:` links before render. NB raw
+ *    HTML is NOT "skipped": `raw` parses it into real element nodes first, which makes
+ *    `skipHtml` (below) inert in this chain — it only removes raw-type nodes, which no longer
+ *    exist after `raw` runs. It's kept as a dead-man's guard (it matters again if `raw` is
+ *    ever dropped), NOT as a live protection — do not credit it in a security analysis.
  *  - `harden` (`rehype-harden`) origin-checks external link/image URLs. #168 wraps it so ONLY
  *    file-path anchors bypass it (reaching the `a` override unrewritten so `FileChip` can render);
  *    every dangerous or external href still goes through harden exactly as before.

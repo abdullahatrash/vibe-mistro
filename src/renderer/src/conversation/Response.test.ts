@@ -73,7 +73,23 @@ describe('Response — dangerous link schemes are neutralized end-to-end', () =>
   }
 })
 
-describe('Response — raw HTML stays dropped (skipHtml + sanitize)', () => {
+describe('Response — the wrapped harden still runs (#168 guard liveness)', () => {
+  // A bare extension-less relative href survives sanitize (relative hrefs are allowed) and is
+  // NOT a file path (`parseFileLink('foo')` → null, so the guard doesn't hide it) — the ONLY
+  // thing that blocks it is rehype-harden (unresolvable URL with `defaultOrigin: undefined`).
+  // If `guardFilePathAnchors` ever silently disabled harden, every other test in this file
+  // would still pass (their dangerous hrefs die in sanitize) but this one would fail with a
+  // live `<a href="foo">`. Do not delete it on a streamdown upgrade without a replacement.
+  it('still hard-blocks a relative non-file href (a harden-only block)', () => {
+    const html = render('[click](foo)')
+    expect(html).toContain('[blocked]')
+    expect(html).toContain('Blocked URL')
+    expect(html).not.toContain('href="foo"')
+    expect(html).not.toContain('data-file-chip')
+  })
+})
+
+describe('Response — raw HTML is sanitized, not skipped', () => {
   it('drops a raw <script> tag', () => {
     const html = render('Hello <script>alert(1)</script> world')
     expect(html).not.toContain('<script')
