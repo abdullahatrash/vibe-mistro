@@ -14,30 +14,77 @@ function thread(id: string, workspaceId: string): ThreadMeta {
 }
 
 describe('navReducer', () => {
-  it('starts with nothing selected', () => {
-    expect(initialNavState).toEqual({ selectedWorkspaceId: null, selectedThreadId: null })
+  it('starts with nothing selected, in the conversation view', () => {
+    expect(initialNavState).toEqual({ selectedWorkspaceId: null, selectedThreadId: null, view: 'conversation' })
   })
 
   it('select-thread pins both the Thread and its Workspace', () => {
     const next = navReducer(initialNavState, { type: 'select-thread', workspaceId: 'w1', threadId: 't1' })
-    expect(next).toEqual({ selectedWorkspaceId: 'w1', selectedThreadId: 't1' })
+    expect(next).toEqual({ selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'conversation' })
   })
 
   it('switching to a different Workspace drops the now-foreign Thread selection', () => {
-    const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't1' }
+    const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'conversation' }
     const next = navReducer(start, { type: 'select-workspace', workspaceId: 'w2' })
-    expect(next).toEqual({ selectedWorkspaceId: 'w2', selectedThreadId: null })
+    expect(next).toEqual({ selectedWorkspaceId: 'w2', selectedThreadId: null, view: 'conversation' })
   })
 
-  it('re-selecting the same Workspace is a no-op (keeps the Thread selection)', () => {
-    const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't1' }
+  it('re-selecting the same Workspace while in the conversation view is a no-op (same reference)', () => {
+    const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'conversation' }
     const next = navReducer(start, { type: 'select-workspace', workspaceId: 'w1' })
     expect(next).toBe(start) // same reference: no spurious re-render or cleared Thread
   })
 
-  it('clear resets to nothing selected', () => {
-    const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't1' }
+  it('clear resets to nothing selected in the conversation view', () => {
+    const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'settings' }
     expect(navReducer(start, { type: 'clear' })).toEqual(initialNavState)
+  })
+
+  describe('Settings view (#130)', () => {
+    it('open-settings switches to the settings view, preserving the selection', () => {
+      const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'conversation' }
+      expect(navReducer(start, { type: 'open-settings' })).toEqual({
+        selectedWorkspaceId: 'w1',
+        selectedThreadId: 't1',
+        view: 'settings',
+      })
+    })
+
+    it('open-settings works with nothing selected', () => {
+      expect(navReducer(initialNavState, { type: 'open-settings' })).toEqual({
+        selectedWorkspaceId: null,
+        selectedThreadId: null,
+        view: 'settings',
+      })
+    })
+
+    it('close-settings returns to the conversation view, PRESERVING the selection', () => {
+      const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'settings' }
+      expect(navReducer(start, { type: 'close-settings' })).toEqual({
+        selectedWorkspaceId: 'w1',
+        selectedThreadId: 't1',
+        view: 'conversation',
+      })
+    })
+
+    it('selecting a Thread while in Settings leaves Settings (resets view)', () => {
+      const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'settings' }
+      const next = navReducer(start, { type: 'select-thread', workspaceId: 'w1', threadId: 't2' })
+      expect(next).toEqual({ selectedWorkspaceId: 'w1', selectedThreadId: 't2', view: 'conversation' })
+    })
+
+    it('selecting a DIFFERENT Workspace while in Settings leaves Settings', () => {
+      const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'settings' }
+      const next = navReducer(start, { type: 'select-workspace', workspaceId: 'w2' })
+      expect(next).toEqual({ selectedWorkspaceId: 'w2', selectedThreadId: null, view: 'conversation' })
+    })
+
+    it('re-selecting the SAME Workspace while in Settings leaves Settings (keeps selection)', () => {
+      const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'settings' }
+      const next = navReducer(start, { type: 'select-workspace', workspaceId: 'w1' })
+      expect(next).toEqual({ selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'conversation' })
+      expect(next).not.toBe(start) // not a no-op here: it must exit Settings
+    })
   })
 })
 
@@ -48,21 +95,23 @@ describe('findSelectedThread (cold-outlet derivation)', () => {
   ]
 
   it('resolves the selected Thread to its cold metadata', () => {
-    const state: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't2' }
+    const state: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't2', view: 'conversation' }
     expect(findSelectedThread(workspaces, state)?.id).toBe('t2')
   })
 
   it('returns null when no Thread is selected', () => {
-    expect(findSelectedThread(workspaces, { selectedWorkspaceId: 'w1', selectedThreadId: null })).toBeNull()
+    expect(
+      findSelectedThread(workspaces, { selectedWorkspaceId: 'w1', selectedThreadId: null, view: 'conversation' }),
+    ).toBeNull()
   })
 
   it('returns null when the selected Thread no longer exists (e.g. after a delete refreshed the list)', () => {
-    const state: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 'gone' }
+    const state: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 'gone', view: 'conversation' }
     expect(findSelectedThread(workspaces, state)).toBeNull()
   })
 
   it('scopes the lookup to the selected Workspace (a Thread id under another Workspace is not matched)', () => {
-    const state: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't3' }
+    const state: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't3', view: 'conversation' }
     expect(findSelectedThread(workspaces, state)).toBeNull()
   })
 })

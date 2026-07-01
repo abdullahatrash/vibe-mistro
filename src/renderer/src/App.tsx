@@ -45,14 +45,14 @@ import {
   type ThreadStatusMap,
 } from './conversation/thread-status'
 import { clearDraft } from './conversation/composer-draft-store'
-import { ArrowLeft, ArrowRight, Maximize2, PanelLeft, PanelRight, Settings, Terminal } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Maximize2, PanelLeft, PanelRight, Terminal } from 'lucide-react'
 import { Button } from './ui/button'
 import { IconButton } from './ui/icon-button'
 import { Shell, type WorkspaceFlags } from './shell/Shell'
 import { Logo } from './shell/logo'
 import { heroHeadline } from './shell/hero-headline'
 import { firstRunState, type FirstRunState } from './shell/first-run'
-import { findSelectedThread, initialNavState, navReducer } from './shell/nav-reducer'
+import { findSelectedThread, initialNavState, navReducer, type NavState } from './shell/nav-reducer'
 import {
   getSidebarCollapsed,
   setSidebarCollapsed as setSidebarCollapsedStore,
@@ -83,10 +83,6 @@ export function App(): JSX.Element {
   const [detect, setDetect] = useState<VibeDetectResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [opening, setOpening] = useState(false)
-  // Whether the on-demand environment/settings panel is open in the sidebar. The
-  // env check is no longer a permanent top-level card (#49) — it's reachable here,
-  // and surfaced prominently in the outlet only when it matters (first-run).
-  const [showSettings, setShowSettings] = useState(false)
   // Whether the left sidebar is collapsed (#127): renderer-only UI chrome, seeded
   // from localStorage (default expanded) and persisted best-effort on toggle. It
   // never touches nav/selection/connections — the <aside> stays mounted, its width
@@ -506,29 +502,6 @@ export function App(): JSX.Element {
     connDispatch({ type: 'set', workspaceId, state: { status: 'not-signed-in', agentId, workspaceDir, authMethods } })
   }
 
-  // The sidebar's pinned top: a settings affordance that reveals the environment
-  // status on demand (#49). The Open-project control now lives in the Projects
-  // header's new-project + (#129); the env card is no longer pinned permanently — it
-  // lives behind this gear once everything's installed, and is surfaced prominently in
-  // the outlet's first-run state when something's missing.
-  const sidebarTop = (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-end gap-2">
-        <IconButton
-          aria-label="Environment & settings"
-          title="Environment & settings"
-          aria-expanded={showSettings}
-          onClick={() => setShowSettings((s) => !s)}
-        >
-          <Settings className="size-4" aria-hidden />
-        </IconButton>
-      </div>
-      {showSettings && (
-        <Environment detect={detect} loading={loading} onRecheck={() => void runDetect()} />
-      )}
-    </div>
-  )
-
   const connectedIds = connectedWorkspaceIds(connections)
   const selectedWs = nav.selectedWorkspaceId
   const selected = selectedConnection(connections, selectedWs)
@@ -659,20 +632,33 @@ export function App(): JSX.Element {
   // longer depend on that: main pushes per-Thread `streaming`/`needsAttention` for
   // ALL live Threads (#53), so a NON-active live sibling's in-flight turn or blocked
   // permission surfaces in the sidebar (and its delete gate) without a mounted view.
+  // The on-demand Settings page (#130): a top-level outlet view, routed by the nav
+  // reducer (`nav.view === 'settings'`), that hosts the env/CLI detection status the
+  // sidebar gear used to toggle (reusing the same `Environment` component + `detect`).
+  // It swaps the conversation/cold/empty outlet WITHOUT unmounting the connected
+  // Workspaces — they stay mounted-but-hidden so a background turn keeps streaming, and
+  // closing Settings (or picking a project/thread) returns to exactly the same view.
+  const inSettings = nav.view === 'settings'
   const outlet = (
     <>
       {connectedIds.map((wid) => {
         const conn = connections[wid]
         if (conn.status !== 'connected') return null
         return (
-          <div key={wid} hidden={wid !== selectedWs}>
-            {renderConnected(conn.thread, wid === selectedWs, wsFlags[wid]?.streaming ?? false)}
+          <div key={wid} hidden={inSettings || wid !== selectedWs}>
+            {renderConnected(conn.thread, !inSettings && wid === selectedWs, wsFlags[wid]?.streaming ?? false)}
           </div>
         )
       })}
-      {selected.status === 'connected'
-        ? null // rendered (visible) in the keep-mounted map above
-        : selected.status !== 'idle'
+      {inSettings ? (
+        <SettingsView
+          detect={detect}
+          loading={loading}
+          onRecheck={() => void runDetect()}
+          onClose={() => navDispatch({ type: 'close-settings' })}
+        />
+      ) : selected.status === 'connected' ? null : ( // connected: rendered (visible) in the keep-mounted map above
+        selected.status !== 'idle'
           ? renderTransientOutlet(selected, {
               continueToThread: (agentId) => void continueToThread(selectedWs ?? '', agentId),
               onRetry: () => selectedWs && void connectWorkspace(selectedWs),
@@ -693,7 +679,8 @@ export function App(): JSX.Element {
                 onRecheck={() => void runDetect()}
                 onOpenProject={() => void openProject()}
               />,
-            )}
+            )
+      )}
     </>
   )
 
@@ -750,7 +737,6 @@ export function App(): JSX.Element {
       <Shell
         collapsed={sidebarCollapsed}
         workspaces={recents}
-        sidebarTop={sidebarTop}
         nav={nav}
         workspaceFlags={wsFlags}
         rows={rows}
@@ -764,6 +750,7 @@ export function App(): JSX.Element {
         onNewThreadInWorkspace={newThreadInWorkspace}
         onDeleteThread={deleteThread}
         onSetThreadFlags={setThreadFlags}
+        onOpenSettings={() => navDispatch({ type: 'open-settings' })}
       />
     </div>
   )
@@ -889,7 +876,7 @@ function renderTransientOutlet(
  */
 function renderColdOutlet(
   recents: ListMetadataResult,
-  nav: { selectedWorkspaceId: string | null; selectedThreadId: string | null },
+  nav: NavState,
   handlers: { onClose: () => void; onContinue: (thread: ThreadMeta) => void },
   empty: ReactNode,
 ): ReactNode {
@@ -969,6 +956,41 @@ function EmptyState({
       <p className="hint">
         Select a thread from the sidebar to view it, or open a project to start a live agent.
       </p>
+    </div>
+  )
+}
+
+/**
+ * The Settings page (#130): an on-demand, nav-routed outlet view that replaces the
+ * old sidebar gear. A titled panel with a back/close affordance (`onClose` dispatches
+ * `close-settings`, so you can leave even with nothing selected) hosting the existing
+ * `Environment` env/CLI status. Future settings land here. This is an ADDITIONAL place
+ * to check the toolchain — NOT a replacement for the first-run `EmptyState`, which still
+ * surfaces a missing toolchain prominently in the outlet when nothing's installed.
+ */
+function SettingsView({
+  detect,
+  loading,
+  onRecheck,
+  onClose,
+}: {
+  detect: VibeDetectResult | null
+  loading: boolean
+  onRecheck: () => void
+  onClose: () => void
+}): JSX.Element {
+  return (
+    <div className="mx-auto flex w-full max-w-[560px] flex-col gap-5">
+      <div className="flex items-center gap-2">
+        <IconButton aria-label="Back" title="Back" onClick={onClose}>
+          <ArrowLeft className="size-4" aria-hidden />
+        </IconButton>
+        <h1 className="text-[19px] font-semibold tracking-tight text-text-strong">Settings</h1>
+      </div>
+      <section className="flex flex-col gap-2">
+        <h2 className="text-[13px] font-semibold text-faint">Environment</h2>
+        <Environment detect={detect} loading={loading} onRecheck={onRecheck} />
+      </section>
     </div>
   )
 }
