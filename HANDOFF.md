@@ -3,11 +3,12 @@
 > You are picking up an in-flight project. Read this top to bottom once, then keep it open.
 > It tells you **what this is**, **how we work**, **what exists**, **what's next**, and **where the
 > authoritative information lives** (in-repo docs + the local reference repos in §4). Last updated
-> 2026-07-01, `main` @ `0197b5a`, **569 tests**. The **design-system epic (PRD #109) is ~half DONE**: its
-> **foundation (#110 tokens, #111 primitives, #112 streamdown spike, #113 shell) and the entire SIDEBAR
-> cluster (#127–#134, #138) shipped**; **REMAINING = #114/#115/#116 conversation · #117 composer · #118 auth ·
-> #119 git panel** (see §6). **`docs/NEXT-SESSION.md` is the copy-paste kickoff for the next session.**
-> Values live in ADR-0010 + `docs/design-tokens.md` + `docs/design-system-components.md` + `docs/streamdown-spike.md`.
+> 2026-07-01, `main` @ `3485094` or later, **675 tests**. 🎉 **The design-system epic (PRD #109) is COMPLETE** —
+> ALL slices shipped (#110 tokens · #111 primitives · #112 streamdown spike · #113 shell · #114–#116 conversation
+> core · #117 composer · #118 auth · #119 git panel, plus the sidebar cluster #127–#134/#138). Every UI area now
+> runs on tokens + primitives. **There is NO active epic — the next one is the user's call** (see §6 for the
+> roadmap + a small open follow-up backlog). `docs/NEXT-SESSION.md` is the copy-paste kickoff. Values live in
+> ADR-0010..0012 + `docs/design-tokens.md` + `docs/design-system-components.md` + `docs/streamdown-spike.md`.
 > `$`/`@` autocomplete stays paused.
 
 ---
