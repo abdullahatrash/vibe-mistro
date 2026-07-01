@@ -12,6 +12,7 @@ import {
   PinOff,
   Plus,
   Search,
+  Settings,
   SquarePen,
   Trash2,
 } from 'lucide-react'
@@ -74,7 +75,6 @@ const NO_STATUSES = {} as const
 export function Shell({
   collapsed,
   workspaces,
-  sidebarTop,
   nav,
   workspaceFlags,
   rows,
@@ -88,13 +88,12 @@ export function Shell({
   onNewThreadInWorkspace,
   onDeleteThread,
   onSetThreadFlags,
+  onOpenSettings,
 }: {
   /** Whether the left sidebar is collapsed (#127) — animate its width to 0 (still mounted). */
   collapsed: boolean
   /** Persisted Workspaces (cold metadata) for the switcher rows + display names. */
   workspaces: ListMetadataResult
-  /** App-owned controls pinned above the list (environment status; the gear). */
-  sidebarTop: ReactNode
   /** The current navigation selection (controlled by App). */
   nav: NavState
   /** Per-Workspace rolled-up live status, keyed by Workspace id (switcher badges). */
@@ -121,6 +120,8 @@ export function Shell({
   onDeleteThread: (thread: ThreadMeta) => Promise<void>
   /** Pin/archive a Thread (#132/#133) — a safe metadata toggle on any row. */
   onSetThreadFlags: SetThreadFlags
+  /** Open the routed Settings page (#130) — from the account chip's menu. */
+  onOpenSettings: () => void
 }): JSX.Element {
   return (
     <div className="flex min-h-0 flex-1">
@@ -141,7 +142,6 @@ export function Shell({
       >
         <div className="flex h-full w-[338px] flex-none flex-col gap-3 overflow-y-auto p-3">
           <SidebarHeader />
-          {sidebarTop}
           <PrimaryNav canCreateThread={canCreateThread} onNewThread={onNewThread} />
           <WorkspaceNav
             workspaces={workspaces}
@@ -157,7 +157,7 @@ export function Shell({
             onSetThreadFlags={onSetThreadFlags}
           />
           <div className="flex-1" />
-          <AccountChip />
+          <AccountChip onOpenSettings={onOpenSettings} />
         </div>
       </aside>
 
@@ -220,30 +220,40 @@ function PrimaryNav({
 }
 
 /**
- * The account chip pinned to the sidebar's bottom — a gradient avatar + a name +
- * a tier. STATIC placeholder chrome (#future): Vibe exposes no account identity
- * (see ADR-0003 / the SignedInBar), so these are fixed strings, not live data.
+ * The account chip pinned to the sidebar's bottom — a gradient avatar + a name + a
+ * tier, now the TRIGGER of an account dropdown (#130). The chip's chrome stays a
+ * STATIC placeholder (#future): Vibe exposes no account identity (see ADR-0003 / the
+ * SignedInBar), so the avatar/name/tier are fixed strings, not live data. The menu
+ * holds a real "Settings" item (→ the routed Settings page that now hosts the env/CLI
+ * status the sidebar gear used to toggle) plus room for future account actions.
  */
-function AccountChip(): JSX.Element {
-  // placeholder — account identity + tier (#future); no live account API exists yet.
+function AccountChip({ onOpenSettings }: { onOpenSettings: () => void }): JSX.Element {
   return (
-    <button
-      type="button"
-      className="flex items-center gap-2.5 rounded-[9px] px-2 py-2 text-left outline-none transition-colors hover:bg-accent/10"
-    >
-      <span
-        aria-hidden
-        className="flex size-8 shrink-0 items-center justify-center rounded-md text-sm font-semibold text-white"
-        style={{ backgroundImage: 'var(--accent-grad-avatar)' }}
-      >
-        V
-      </span>
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-[14px] font-semibold text-text-strong">Your account</span>
-        <span className="truncate text-[12px] text-faint">Mistral Vibe</span>
-      </span>
-      <ChevronDown className="size-4 shrink-0 text-muted" aria-hidden />
-    </button>
+    <Menu>
+      <MenuTrigger className="flex items-center gap-2.5 rounded-[9px] px-2 py-2 text-left outline-none transition-colors hover:bg-accent/10 focus-visible:bg-accent/10 data-[popup-open]:bg-accent/10">
+        {/* placeholder — account identity + tier (#future); no live account API exists yet. */}
+        <span
+          aria-hidden
+          className="flex size-8 shrink-0 items-center justify-center rounded-md text-sm font-semibold text-white"
+          style={{ backgroundImage: 'var(--accent-grad-avatar)' }}
+        >
+          V
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-[14px] font-semibold text-text-strong">Your account</span>
+          <span className="truncate text-[12px] text-faint">Mistral Vibe</span>
+        </span>
+        <ChevronDown className="size-4 shrink-0 text-muted" aria-hidden />
+      </MenuTrigger>
+      <MenuContent align="start" className="min-w-[200px]">
+        <MenuItem onClick={onOpenSettings}>
+          <Settings className="size-3.5" aria-hidden />
+          Settings
+        </MenuItem>
+        {/* room for future account actions (profile, sign-out, tier) — #future;
+            no live account API exists yet (ADR-0003). */}
+      </MenuContent>
+    </Menu>
   )
 }
 
