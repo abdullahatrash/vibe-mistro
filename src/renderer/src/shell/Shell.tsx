@@ -55,7 +55,7 @@ const NO_STATUSES = {} as const
  *
  * TB3 (#48) collapses the two competing Thread lists into ONE unified list per
  * Workspace; the SELECTED Workspace expands to its unified rows (cold + live merged),
- * each row showing a live/history badge, a streaming indicator, a needs-attention
+ * each row showing a live/idle dot, a streaming indicator, a needs-attention
  * badge, and an inline (safe) delete. Selection is the nav reducer's alone.
  */
 export function Shell({
@@ -517,7 +517,7 @@ function ProjectRow({
 }
 
 /**
- * One unified Thread row: its label, a live (●) vs `history` badge, a streaming
+ * One unified Thread row: its label, a live (green) vs idle (grey) dot, a streaming
  * indicator and a needs-attention badge driven by the status registry, a relative
  * timestamp, and a kebab actions menu (base-ui) holding Delete — shown only when
  * `deletable`. Clicking the row selects it → the outlet routes live `Conversation`
@@ -555,7 +555,6 @@ function NavThread({
         {row.streaming && (
           <Spinner className="size-3.5 text-accent-text" aria-label="Streaming" />
         )}
-        {!row.live && <Badge variant="accent">history</Badge>}
         {row.needsAttention && (
           <Badge variant="destructive" title="Awaiting your response">
             !
