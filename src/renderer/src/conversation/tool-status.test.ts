@@ -31,4 +31,34 @@ describe('describeToolStatus', () => {
     expect(describeToolStatus(undefined)).toEqual({ state: 'pending', glyph: 'spinner' })
     expect(describeToolStatus('')).toEqual({ state: 'pending', glyph: 'spinner' })
   })
+
+  // #164 — a non-terminal status is SETTLED once the turn stops streaming: without
+  // this the row spins forever if ACP omits a terminal `tool_call_update`.
+  describe('settled context (streaming flag)', () => {
+    it('keeps the spinner for non-terminal statuses while streaming', () => {
+      expect(describeToolStatus('pending', true)).toEqual({ state: 'pending', glyph: 'spinner' })
+      expect(describeToolStatus('in_progress', true)).toEqual({ state: 'running', glyph: 'spinner' })
+      expect(describeToolStatus('weird-status', true)).toEqual({ state: 'pending', glyph: 'spinner' })
+      expect(describeToolStatus(null, true)).toEqual({ state: 'pending', glyph: 'spinner' })
+    })
+
+    it('settles non-terminal statuses to a static dot once not streaming', () => {
+      expect(describeToolStatus('pending', false)).toEqual({ state: 'settled', glyph: 'dot' })
+      expect(describeToolStatus('in_progress', false)).toEqual({ state: 'settled', glyph: 'dot' })
+    })
+
+    it('settles unknown/missing statuses to a static dot once not streaming', () => {
+      expect(describeToolStatus('weird-status', false)).toEqual({ state: 'settled', glyph: 'dot' })
+      expect(describeToolStatus(null, false)).toEqual({ state: 'settled', glyph: 'dot' })
+      expect(describeToolStatus(undefined, false)).toEqual({ state: 'settled', glyph: 'dot' })
+      expect(describeToolStatus('', false)).toEqual({ state: 'settled', glyph: 'dot' })
+    })
+
+    it('leaves terminal statuses unaffected by the streaming flag', () => {
+      expect(describeToolStatus('completed', false)).toEqual({ state: 'done', glyph: 'check' })
+      expect(describeToolStatus('completed', true)).toEqual({ state: 'done', glyph: 'check' })
+      expect(describeToolStatus('failed', false)).toEqual({ state: 'failed', glyph: 'x' })
+      expect(describeToolStatus('failed', true)).toEqual({ state: 'failed', glyph: 'x' })
+    })
+  })
 })

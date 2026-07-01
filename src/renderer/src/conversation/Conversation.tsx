@@ -22,6 +22,7 @@ import {
   Brain,
   Check,
   ChevronDown,
+  Circle,
   Copy,
   Eye,
   Globe,
@@ -862,7 +863,7 @@ export function Item({
     case 'assistant':
       return <AssistantRow item={item} streaming={streaming} />
     case 'tool':
-      return <ToolRow item={item} />
+      return <ToolRow item={item} streaming={streaming} />
     case 'permission':
       return <PermissionRow item={item} onPermission={onPermission} />
     case 'error':
@@ -1036,7 +1037,8 @@ function ToolKindIcon({ name, className }: { name: ToolIconName; className?: str
 }
 
 /** The right-hand status glyph (pure `tool-status.ts` → lucide): spinner while live,
- *  a muted check when completed, a destructive X on failure. */
+ *  a muted check when completed, a destructive X on failure, a neutral static dot
+ *  when a non-terminal status settled after the turn ended (#164). */
 function ToolStatusGlyph({ glyph }: { glyph: ToolStatusGlyph }): JSX.Element {
   switch (glyph) {
     case 'check':
@@ -1045,6 +1047,8 @@ function ToolStatusGlyph({ glyph }: { glyph: ToolStatusGlyph }): JSX.Element {
       return <X className="size-4 text-bad" aria-hidden />
     case 'spinner':
       return <Loader2 className="size-4 animate-spin text-muted" aria-hidden />
+    case 'dot':
+      return <Circle className="size-2 fill-muted text-muted opacity-60" aria-hidden />
   }
 }
 
@@ -1070,13 +1074,15 @@ function toolPreview(item: ToolItem, heading: string): string | null {
   return raw.trim().toLowerCase() === heading.trim().toLowerCase() ? null : raw
 }
 
-function ToolRow({ item }: { item: ToolItem }): JSX.Element {
+function ToolRow({ item, streaming }: { item: ToolItem; streaming: boolean }): JSX.Element {
   // Tool call (#115, adapted from t3code SimpleWorkEntryRow): a compact row —
   // leading tone-icon (kind→lucide) + heading + dimmed preview + a rotating chevron
   // (only when there's detail) + a right status glyph (ACP status→display). Clicking
   // an expandable row toggles an indented `<pre>` of the raw input/output/content.
+  // `streaming` (#164) settles a non-terminal status to a static dot once this
+  // Thread's turn ends, so a missing terminal `tool_call_update` doesn't spin forever.
   const [expanded, setExpanded] = useState(false)
-  const status = describeToolStatus(item.status)
+  const status = describeToolStatus(item.status, streaming)
   const heading = item.title ?? item.toolKind ?? 'tool'
   const preview = toolPreview(item, heading)
   const detail = toolDetail(item)
