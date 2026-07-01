@@ -1,7 +1,8 @@
 import { useState, type JSX, type ReactNode } from 'react'
-import { Atom, ChevronDown, ChevronRight, Clock, Folder, MoreVertical, Search, SquarePen, Trash2 } from 'lucide-react'
+import { Atom, Check, ChevronDown, Clock, Folder, MoreVertical, Search, SquarePen, Trash2 } from 'lucide-react'
 import type { ListMetadataResult, ThreadMeta } from '../../../shared/ipc'
 import type { NavState } from './nav-reducer'
+import { backgroundAttention } from './background-attention'
 import { isThreadDeletable, type UnifiedThreadRow } from './unified-threads'
 import { Badge } from '../ui/badge'
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '../ui/menu'
@@ -183,12 +184,26 @@ function AccountChip(): JSX.Element {
 }
 
 /**
- * The sidebar's Projects section (= Workspaces): a collapsible header over the
- * Workspace switcher list. The SELECTED Workspace expands to its unified Thread list
- * (TB3 #48), capped to {@link THREAD_CAP} with a "Show more" toggle (renderer-only
- * state — no IPC/persistence). A non-selected Workspace shows only its name + a
- * rolled-up live status (a streaming spinner / a needs-attention badge), so a
- * background Workspace blocked on a permission prompt is visible without expanding.
+ * The sidebar's Projects section (= Workspaces): a **project-switcher dropdown**
+ * (#128) over the ACTIVE Workspace's unified Thread list — replacing #113's inline,
+ * always-expanded multi-project fold.
+ *
+ * The switcher TRIGGER shows the active Workspace (folder + name + a chevron); its
+ * dropdown (the base-ui `Menu`) lists ALL Workspaces, each with its rolled-up live
+ * status (streaming spinner / needs-attention badge) and a check on the current one.
+ * Picking one calls `onSelectWorkspace` — the EXISTING selection path (the nav
+ * reducer), unchanged; this is a presentation change only.
+ *
+ * Background-Workspace visibility (the deferred TB2 finding) is preserved TWO ways:
+ * (a) each Workspace row IN the dropdown carries its flags, and (b) a rolled-up
+ * indicator on the COLLAPSED trigger ({@link backgroundAttention}) fires when ANY
+ * non-active Workspace needs you / is streaming — so a wedged background turn is
+ * visible without opening the dropdown.
+ *
+ * Below the switcher, ONLY the active Workspace's unified Thread list (TB3 #48)
+ * renders (from `rows`, already scoped to the selection by App), capped to
+ * {@link THREAD_CAP} with a "Show more" toggle (renderer-only state — no
+ * IPC/persistence) and the selection-aware pin.
  */
 function WorkspaceNav({
   workspaces,
@@ -209,102 +224,121 @@ function WorkspaceNav({
   onSelectThread: (workspaceId: string, threadId: string) => void
   onDeleteThread: (thread: ThreadMeta) => Promise<void>
 }): JSX.Element {
-  const [collapsed, setCollapsed] = useState(false)
   const [expandedThreads, setExpandedThreads] = useState(false)
   // ONE Date.now() per render, injected into the pure formatter at each call site.
   const nowMs = Date.now()
 
+  const activeId = nav.selectedWorkspaceId
+  const activeWorkspace = workspaces.find((w) => w.id === activeId) ?? null
+  // The roll-up of every NON-active Workspace's status, for the collapsed trigger —
+  // so a background Workspace blocked on a permission is visible without opening.
+  const background = backgroundAttention(workspaceFlags, activeId)
+  // Cap the active Workspace's thread list, PINNING the selected row so opening a
+  // thread that sorts below the cap never hides its (highlighted) row (#113 review).
+  const capped = visibleRows(
+    rows,
+    THREAD_CAP,
+    expandedThreads,
+    (r) => r.thread.id === nav.selectedThreadId,
+  )
+  // What the toggle can still reveal (0 → nothing hidden → no toggle).
+  const hiddenCount = rows.length - capped.length
+  // A permission-blocked thread that sorts BELOW the cap would otherwise have no
+  // always-visible signal (the active Workspace is excluded from the trigger
+  // roll-up), so flag it on the "Show more" control (#128 review).
+  const cappedIds = new Set(capped.map((r) => r.thread.id))
+  const hiddenNeedsAttention = rows.some((r) => !cappedIds.has(r.thread.id) && r.needsAttention)
+
   return (
     <nav className="flex flex-col gap-0.5">
-      <button
-        type="button"
-        onClick={() => setCollapsed((c) => !c)}
-        aria-expanded={!collapsed}
-        className="flex items-center gap-1 px-3 py-1.5 text-[13px] font-medium text-faint outline-none"
-      >
-        {collapsed ? (
-          <ChevronRight className="size-3.5" aria-hidden />
-        ) : (
-          <ChevronDown className="size-3.5" aria-hidden />
-        )}
-        Projects
-      </button>
+      <div className="px-3 py-1.5 text-[13px] font-medium text-faint">Projects</div>
 
-      {!collapsed &&
-        (workspaces.length === 0 ? (
-          <p className="px-3 py-1 text-[13px] leading-relaxed text-muted">
-            No workspaces yet. Open a project to begin.
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-0.5">
+      {workspaces.length === 0 ? (
+        <p className="px-3 py-1 text-[13px] leading-relaxed text-muted">
+          No workspaces yet. Open a project to begin.
+        </p>
+      ) : (
+        <Menu>
+          <MenuTrigger
+            title={activeWorkspace?.dir}
+            className="flex w-full items-center gap-2.5 rounded-md px-3 py-[7px] text-left text-[15px] text-text-body outline-none transition-colors hover:bg-accent/10 focus-visible:bg-accent/10 data-[popup-open]:bg-accent/10"
+          >
+            <Folder className="size-4 shrink-0 text-muted" aria-hidden />
+            <span className="flex-1 truncate">
+              {activeWorkspace ? activeWorkspace.displayName : 'Select a project'}
+            </span>
+            {/* (b) rolled-up background status on the collapsed trigger (TB2 finding). */}
+            {background.streaming && (
+              <Spinner className="size-3.5 text-accent-text" aria-label="A background project is working" />
+            )}
+            {background.needsAttention && (
+              <Badge variant="destructive" title="A background project needs your attention">
+                needs you
+              </Badge>
+            )}
+            <ChevronDown className="size-4 shrink-0 text-muted" aria-hidden />
+          </MenuTrigger>
+          <MenuContent align="start" className="min-w-[290px]">
             {workspaces.map((w) => {
-              const isSelected = w.id === nav.selectedWorkspaceId
               const flags = workspaceFlags[w.id]
-              // Cap the list, but PIN the selected row so opening a thread that sorts
-              // below the cap never hides its (highlighted) sidebar row (#113 review).
-              const capped = isSelected
-                ? visibleRows(
-                    rows,
-                    THREAD_CAP,
-                    expandedThreads,
-                    (r) => r.thread.id === nav.selectedThreadId,
-                  )
-                : []
-              // What the toggle can still reveal (0 → nothing hidden → no toggle).
-              const hiddenCount = rows.length - capped.length
+              const isActive = w.id === activeId
               return (
-                <li key={w.id}>
-                  <NavItem
-                    active={isSelected}
-                    title={w.dir}
-                    onClick={() => onSelectWorkspace(w.id)}
-                    className="py-[7px] text-[15px]"
-                  >
-                    <Folder className="size-4" aria-hidden />
-                    <span className="flex-1 truncate">{w.displayName}</span>
-                    {flags?.streaming && (
-                      <Spinner className="size-3.5 text-accent-text" aria-label="streaming" />
-                    )}
-                    {flags?.needsAttention && (
-                      <Badge variant="destructive" title="A thread needs your attention">
-                        needs you
-                      </Badge>
-                    )}
-                  </NavItem>
-
-                  {isSelected &&
-                    (rows.length > 0 ? (
-                      <ul className="flex flex-col gap-0.5">
-                        {capped.map((row) => (
-                          <NavThread
-                            key={row.thread.id}
-                            row={row}
-                            nowMs={nowMs}
-                            selected={row.thread.id === nav.selectedThreadId}
-                            // Safe delete (TB6 / #48 / #53), decided by the pure gate: a cold
-                            // row always; the primary never; any other live row when it is idle.
-                            deletable={isThreadDeletable(row, protectedThreadId)}
-                            onOpen={() => onSelectThread(w.id, row.thread.id)}
-                            onDelete={onDeleteThread}
-                          />
-                        ))}
-                        {(expandedThreads || hiddenCount > 0) && (
-                          <button
-                            type="button"
-                            onClick={() => setExpandedThreads((e) => !e)}
-                            className="px-3 py-1 pl-[42px] text-left text-[13px] text-accent-text outline-none hover:underline"
-                          >
-                            {expandedThreads ? 'Show less' : `Show more (${hiddenCount})`}
-                          </button>
-                        )}
-                      </ul>
-                    ) : (
-                      <div className="px-3 py-1 pl-[42px] text-[13px] text-muted">No threads yet</div>
-                    ))}
-                </li>
+                <MenuItem key={w.id} onClick={() => onSelectWorkspace(w.id)} title={w.dir}>
+                  <Folder className="size-4 shrink-0" aria-hidden />
+                  <span className="flex-1 truncate">{w.displayName}</span>
+                  {/* (a) each Workspace's own flags, visible in the open dropdown. */}
+                  {flags?.streaming && <Spinner className="size-3.5" aria-label="streaming" />}
+                  {flags?.needsAttention && (
+                    <Badge variant="destructive" title="A thread needs your attention">
+                      needs you
+                    </Badge>
+                  )}
+                  {isActive && <Check className="size-4 shrink-0" aria-hidden />}
+                </MenuItem>
               )
             })}
+          </MenuContent>
+        </Menu>
+      )}
+
+      {/* Only the ACTIVE Workspace's thread list renders below the switcher; `rows` is
+          already scoped to the selection by App. Nothing selected → no list at all. */}
+      {activeWorkspace &&
+        (rows.length > 0 ? (
+          <ul className="flex flex-col gap-0.5">
+            {capped.map((row) => (
+              <NavThread
+                key={row.thread.id}
+                row={row}
+                nowMs={nowMs}
+                selected={row.thread.id === nav.selectedThreadId}
+                // Safe delete (TB6 / #48 / #53), decided by the pure gate: a cold row
+                // always; the primary never; any other live row when it is idle.
+                deletable={isThreadDeletable(row, protectedThreadId)}
+                onOpen={() => onSelectThread(activeWorkspace.id, row.thread.id)}
+                onDelete={onDeleteThread}
+              />
+            ))}
+            {(expandedThreads || hiddenCount > 0) && (
+              <button
+                type="button"
+                onClick={() => setExpandedThreads((e) => !e)}
+                className="flex items-center gap-2 px-3 py-1 pl-[42px] text-left text-[13px] text-accent-text outline-none hover:underline"
+              >
+                <span>{expandedThreads ? 'Show less' : `Show more (${hiddenCount})`}</span>
+                {!expandedThreads && hiddenNeedsAttention && (
+                  <span
+                    className="size-1.5 shrink-0 rounded-full bg-bad"
+                    role="img"
+                    aria-label="A hidden thread needs your attention"
+                    title="A hidden thread needs your attention"
+                  />
+                )}
+              </button>
+            )}
           </ul>
+        ) : (
+          <div className="px-3 py-1 pl-[42px] text-[13px] text-muted">No threads yet</div>
         ))}
     </nav>
   )
