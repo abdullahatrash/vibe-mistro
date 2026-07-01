@@ -193,7 +193,14 @@ sourcing. Verdict: no fired trigger.
 - Decision: **Option 1** — Workspace-open creates a renderer-only Draft (like the + button); defer both
   `session/new` and persistence to first prompt. Workspace metadata still persists on open; only the
   Thread defers. Captured as the **Draft Thread** term (CONTEXT.md) + **ADR-0011**.
-- ⚠️ Code fix to `selectWorkspace`/`connectWorkspace`/`startThread` is NOT yet implemented — next task.
+- ✅ Code fix IMPLEMENTED. `startThread`'s normal branch (and the post-sign-in `openThread` handler) now
+  return a `draftConnection` — mint a Thread id, no `session/new`, no `recordThread` — mirroring the
+  proven `continueConnection` session-less shape. First prompt binds + persists via `mintAndBind`. Dead
+  `recordThread` / `connectionFor` / `ThreadIds` removed. Renderer unchanged (reducers already handle a
+  draft connection via the Continue flow). Typecheck clean, 501 tests green.
+- Controls note: vibe-acp only advertises Mode/Model/effort via `session/new`, so the first draft's
+  picker is empty until first prompt — same as the existing Continue flow, not a new regression. An
+  agent-level controls cache (deferred) would populate it after any Thread runs once. See ADR-0011.
 
 **Docs touched:** `CONTEXT.md` (Thread + new Draft Thread terms), `docs/adr/0011-*.md` (new),
 `src/main/persistence/{metadata-store,transcript}.ts` (+ tests). All 501 tests green, typecheck clean.
