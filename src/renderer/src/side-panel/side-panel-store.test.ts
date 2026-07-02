@@ -14,6 +14,7 @@ import {
   openSurface,
   openWorkspaceSurface,
   readPanelMap,
+  removeWorkspacePanel,
   showPanel,
   SIDE_PANEL_STORAGE_KEY,
   subscribe,
@@ -447,5 +448,30 @@ describe('module singleton', () => {
     expect(getWorkspacePanel('ws-a').isOpen).toBe(false)
     toggleWorkspaceSurface('ws-a', 'files') // hidden → re-open
     expect(getWorkspacePanel('ws-a').isOpen).toBe(true)
+  })
+})
+
+// #193 review SHOULD-FIX: the delete-cascade for a removed Workspace (t3code removeThread
+// parity) — workspaceIds are fresh UUIDs, so without this a removed Workspace's entry
+// would sit unreachable in localStorage forever.
+describe('removeWorkspacePanel', () => {
+  afterEach(() => _resetSidePanelStore(null))
+
+  it('drops the Workspace entry entirely, including from persistence', () => {
+    const storage = fakeStorage()
+    _resetSidePanelStore(storage)
+    openWorkspaceSurface('ws-gone', 'review')
+    openWorkspaceSurface('ws-kept', 'files')
+    removeWorkspacePanel('ws-gone')
+    expect(getWorkspacePanel('ws-gone')).toBe(EMPTY_PANEL_STATE)
+    expect(getWorkspacePanel('ws-kept').activeSurfaceId).toBe('files')
+    expect(storage.store.get(SIDE_PANEL_STORAGE_KEY)).not.toContain('ws-gone')
+    expect(storage.store.get(SIDE_PANEL_STORAGE_KEY)).toContain('ws-kept')
+  })
+
+  it('is a no-op for an unknown Workspace (no write, no notify)', () => {
+    _resetSidePanelStore(null)
+    expect(() => removeWorkspacePanel('never-seen')).not.toThrow()
+    expect(getWorkspacePanel('never-seen')).toBe(EMPTY_PANEL_STATE)
   })
 })

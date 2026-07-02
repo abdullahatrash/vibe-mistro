@@ -357,6 +357,15 @@ export function closeWorkspacePanel(workspaceId: string): void {
 export function toggleWorkspacePanelVisibility(workspaceId: string): void {
   apply(workspaceId, togglePanelVisibility)
 }
+/**
+ * Delete-cascade for a REMOVED Workspace (#193 review; t3code `removeThread`): drop its
+ * panel entry entirely so `side-panel:v2` accumulates no unreachable blobs — workspaceIds
+ * are fresh UUIDs, so a removed Workspace's entry could never be read again. Called from
+ * App's remove-Workspace flow beside its other localStorage cascades.
+ */
+export function removeWorkspacePanel(workspaceId: string): void {
+  apply(workspaceId, () => EMPTY_PANEL_STATE)
+}
 
 /**
  * Bind the module store to one Workspace: a live, stable-reference `WorkspacePanelState`

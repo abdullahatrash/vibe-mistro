@@ -78,6 +78,15 @@ export function SurfacePanel({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [isActive, workspaceId])
 
+  // A BACKGROUND Workspace renders nothing (#193 review MUST-FIX): App keeps it mounted
+  // inside a `hidden` wrapper, but base-ui's Dialog PORTALS to document.body — a
+  // backgrounded Workspace's left-open Sheet would escape the wrapper and paint a modal
+  // backdrop over the active Workspace (stacking per background Workspace). The keydown
+  // effect above already no-ops when inactive, so returning null here only drops DOM —
+  // the per-Workspace panel STATE survives in the store for its next activation. (Also
+  // skips mounting a hidden inline PanelBody — needless DOM.) AFTER the hooks: hook order.
+  if (!isActive) return null
+
   // Content mounts ONLY while open: this keeps the Review Surface's git subscription
   // (gated on `isActive` inside ChangesPanel) from running behind a closed panel, so the
   // git behaviour stays frozen (#84/ADR-0008). A closed wide panel renders nothing; a

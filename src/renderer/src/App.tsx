@@ -64,7 +64,11 @@ import {
   getSidebarCollapsed,
   setSidebarCollapsed as setSidebarCollapsedStore,
 } from './shell/sidebar-collapsed-store'
-import { toggleWorkspacePanelVisibility, useWorkspacePanel } from './side-panel/side-panel-store'
+import {
+  removeWorkspacePanel,
+  toggleWorkspacePanelVisibility,
+  useWorkspacePanel,
+} from './side-panel/side-panel-store'
 import { deriveUnifiedThreads, workspaceFlags, type UnifiedThreadRow } from './shell/unified-threads'
 
 /** A stable empty live-set for Workspaces with no live-state yet (no re-alloc). */
@@ -214,6 +218,9 @@ export function App(): JSX.Element {
       setStatuses((prev) => removedThreadIds.reduce((acc, id) => clearThreadStatus(acc, id), prev))
       for (const id of removedThreadIds) clearDraft(window.localStorage, id)
     }
+    // Drop the side-panel entry too (#193): workspaceIds are fresh UUIDs, so a removed
+    // Workspace's open-tabs blob would otherwise sit unreachable in localStorage forever.
+    removeWorkspacePanel(workspaceId)
     await refreshRecents()
   }
 
