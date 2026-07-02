@@ -27,9 +27,11 @@ import {
   closeWorkspacePanel,
   closeWorkspaceSurface,
   closeWorkspaceSurfacesToRight,
+  MAX_TERMINALS_PER_WORKSPACE,
   openWorkspaceFileSurface,
   openWorkspaceSurface,
   openWorkspaceTerminalSurface,
+  terminalSurfaceCount,
   toggleWorkspaceSurface,
   useWorkspacePanel,
   type SingletonKind,
@@ -217,11 +219,13 @@ function PanelBody({
   // A close op is a VIEW op for every Surface except terminal, whose tab IS the
   // session's lifetime (ADR-0014): unmount keeps the shell (reattach later), but
   // explicitly closing the tab kills the PTY. Each close path first kills the
-  // sessions its store op is about to remove (one per Workspace this slice, so
-  // any removed terminal Surface maps to the one `terminalClose`).
+  // sessions its store op is about to remove — one `terminalClose` per removed
+  // terminal tab, addressed by its own `term-N` resource id.
   function killTerminalsAmong(removed: Surface[]): void {
-    if (removed.some((surface) => surface.kind === 'terminal')) {
-      void window.api.terminalClose({ workspaceId })
+    for (const surface of removed) {
+      if (surface.kind === 'terminal') {
+        void window.api.terminalClose({ workspaceId, terminalId: surface.resourceId })
+      }
     }
   }
   function closeSurfaceAndKill(id: string): void {
@@ -246,6 +250,9 @@ function PanelBody({
     if (target === 'terminal') openWorkspaceTerminalSurface(workspaceId)
     else if (target !== 'browser') openWorkspaceSurface(workspaceId, target)
   }
+  // At the per-Workspace terminal cap, the Terminal affordance disables (its store
+  // op no-ops anyway — this keeps the button from reading as broken).
+  const terminalAtCap = terminalSurfaceCount(panel) >= MAX_TERMINALS_PER_WORKSPACE
 
   return (
     <aside
@@ -275,7 +282,7 @@ function PanelBody({
         />
       )}
       {panel.surfaces.length === 0 ? (
-        <LauncherGrid onOpen={openCardTarget} />
+        <LauncherGrid onOpen={openCardTarget} terminalAtCap={terminalAtCap} />
       ) : (
         <>
           <SurfaceTabStrip
@@ -287,6 +294,7 @@ function PanelBody({
             onCloseToRight={closeToRightAndKill}
             onCloseAll={closeAllAndKill}
             onOpen={openCardTarget}
+            terminalAtCap={terminalAtCap}
           />
           <div className="flex min-h-0 flex-1 flex-col">
             {active?.kind === 'review' && (
@@ -311,10 +319,15 @@ function PanelBody({
               />
             )}
             {active?.kind === 'terminal' && (
-              // The Workspace's shell (ADR-0014). Keyed by the surface id so a future
-              // multi-terminal slice remounts per session; the SESSION lives in main —
+              // The Workspace's shell (ADR-0014). Keyed by the surface id so each
+              // `term-N` tab remounts its OWN view/session; the SESSION lives in main —
               // this view detaching (tab switch) leaves the shell running.
-              <TerminalSurface key={active.id} workspaceId={workspaceId} agentId={agentId} />
+              <TerminalSurface
+                key={active.id}
+                workspaceId={workspaceId}
+                terminalId={active.resourceId}
+                agentId={agentId}
+              />
             )}
             {active?.kind === 'file' && (
               // A read-only file preview tab (#189): fetches the confined `files:read` and renders
@@ -343,8 +356,12 @@ function surfaceMeta(surface: Surface): { icon: ReactNode; label: string } {
       return { icon: <Files aria-hidden />, label: 'Files' }
     case 'file':
       return { icon: <FileText aria-hidden />, label: basename(surface.relativePath) }
-    case 'terminal':
-      return { icon: <SquareTerminal aria-hidden />, label: 'Terminal' }
+    case 'terminal': {
+      // Number the tabs from the `term-N` id so siblings disambiguate: the first
+      // reads "Terminal", the rest "Terminal N".
+      const n = Number(/^term-(\d+)$/.exec(surface.resourceId)?.[1] ?? '1')
+      return { icon: <SquareTerminal aria-hidden />, label: n <= 1 ? 'Terminal' : `Terminal ${n}` }
+    }
     case 'browser':
       return { icon: <Globe aria-hidden />, label: 'Browser' }
   }
@@ -367,6 +384,7 @@ function SurfaceTabStrip({
   onCloseToRight,
   onCloseAll,
   onOpen,
+  terminalAtCap,
 }: {
   surfaces: Surface[]
   activeSurfaceId: string | null
@@ -376,6 +394,7 @@ function SurfaceTabStrip({
   onCloseToRight: (id: string) => void
   onCloseAll: () => void
   onOpen: (target: CardDef['target']) => void
+  terminalAtCap: boolean
 }): JSX.Element {
   return (
     <div
@@ -450,11 +469,13 @@ function SurfaceTabStrip({
           <Plus className="size-4" aria-hidden />
         </MenuTrigger>
         <MenuContent align="start">
-          {CARDS.map((card) => (
+          {CARDS.map((card) => {
+            const enabled = cardEnabled(card, terminalAtCap)
+            return (
             <MenuItem
               key={card.label}
-              disabled={!card.live}
-              onClick={card.live ? () => onOpen(card.target) : undefined}
+              disabled={!enabled}
+              onClick={enabled ? () => onOpen(card.target) : undefined}
             >
               <span className="flex items-center gap-2 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted">
                 {card.icon}
@@ -462,11 +483,20 @@ function SurfaceTabStrip({
                 {!card.live && <span className="text-[11px] font-medium text-faint">Soon</span>}
               </span>
             </MenuItem>
-          ))}
+            )
+          })}
         </MenuContent>
       </Menu>
     </div>
   )
+}
+
+/**
+ * Whether a launcher card / menu item is actionable: a live card, unless it's the
+ * Terminal at the per-Workspace session cap (where opening another would no-op).
+ */
+function cardEnabled(card: CardDef, terminalAtCap: boolean): boolean {
+  return card.live && !(card.target === 'terminal' && terminalAtCap)
 }
 
 /** A launcher card's definition. Live cards open a Surface; inert ones are reserved. */
@@ -522,7 +552,13 @@ const CARDS: readonly CardDef[] = [
  * Browser cards are disabled + tagged "Soon" (the sidebar PlaceholderNav precedent).
  * Opening one replaces the grid with the tab strip; closing the last tab returns here.
  */
-function LauncherGrid({ onOpen }: { onOpen: (target: CardDef['target']) => void }): JSX.Element {
+function LauncherGrid({
+  onOpen,
+  terminalAtCap,
+}: {
+  onOpen: (target: CardDef['target']) => void
+  terminalAtCap: boolean
+}): JSX.Element {
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
       <div className="w-full max-w-xl">
@@ -535,7 +571,7 @@ function LauncherGrid({ onOpen }: { onOpen: (target: CardDef['target']) => void 
             <LauncherCard
               key={card.label}
               card={card}
-              onClick={card.live ? () => onOpen(card.target) : undefined}
+              onClick={cardEnabled(card, terminalAtCap) ? () => onOpen(card.target) : undefined}
             />
           ))}
         </div>

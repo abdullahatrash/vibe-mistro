@@ -908,9 +908,9 @@ function registerIpc(deps: MainDeps): void {
       for (const t of snapshot.threads) {
         if (t.workspaceId === workspaceId) deps.bridge.tombstone(t.id)
       }
-      // Kill the Workspace's shell session too (ADR-0014) — a removed project must
-      // not leave a live PTY behind. Best-effort like every other step here.
-      terminalManager?.close(workspaceId)
+      // Kill EVERY shell session the Workspace hosts (ADR-0014) — a removed project
+      // must not leave live PTYs behind. Best-effort like every other step here.
+      terminalManager?.closeWorkspace(workspaceId)
       await removeWorkspace({
         workspaceId,
         store: deps.store,

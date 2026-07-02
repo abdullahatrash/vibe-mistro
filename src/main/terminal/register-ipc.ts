@@ -56,38 +56,38 @@ export function registerTerminalIpc(deps: { pool: AgentPool; manager: TerminalMa
     // spawn a shell with no Workspace behind it.
     const agent = deps.pool.get(args.agentId)
     if (!agent) return { ok: false, error: 'Workspace agent is not connected.' }
-    return deps.manager.openOrAttach(args.workspaceId, {
+    return deps.manager.openOrAttach(args.workspaceId, args.terminalId, {
       cwd: agent.workspaceDir,
       cols: args.cols,
       rows: args.rows,
     })
   })
 
-  // Input/resize/close address the SESSION (workspaceId): they can only reach a
-  // session a prior agent-addressed `open` created. Each is a bounded no-op on an
-  // unknown session — never a throw into the renderer's fire-and-forget calls.
+  // Input/resize/close/clear/restart address the SESSION (workspaceId+terminalId):
+  // they can only reach a session a prior agent-addressed `open` created. Each is a
+  // bounded no-op on an unknown session — never a throw into the fire-and-forget calls.
   ipcMain.handle(IPC.terminalWrite, (_event, args: TerminalWriteArgs): void => {
-    deps.manager.write(args.workspaceId, args.data)
+    deps.manager.write(args.workspaceId, args.terminalId, args.data)
   })
 
   ipcMain.handle(IPC.terminalResize, (_event, args: TerminalResizeArgs): void => {
-    deps.manager.resize(args.workspaceId, args.cols, args.rows)
+    deps.manager.resize(args.workspaceId, args.terminalId, args.cols, args.rows)
   })
 
   ipcMain.handle(IPC.terminalClose, (_event, args: TerminalCloseArgs): void => {
-    deps.manager.close(args.workspaceId)
+    deps.manager.close(args.workspaceId, args.terminalId)
   })
 
   ipcMain.handle(IPC.terminalClear, (_event, args: TerminalClearArgs): void => {
     // Reset the retained scrollback so a later reattach starts blank — the shell
     // keeps running; the renderer clears its own xterm view.
-    deps.manager.clear(args.workspaceId)
+    deps.manager.clear(args.workspaceId, args.terminalId)
   })
 
   ipcMain.handle(IPC.terminalRestart, (_event, args: TerminalRestartArgs): TerminalOpenResult => {
     // Kill + respawn the session's shell in its OWN cwd (stored at open) — no agent
     // needed, so restart works even after the warm agent was evicted. Replies with
     // the fresh session handle (snapshot empty) or a spawn error for the overlay.
-    return deps.manager.restart(args.workspaceId, args.cols, args.rows)
+    return deps.manager.restart(args.workspaceId, args.terminalId, args.cols, args.rows)
   })
 }
