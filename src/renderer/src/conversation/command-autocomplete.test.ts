@@ -3,6 +3,7 @@ import {
   applyCommand,
   filterCommands,
   getCommandQuery,
+  matchInvokedCommand,
   moveSelection,
 } from './command-autocomplete'
 import type { AcpCommand } from './reducer'
@@ -139,5 +140,52 @@ describe('moveSelection — wrapping', () => {
 
   it('clamps to 0 for an empty list', () => {
     expect(moveSelection(0, 0, 1)).toBe(0)
+  })
+})
+
+describe('matchInvokedCommand — sent-message skill/command detection', () => {
+  it('matches a bare `/name` prompt', () => {
+    expect(matchInvokedCommand('/init', COMMANDS)).toEqual({ name: 'init', description: 'Initialise' })
+  })
+
+  it('matches `/name` followed by extra instructions', () => {
+    expect(matchInvokedCommand('/review the composer changes', COMMANDS)?.name).toBe('review')
+  })
+
+  it('tolerates surrounding whitespace (the composer trims, but mirror the server anyway)', () => {
+    expect(matchInvokedCommand('  /clear  ', COMMANDS)?.name).toBe('clear')
+  })
+
+  it('tolerates whitespace between the slash and the name (Python split(None) semantics)', () => {
+    expect(matchInvokedCommand('/ init', COMMANDS)?.name).toBe('init')
+  })
+
+  it('matches case-insensitively', () => {
+    expect(matchInvokedCommand('/REVIEW now', COMMANDS)?.name).toBe('review')
+  })
+
+  it('rejects a name that is not in the list', () => {
+    expect(matchInvokedCommand('/unknown', COMMANDS)).toBeNull()
+  })
+
+  it('rejects text that does not open with a slash', () => {
+    expect(matchInvokedCommand('run /init please', COMMANDS)).toBeNull()
+  })
+
+  it('rejects a prefix of a command name (no partial matches)', () => {
+    expect(matchInvokedCommand('/rev', COMMANDS)).toBeNull()
+  })
+
+  it('rejects a bare slash and an empty message', () => {
+    expect(matchInvokedCommand('/', COMMANDS)).toBeNull()
+    expect(matchInvokedCommand('', COMMANDS)).toBeNull()
+  })
+
+  it('rejects everything against an empty commands list (pre-bind draft)', () => {
+    expect(matchInvokedCommand('/init', [])).toBeNull()
+  })
+
+  it('splits the name on any whitespace, including a newline', () => {
+    expect(matchInvokedCommand('/init\ndo it', COMMANDS)?.name).toBe('init')
   })
 })
