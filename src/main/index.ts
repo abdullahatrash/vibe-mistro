@@ -62,6 +62,8 @@ import { GitStatusManager } from './git/status-stream'
 import { chokidarWatchFactory, realClock } from './git/runtime'
 import { registerGitIpc } from './git/register-ipc'
 import { registerFilesIpc } from './files/register-ipc'
+import { createTerminalManager, registerTerminalIpc } from './terminal/register-ipc'
+import type { TerminalManager } from './terminal/terminal-manager'
 import { FilesListCache, shouldInvalidateFilesCacheOnGitStatus } from './files/cache'
 
 // Test seam (e2e smoke): point the whole persisted profile (metadata.json +
@@ -203,6 +205,13 @@ const gitStatus = new GitStatusManager({
 
 /** The periodic idle-evict sweep timer (cleared on quit). */
 let sweepTimer: ReturnType<typeof setInterval> | null = null
+
+/**
+ * The Workspace terminal sessions (ADR-0014), created at app-ready (its env comes
+ * from the login-shell probe). Module-level like the pool so the quit hooks and
+ * the remove-Workspace teardown reach it.
+ */
+let terminalManager: TerminalManager | null = null
 
 /**
  * The stores + transcript bridge every conversation-flow handler needs, created at
@@ -598,6 +607,8 @@ function registerIpc(deps: MainDeps): void {
   // next to them.
   registerGitIpc({ gitStatus })
   registerFilesIpc({ pool, cache: filesListCache })
+  terminalManager = createTerminalManager()
+  registerTerminalIpc({ pool, manager: terminalManager })
 
   ipcMain.handle(IPC.detectVibe, () => detectVibe())
 
@@ -889,6 +900,9 @@ function registerIpc(deps: MainDeps): void {
       for (const t of snapshot.threads) {
         if (t.workspaceId === workspaceId) deps.bridge.tombstone(t.id)
       }
+      // Kill the Workspace's shell session too (ADR-0014) — a removed project must
+      // not leave a live PTY behind. Best-effort like every other step here.
+      terminalManager?.close(workspaceId)
       await removeWorkspace({
         workspaceId,
         store: deps.store,
@@ -1099,6 +1113,10 @@ app.on('window-all-closed', () => {
   // The pool is process-global, which is fine for single-window TB1/TB2.
   // A future multi-window slice should scope the pool per window.
   pool.disposeAll()
+  // Shell sessions die with the windows too (ADR-0014): with no window to ever
+  // reattach from, a surviving PTY would just be an orphaned process — mirror
+  // the pool's teardown rather than the warm-across-reopen behaviour.
+  terminalManager?.disposeAll()
   if (process.platform !== 'darwin') app.quit()
 })
 
@@ -1112,4 +1130,7 @@ app.on('will-quit', () => {
   // Tear down every git-status subscription (#84) so no fs watcher or fetch timer
   // outlives the app — mirrors the sweep-timer cleanup above.
   gitStatus.disposeAll()
+  // And every shell session (idempotent after window-all-closed; this also covers
+  // the darwin quit-from-dock path where no window-all-closed fired).
+  terminalManager?.disposeAll()
 })

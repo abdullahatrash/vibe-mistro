@@ -116,6 +116,31 @@ export function openFileSurface(state: WorkspacePanelState, relativePath: string
 }
 
 /**
+ * This slice's single per-Workspace terminal session id (ADR-0014; t3code's
+ * client-chosen `term-1`). Slice 3 mints `term-2`… for additional tabs.
+ */
+export const DEFAULT_TERMINAL_RESOURCE_ID = 'term-1'
+
+/** The slice-1 terminal descriptor: one session per Workspace, id keyed by the resource. */
+function terminalSurface(): Surface {
+  return {
+    id: `terminal:${DEFAULT_TERMINAL_RESOURCE_ID}`,
+    kind: 'terminal',
+    resourceId: DEFAULT_TERMINAL_RESOURCE_ID,
+  }
+}
+
+/**
+ * Open (or re-activate) the Workspace's terminal Surface (ADR-0014). Effectively a
+ * singleton this slice — the fixed `term-1` resource id makes `upsertSurface` dedupe
+ * it — but deliberately NOT a `SingletonKind`: the descriptor already carries the
+ * resource id, so slice 3's multi-terminal tabs extend this without a shape change.
+ */
+export function openTerminalSurface(state: WorkspacePanelState): WorkspacePanelState {
+  return upsertSurface(state, terminalSurface())
+}
+
+/**
  * The ⌘P / ⌃⇧G semantics (t3code `toggle`): if the panel is open AND this kind is the
  * ACTIVE tab, hide the panel (keep the tabs + active id). Otherwise open/activate the
  * singleton — which also OPENS a closed panel. So one chord opens, a second (while it's
@@ -236,6 +261,17 @@ export function coerceSurface(raw: unknown): Surface | null {
     const id = (raw as { id?: unknown }).id
     if (typeof relativePath === 'string' && relativePath.length > 0 && id === `file:${relativePath}`) {
       return { id: `file:${relativePath}`, kind: 'file', relativePath }
+    }
+    return null
+  }
+  if (kind === 'terminal') {
+    // A persisted terminal tab restores ONLY as this slice's fixed `term-1` singleton
+    // (activating it opens a fresh shell — the session itself never persists). Any
+    // other resource id is a future multi-terminal blob — dropped, not trusted.
+    const resourceId = (raw as { resourceId?: unknown }).resourceId
+    const id = (raw as { id?: unknown }).id
+    if (resourceId === DEFAULT_TERMINAL_RESOURCE_ID && id === `terminal:${resourceId}`) {
+      return { id: `terminal:${resourceId}`, kind: 'terminal', resourceId }
     }
     return null
   }
@@ -367,6 +403,7 @@ function bindWorkspaceOp<A extends unknown[]>(
 
 export const openWorkspaceSurface = bindWorkspaceOp(openSurface)
 export const openWorkspaceFileSurface = bindWorkspaceOp(openFileSurface)
+export const openWorkspaceTerminalSurface = bindWorkspaceOp(openTerminalSurface)
 export const toggleWorkspaceSurface = bindWorkspaceOp(toggleSurface)
 export const activateWorkspaceSurface = bindWorkspaceOp(activateSurface)
 export const closeWorkspaceSurface = bindWorkspaceOp(closeSurface)

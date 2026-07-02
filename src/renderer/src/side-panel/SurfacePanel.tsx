@@ -17,6 +17,7 @@ import {
 import { ChangesPanel } from '../git/ChangesPanel'
 import { FilesSurface } from './FilesSurface'
 import { FilePreview } from './FilePreview'
+import { TerminalSurface } from './TerminalSurface'
 import { surfaceForChord } from './surface-keys'
 import { basename } from '../lib/paths'
 import {
@@ -28,6 +29,7 @@ import {
   closeWorkspaceSurfacesToRight,
   openWorkspaceFileSurface,
   openWorkspaceSurface,
+  openWorkspaceTerminalSurface,
   toggleWorkspaceSurface,
   useWorkspacePanel,
   type SingletonKind,
@@ -49,7 +51,8 @@ const NARROW_QUERY = '(max-width: 980px)'
  * active id) lives in the shared `side-panel-store`; this component renders it and drives
  * ⌘P/⌃⇧G. Open Surfaces show as a TAB STRIP; with zero open, the panel shows the launcher
  * CARDS (its empty state). Review re-homes the git Changes panel behavior-identical
- * (#84–#88, ADR-0008); Files is the searchable tree (#188); Terminal/Browser are inert.
+ * (#84–#88, ADR-0008); Files is the searchable tree (#188); Terminal is the Workspace
+ * shell (ADR-0014); Browser stays inert/reserved.
  *
  * Presentation is DUAL: inline beside the conversation on wide windows — a full-height,
  * flush, `border-l`-separated column (t3code's editor-panel chrome) whose width is
@@ -211,6 +214,39 @@ function PanelBody({
 
   const active = panel.surfaces.find((s) => s.id === panel.activeSurfaceId) ?? null
 
+  // A close op is a VIEW op for every Surface except terminal, whose tab IS the
+  // session's lifetime (ADR-0014): unmount keeps the shell (reattach later), but
+  // explicitly closing the tab kills the PTY. Each close path first kills the
+  // sessions its store op is about to remove (one per Workspace this slice, so
+  // any removed terminal Surface maps to the one `terminalClose`).
+  function killTerminalsAmong(removed: Surface[]): void {
+    if (removed.some((surface) => surface.kind === 'terminal')) {
+      void window.api.terminalClose({ workspaceId })
+    }
+  }
+  function closeSurfaceAndKill(id: string): void {
+    killTerminalsAmong(panel.surfaces.filter((surface) => surface.id === id))
+    closeWorkspaceSurface(workspaceId, id)
+  }
+  function closeOthersAndKill(id: string): void {
+    killTerminalsAmong(panel.surfaces.filter((surface) => surface.id !== id))
+    closeOtherWorkspaceSurfaces(workspaceId, id)
+  }
+  function closeToRightAndKill(id: string): void {
+    const index = panel.surfaces.findIndex((surface) => surface.id === id)
+    if (index >= 0) killTerminalsAmong(panel.surfaces.slice(index + 1))
+    closeWorkspaceSurfacesToRight(workspaceId, id)
+  }
+  function closeAllAndKill(): void {
+    killTerminalsAmong(panel.surfaces)
+    closeAllWorkspaceSurfaces(workspaceId)
+  }
+  /** A launcher card / "+"-menu target: singletons via the store op, terminal via its own. */
+  function openCardTarget(target: CardDef['target']): void {
+    if (target === 'terminal') openWorkspaceTerminalSurface(workspaceId)
+    else if (target !== 'browser') openWorkspaceSurface(workspaceId, target)
+  }
+
   return (
     <aside
       aria-label="Side panel"
@@ -239,18 +275,18 @@ function PanelBody({
         />
       )}
       {panel.surfaces.length === 0 ? (
-        <LauncherGrid onOpen={(kind) => openWorkspaceSurface(workspaceId, kind)} />
+        <LauncherGrid onOpen={openCardTarget} />
       ) : (
         <>
           <SurfaceTabStrip
             surfaces={panel.surfaces}
             activeSurfaceId={panel.activeSurfaceId}
             onActivate={(id) => activateWorkspaceSurface(workspaceId, id)}
-            onClose={(id) => closeWorkspaceSurface(workspaceId, id)}
-            onCloseOthers={(id) => closeOtherWorkspaceSurfaces(workspaceId, id)}
-            onCloseToRight={(id) => closeWorkspaceSurfacesToRight(workspaceId, id)}
-            onCloseAll={() => closeAllWorkspaceSurfaces(workspaceId)}
-            onOpen={(kind) => openWorkspaceSurface(workspaceId, kind)}
+            onClose={closeSurfaceAndKill}
+            onCloseOthers={closeOthersAndKill}
+            onCloseToRight={closeToRightAndKill}
+            onCloseAll={closeAllAndKill}
+            onOpen={openCardTarget}
           />
           <div className="flex min-h-0 flex-1 flex-col">
             {active?.kind === 'review' && (
@@ -273,6 +309,12 @@ function PanelBody({
                 agentId={agentId}
                 onOpenFile={(relativePath) => openWorkspaceFileSurface(workspaceId, relativePath)}
               />
+            )}
+            {active?.kind === 'terminal' && (
+              // The Workspace's shell (ADR-0014). Keyed by the surface id so a future
+              // multi-terminal slice remounts per session; the SESSION lives in main —
+              // this view detaching (tab switch) leaves the shell running.
+              <TerminalSurface key={active.id} workspaceId={workspaceId} agentId={agentId} />
             )}
             {active?.kind === 'file' && (
               // A read-only file preview tab (#189): fetches the confined `files:read` and renders
@@ -333,7 +375,7 @@ function SurfaceTabStrip({
   onCloseOthers: (id: string) => void
   onCloseToRight: (id: string) => void
   onCloseAll: () => void
-  onOpen: (kind: SingletonKind) => void
+  onOpen: (target: CardDef['target']) => void
 }): JSX.Element {
   return (
     <div
@@ -412,7 +454,7 @@ function SurfaceTabStrip({
             <MenuItem
               key={card.label}
               disabled={!card.live}
-              onClick={card.live ? () => onOpen(card.target as SingletonKind) : undefined}
+              onClick={card.live ? () => onOpen(card.target) : undefined}
             >
               <span className="flex items-center gap-2 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted">
                 {card.icon}
@@ -453,7 +495,7 @@ const CARDS: readonly CardDef[] = [
     label: 'Terminal',
     description: 'Run commands in the Workspace.',
     icon: <SquareTerminal aria-hidden />,
-    live: false,
+    live: true,
   },
   {
     target: 'browser',
@@ -480,7 +522,7 @@ const CARDS: readonly CardDef[] = [
  * Browser cards are disabled + tagged "Soon" (the sidebar PlaceholderNav precedent).
  * Opening one replaces the grid with the tab strip; closing the last tab returns here.
  */
-function LauncherGrid({ onOpen }: { onOpen: (kind: SingletonKind) => void }): JSX.Element {
+function LauncherGrid({ onOpen }: { onOpen: (target: CardDef['target']) => void }): JSX.Element {
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
       <div className="w-full max-w-xl">
@@ -493,7 +535,7 @@ function LauncherGrid({ onOpen }: { onOpen: (kind: SingletonKind) => void }): JS
             <LauncherCard
               key={card.label}
               card={card}
-              onClick={card.live ? () => onOpen(card.target as SingletonKind) : undefined}
+              onClick={card.live ? () => onOpen(card.target) : undefined}
             />
           ))}
         </div>

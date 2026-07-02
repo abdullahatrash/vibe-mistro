@@ -22,6 +22,12 @@ import {
   type FilesListResult,
   type FilesReadArgs,
   type FilesReadResult,
+  type TerminalCloseArgs,
+  type TerminalEvent,
+  type TerminalOpenArgs,
+  type TerminalOpenResult,
+  type TerminalResizeArgs,
+  type TerminalWriteArgs,
   type GitStatusEvent,
   type GitStatusSubscriptionArgs,
   type ListMetadataResult,
@@ -120,7 +126,16 @@ const api = {
   revealPath: (args: RevealPathArgs): Promise<void> => ipcRenderer.invoke(IPC.revealPath, args),
   filesList: (args: FilesListArgs): Promise<FilesListResult> => ipcRenderer.invoke(IPC.filesList, args),
   filesRead: (args: FilesReadArgs): Promise<FilesReadResult> => ipcRenderer.invoke(IPC.filesRead, args),
+  terminalOpen: (args: TerminalOpenArgs): Promise<TerminalOpenResult> =>
+    ipcRenderer.invoke(IPC.terminalOpen, args),
+  terminalWrite: (args: TerminalWriteArgs): Promise<void> =>
+    ipcRenderer.invoke(IPC.terminalWrite, args),
+  terminalResize: (args: TerminalResizeArgs): Promise<void> =>
+    ipcRenderer.invoke(IPC.terminalResize, args),
+  terminalClose: (args: TerminalCloseArgs): Promise<void> =>
+    ipcRenderer.invoke(IPC.terminalClose, args),
   onAcpEvent: subscribe<AcpEvent>(IPC.acpEvent),
+  onTerminalEvent: subscribe<TerminalEvent>(IPC.terminalEvent),
   onThreadBound: subscribe<ThreadBoundEvent>(IPC.threadBound),
   onThreadStatus: subscribe<ThreadStatusEvent>(IPC.threadStatus),
   onThreadTitle: subscribe<ThreadTitleEvent>(IPC.threadTitle),
