@@ -14,9 +14,9 @@ import { getSurfaceState, setSurfaceState } from './surface-state-store'
  * the sidebar toggle, persisted app-globally). Open, it renders four launcher CARDS —
  * Review (⌃⇧G), Terminal, Browser (⌘T), Files (⌘P) — top-aligned; at most ONE Surface is
  * expanded at a time and the cards show only when NONE is. Review re-homes the existing
- * git Changes panel behavior-identical (#84–#88); Files expands to a slice-2 placeholder;
- * Terminal and Browser are inert "Soon" cards (the sidebar Search/Scheduled/Plugins
- * precedent).
+ * git Changes panel behavior-identical (#84–#88); Files expands to the searchable tree
+ * (#188); Terminal and Browser are inert "Soon" cards (the sidebar Search/Scheduled/
+ * Plugins precedent).
  *
  * The expanded choice persists PER Workspace across restart (localStorage, throw-tolerant
  * injected-storage store). Because App keys each `ConnectedWorkspace` (hence this panel)
@@ -93,11 +93,20 @@ export function SurfacePanel({
   }
 
   if (expanded === 'files') {
-    return <FilesSurface onCollapse={() => apply(null)} />
+    // The Files Surface tree (#188). It focuses its own search on mount — and it only
+    // mounts when Files is open+expanded — so ⌘P (open + Files) and a Files card click
+    // both land in a search-focused tree, keying off "Files became visible" (ADR-0013
+    // decision 1) with no per-trigger plumbing. Selecting a file emits an open-file
+    // intent that slice 3 (#189) consumes; a no-op until then.
+    return <FilesSurface onCollapse={() => apply(null)} workspaceDir={workspaceDir} onOpenFile={NO_OPEN_FILE} />
   }
 
   return <SurfaceStack onOpen={(surface) => apply(surface)} />
 }
+
+// Selecting a file emits an open-file intent; slice 3 (#189) swaps this for opening a
+// read-only preview tab. A no-op until then (a zero-arg fn satisfies the callback type).
+const NO_OPEN_FILE = (): void => undefined
 
 /** A launcher card's definition. Live cards open a Surface; inert ones are reserved. */
 interface CardDef {

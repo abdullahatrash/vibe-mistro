@@ -213,6 +213,22 @@ export const IPC = {
    * would execute `.app`/`.command`/installers from untrusted markdown on one click.)
    */
   revealPath: 'shell:reveal-path',
+  /**
+   * Renderer -> main: LIST the active Workspace's files for the Files Surface tree
+   * (#188, ADR-0013 decisions 3-4). Invoke, `{ workspaceDir, refresh? }` ->
+   * `FilesListResult` — a flat array of `{ path, kind }` entries (path RELATIVE to the
+   * Workspace root, forward-slash separated) plus a `truncated` flag. The walk honors
+   * `.gitignore` (root + nested), HARD-SKIPS `.git`, includes dotfiles, caps at
+   * ~20k entries, and is **Workspace-root-confined + symlink-safe** — deliberately
+   * STRICTER than the agent's unconfined `fs/read` (ADR-0004 vs ADR-0013): it never
+   * follows a symlink during the walk, so a symlinked dir is listed but not descended
+   * (blocks both escapes and cycles), and no entry can contain `..` or an absolute path.
+   * Main CACHES the result per `workspaceDir`; `refresh:true` (the panel's Refresh
+   * button) rebuilds, and the existing git status-stream watcher firing invalidates the
+   * cache (NO new fs watcher). NOT agent activity, so — like `git:diff` — it does NOT
+   * `pool.touch`. A walk failure degrades to the empty result (never throws).
+   */
+  filesList: 'files:list',
 } as const
 
 /**
@@ -927,4 +943,38 @@ export interface GhCreatePrArgs {
 export interface RevealPathArgs {
   agentId: string
   path: string
+}
+
+/**
+ * Args for `filesList` (#188): list one Workspace's files. `workspaceDir` addresses the
+ * Workspace exactly as the git handlers do (the value main minted at connect and handed
+ * the renderer). `refresh:true` bypasses main's per-Workspace cache and rebuilds — the
+ * panel's Refresh button; omitted/false serves the cache when it is fresh.
+ */
+export interface FilesListArgs {
+  workspaceDir: string
+  refresh?: boolean
+}
+
+/**
+ * One entry in a `filesList` reply (#188). `path` is RELATIVE to the Workspace root,
+ * forward-slash separated, and — by construction of the confined walk — never contains
+ * `..` or an absolute path. `kind` is `directory` for a real (descended) directory;
+ * everything else, INCLUDING a symlink (never followed), is reported as a `file` leaf.
+ */
+export interface FileEntry {
+  path: string
+  kind: 'file' | 'directory'
+}
+
+/**
+ * The `filesList` reply (#188). `entries` is the flat, deterministically-ordered
+ * (directories-first, then name) listing the renderer maps to `@pierre/trees` paths.
+ * `truncated` is true when the walk hit the ~20k-entry cap and stopped early — the panel
+ * shows a "· partial" indicator. The empty result (`entries:[], truncated:false`) also
+ * covers a swallowed walk failure (a missing / unreadable Workspace root).
+ */
+export interface FilesListResult {
+  entries: FileEntry[]
+  truncated: boolean
 }

@@ -21,6 +21,8 @@ import {
   type GhPrResult,
   type GitStatusEvent,
   type GitStatusSubscriptionArgs,
+  type FilesListArgs,
+  type FilesListResult,
   type ListMetadataResult,
   type RevealPathArgs,
   type OpenThreadArgs,
@@ -79,6 +81,8 @@ import { gitBranches, gitCheckout, gitCreateBranch } from './git/branches'
 import { ghCreatePr, ghCurrentPr } from './git/github'
 import { GitStatusManager } from './git/status-stream'
 import { chokidarWatchFactory, realClock } from './git/runtime'
+import { listFiles } from './files/list-files'
+import { FilesListCache, shouldInvalidateFilesCacheOnGitStatus } from './files/cache'
 
 /**
  * The warm-agent pool (ADR-0006 decision 3, TB2 #47): one `vibe-acp` agent per
@@ -208,12 +212,26 @@ async function recordThreadTitle(sessionId: string | null, title: string): Promi
  * here), so its emit is wired to `webContents.send` below — mirroring
  * `emitThreadStatus`. Torn down on quit so no watcher/timer outlives the app.
  */
+/**
+ * Per-Workspace cache of the Files Surface listing (#188, ADR-0013 decision 4). Served by
+ * the `files:list` handler; invalidated by the panel's Refresh (a `refresh:true` invoke,
+ * which bypasses it) and — piggybacked, no new watcher — by the git status-stream watcher
+ * firing (see the `emit` hook below).
+ */
+const filesListCache = new FilesListCache()
+
 const gitStatus = new GitStatusManager({
   read: (workspaceDir) => readGitStatus(workspaceDir),
   fetch: (workspaceDir) => gitFetch(workspaceDir),
   watch: chokidarWatchFactory,
   clock: realClock,
   emit: (event: GitStatusEvent) => {
+    // Piggyback the files cache on the git watcher (#188): a `localUpdated` push means
+    // the working tree changed (fs watcher / turn-end / commit), so the cached listing
+    // may be stale — drop it. `snapshot`/`remoteUpdated` don't touch local files. This is
+    // the WHOLE invalidation hook — no new fs watcher (ADR-0013). The decision is the
+    // pure `shouldInvalidateFilesCacheOnGitStatus`, unit-tested in cache.test.ts.
+    if (shouldInvalidateFilesCacheOnGitStatus(event.kind)) filesListCache.invalidate(event.workspaceDir)
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.webContents.isDestroyed()) win.webContents.send(IPC.gitStatus, event)
     }
@@ -1221,6 +1239,24 @@ function registerIpc(): void {
       // Missing path / stat / realpath failure — swallow (best-effort, never throws).
       console.error(`[vibe-mistro:reveal-path] ${requested}: ${String(err)}`)
     }
+  })
+
+  ipcMain.handle(IPC.filesList, async (_event, args: FilesListArgs): Promise<FilesListResult> => {
+    // LIST the active Workspace's files for the Files Surface tree (#188, ADR-0013). We
+    // address the Workspace exactly as the git handlers do — a renderer-passed
+    // `workspaceDir` (the value main minted at connect and handed back), trusted the same
+    // way; the confinement here is over the WALK (never following a symlink), inside
+    // `listFiles`. Cache-served unless `refresh` forces a rebuild; the git status-stream
+    // watcher invalidates the cache (the `emit` hook above), so an agent-created file
+    // appears on the next read with NO new fs watcher. NOT agent activity, so — like
+    // `git:diff` — it does NOT `pool.touch`. A walk failure degrades to the empty result.
+    if (!args.refresh) {
+      const cached = filesListCache.get(args.workspaceDir)
+      if (cached) return cached
+    }
+    const result = await listFiles(args.workspaceDir)
+    filesListCache.set(args.workspaceDir, result)
+    return result
   })
 }
 
