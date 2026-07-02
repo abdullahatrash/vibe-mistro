@@ -55,6 +55,14 @@ function probe(shell: string, mode: '-il' | '-l'): Record<string, string> | null
  */
 export function getShellEnv(): NodeJS.ProcessEnv {
   if (cached) return cached
+  // Test seam (e2e): the probed login-shell PATH normally WINS over process.env,
+  // which would route `vibe-acp` past the suite's fake agent no matter what PATH
+  // the test launches with. Skipping the probe keeps process.env authoritative so
+  // a prepended fake-bin dir resolves first. No-op in normal launches.
+  if (process.env.VIBE_MISTRO_SKIP_SHELL_ENV) {
+    cached = process.env
+    return cached
+  }
   if (process.platform === 'win32') {
     cached = process.env
     return cached
