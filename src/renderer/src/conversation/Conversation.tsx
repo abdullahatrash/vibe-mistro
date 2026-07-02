@@ -11,6 +11,7 @@ import {
 } from 'react'
 import type {
   AuthMethod,
+  FileEntry,
   ThreadAgentControls,
   ThreadConfigAxis,
   ThreadModes,
@@ -25,6 +26,8 @@ import {
   Circle,
   Copy,
   Eye,
+  File,
+  Folder,
   Globe,
   Loader2,
   Mic,
@@ -81,6 +84,7 @@ import {
   getCommandQuery,
   moveSelection,
 } from './command-autocomplete'
+import { applyPath, filterPaths, getPathQuery } from './path-autocomplete'
 import { ACCEPTED_IMAGE_TYPES, isAcceptedImageType, parseDataUrl } from './image-attach'
 import { isSending, nextQueueId, useFollowUpQueue } from './follow-up-queue'
 
@@ -205,6 +209,22 @@ export function Conversation({
   // you keep typing (the escape hatch for sending literal `/text`). Cleared once the
   // token closes/deletes or a different `/` opens, so a fresh trigger reopens.
   const dismissedStartRef = useRef<number | null>(null)
+  // Ephemeral `@` file-path autocomplete state (#190), the mid-sentence sibling of the
+  // `/` popover: the open trigger (the `@`'s index + the fragment after it), the
+  // highlighted row, its scroll ref, and the Esc-dismiss latch (per-token, same shape as
+  // `/`'s so a user can type a literal `@foo`). Renderer-local; a Thread switch remounts
+  // this view (keyed by threadId), so it always starts closed. `null` = closed.
+  const [pathTrigger, setPathTrigger] = useState<{ start: number; query: string } | null>(null)
+  const [pathIndex, setPathIndex] = useState(0)
+  const activePathRowRef = useRef<HTMLLIElement>(null)
+  const pathDismissedStartRef = useRef<number | null>(null)
+  // The shared `files:list` listing (ADR-0013 decision 5), fetched ONCE per composer
+  // mount on the first `@` (lazy) and cached here — ranking runs in the renderer, so no
+  // per-keystroke IPC. `requestedRef` guards the single fetch; a failed/empty listing is
+  // tolerated (the popup just shows nothing — a typed `@path` still sends fine, the agent
+  // resolves it). Addressed by the connection's `agentId`, like the Files Surface.
+  const [pathEntries, setPathEntries] = useState<FileEntry[]>([])
+  const pathEntriesRequestedRef = useRef(false)
   // True once any live event has been folded in: guards the async hydrate from
   // clobbering events that streamed in before the JSONL read resolved.
   const liveSeen = useRef(false)
@@ -501,11 +521,25 @@ export function Conversation({
   const showCommands = commandTrigger !== null && commandRows.length > 0
   const activeIndex = Math.min(commandIndex, commandRows.length - 1)
 
+  // The `@` popover's live matches (#190): the cached listing ranked substring-then-
+  // subsequence by the open fragment. MUTUAL EXCLUSION with `/`: the two triggers CAN
+  // both match (e.g. `/foo@bar` at a line start), so the start-anchored `/` popover wins
+  // — `showPaths` is gated on `!showCommands`, and the keyboard handler runs the `/`
+  // block first (which returns), so at most one popover is ever open. `activePathIndex`
+  // clamps the stored highlight in case the match count shrank as the fragment grew.
+  const pathRows: FileEntry[] = pathTrigger ? filterPaths(pathEntries, pathTrigger.query) : []
+  const showPaths = !showCommands && pathTrigger !== null && pathRows.length > 0
+  const activePathIndex = Math.min(pathIndex, pathRows.length - 1)
+
   // Keep the highlighted row visible when ↑/↓ walk past the popover's max-height
   // (#95). `block: 'nearest'` scrolls only the overflow list, not the whole page.
   useEffect(() => {
     if (showCommands) activeRowRef.current?.scrollIntoView({ block: 'nearest' })
   }, [showCommands, activeIndex])
+
+  useEffect(() => {
+    if (showPaths) activePathRowRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [showPaths, activePathIndex])
 
   // Re-derive the trigger from the composer's value + caret after any edit or caret
   // move. Reads the live caret so `hello /re` (mid-line) never triggers while `/re`
@@ -551,6 +585,71 @@ export function Conversation({
     })
   }
 
+  // Fetch the shared `files:list` listing ONCE per composer mount, lazily on the first
+  // `@` (ADR-0013 decision 5). Serves main's per-Workspace cache (no `refresh`), so it is
+  // cheap; a failure is swallowed — the popup just stays empty and a typed `@path` still
+  // sends. The resolved entries land in state, which re-renders the open popover with them.
+  function ensurePathEntries(): void {
+    if (pathEntriesRequestedRef.current) return
+    pathEntriesRequestedRef.current = true
+    void window.api.filesList({ agentId: thread.agentId }).then(
+      (result) => setPathEntries(result.entries),
+      () => {
+        /* tolerate a failed listing — typed paths still send; the agent resolves them */
+      },
+    )
+  }
+
+  // Re-derive the `@` trigger from the composer's value + caret after any edit or caret
+  // move (mid-sentence, unlike `/`). Mirrors `refreshCommandTrigger`: an active trigger
+  // kicks the lazy listing fetch and clears/holds the Esc latch the same way.
+  function refreshPathTrigger(value: string, caret: number | null): void {
+    const trigger = caret === null ? null : getPathQuery(value, caret)
+    if (!trigger || !trigger.active) {
+      pathDismissedStartRef.current = null
+      setPathTrigger(null)
+      setPathIndex(0)
+      return
+    }
+    if (pathDismissedStartRef.current === trigger.start) {
+      // Still the Esc-dismissed token — stay closed as the fragment grows (lets a user
+      // type a literal `@foo`).
+      setPathTrigger(null)
+      return
+    }
+    pathDismissedStartRef.current = null
+    ensurePathEntries()
+    setPathTrigger({ start: trigger.start, query: trigger.query })
+    setPathIndex(0)
+  }
+
+  // Accept a path completion: splice the plain-text `@<path>` over the `@fragment` token
+  // (a FILE gets a trailing space and closes the token; a DIRECTORY gets a trailing slash
+  // and REOPENS the popover on the new fragment so completion drills into the dir), keep
+  // the draft + persisted draft (#60) in lockstep, then restore focus + caret via rAF.
+  function acceptPath(entry: FileEntry): void {
+    if (!pathTrigger) return
+    const node = inputRef.current
+    const caret = node ? node.selectionStart : draft.length
+    const next = applyPath(draft, pathTrigger.start, caret, entry)
+    setDraft(next.value)
+    persistDraft(window.localStorage, thread.threadId, next.value)
+    setPathIndex(0)
+    if (entry.kind === 'directory') {
+      // `@dir/` — re-derive immediately so the popup continues into the directory.
+      refreshPathTrigger(next.value, next.caret)
+    } else {
+      pathDismissedStartRef.current = null
+      setPathTrigger(null)
+    }
+    requestAnimationFrame(() => {
+      const el = inputRef.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(next.caret, next.caret)
+    })
+  }
+
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
     // Popover-open key interception (#95): navigation + accept must win over Enter's
     // send and Tab's focus move. When closed, every key falls through unchanged.
@@ -575,6 +674,33 @@ export function Conversation({
         // Latch this token as dismissed so typing more doesn't reopen it (#95).
         dismissedStartRef.current = commandTrigger?.start ?? null
         setCommandTrigger(null)
+        return
+      }
+    }
+    // The `@` popover's key interception (#190) — same contract as `/`, and reachable
+    // only when the `/` popover is closed (`showPaths` is gated on `!showCommands`, and
+    // the block above returns), so the two never fight over a key.
+    if (showPaths) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setPathIndex(moveSelection(activePathIndex, pathRows.length, 1))
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setPathIndex(moveSelection(activePathIndex, pathRows.length, -1))
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        acceptPath(pathRows[activePathIndex])
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        // Latch this token as dismissed so typing more doesn't reopen it (#190).
+        pathDismissedStartRef.current = pathTrigger?.start ?? null
+        setPathTrigger(null)
         return
       }
     }
@@ -722,6 +848,41 @@ export function Conversation({
                   ))}
                 </ul>
               )}
+              {showPaths && (
+                <ul
+                  className="absolute right-0 bottom-full left-0 z-10 mb-2 max-h-56 list-none overflow-y-auto rounded-xl border border-border bg-panel p-1 shadow-lg"
+                  role="listbox"
+                  aria-label="File paths"
+                >
+                  {pathRows.map((entry, i) => (
+                    <li
+                      key={entry.path}
+                      ref={i === activePathIndex ? activePathRowRef : null}
+                      role="option"
+                      aria-selected={i === activePathIndex}
+                      className={cn(
+                        'flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5',
+                        i === activePathIndex && 'bg-[var(--accent-tint)]',
+                      )}
+                      // mousedown (not click) so we accept BEFORE the textarea blurs.
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        acceptPath(entry)
+                      }}
+                    >
+                      {entry.kind === 'directory' ? (
+                        <Folder className="size-3.5 shrink-0 text-muted" aria-hidden />
+                      ) : (
+                        <File className="size-3.5 shrink-0 text-muted" aria-hidden />
+                      )}
+                      <span className="truncate text-[13px] text-text-body">
+                        {entry.path}
+                        {entry.kind === 'directory' && '/'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
               <Textarea
                 ref={inputRef}
                 className="min-h-0 resize-none border-0 bg-transparent p-0 text-[17px] leading-normal focus-visible:border-0"
@@ -733,13 +894,15 @@ export function Conversation({
                   // Write-through: keep React state and the persisted draft (#60) in lockstep.
                   setDraft(e.target.value)
                   persistDraft(window.localStorage, thread.threadId, e.target.value)
-                  // Re-derive the `/` autocomplete trigger from the new value + caret (#95).
+                  // Re-derive the `/` (#95) and `@` (#190) triggers from the new value + caret.
                   refreshCommandTrigger(e.target.value, e.target.selectionStart)
+                  refreshPathTrigger(e.target.value, e.target.selectionStart)
                 }}
-                // Caret moves (arrows/click) with no edit also open/close the trigger (#95).
-                onSelect={(e) =>
+                // Caret moves (arrows/click) with no edit also open/close the triggers.
+                onSelect={(e) => {
                   refreshCommandTrigger(e.currentTarget.value, e.currentTarget.selectionStart)
-                }
+                  refreshPathTrigger(e.currentTarget.value, e.currentTarget.selectionStart)
+                }}
                 onKeyDown={onKeyDown}
                 onPaste={onPaste}
                 rows={2}
