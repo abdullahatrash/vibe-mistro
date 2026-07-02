@@ -116,7 +116,7 @@ describe('shellCandidates / terminalEnv', () => {
 describe('TerminalManager openOrAttach', () => {
   it('spawns the shell in the given cwd and streams output events tagged by workspace + terminal', () => {
     const { manager, events, ptys, spawns } = harness()
-    const result = manager.openOrAttach('w1', { cwd: '/proj', cols: 120, rows: 30 })
+    const result = manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 120, rows: 30 })
 
     expect(result).toEqual({ ok: true, terminalId: 'term-1', snapshot: '', exited: false })
     expect(spawns[0]).toMatchObject({ file: '/bin/zsh', cwd: '/proj', cols: 120, rows: 30 })
@@ -129,10 +129,10 @@ describe('TerminalManager openOrAttach', () => {
 
   it('REATTACHES to a running session: no respawn, snapshot carries the buffered scrollback', () => {
     const { manager, ptys, spawns } = harness()
-    manager.openOrAttach('w1', { cwd: '/proj', cols: 120, rows: 30 })
+    manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 120, rows: 30 })
     ptys[0].emitData('$ ls\r\nsrc\r\n')
 
-    const again = manager.openOrAttach('w1', { cwd: '/proj', cols: 80, rows: 24 })
+    const again = manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })
     expect(again).toEqual({ ok: true, terminalId: 'term-1', snapshot: '$ ls\r\nsrc\r\n', exited: false })
     expect(spawns).toHaveLength(1) // no second spawn
   })
@@ -149,7 +149,7 @@ describe('TerminalManager openOrAttach', () => {
       env: { SHELL: '/opt/gone-fish' },
     })
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const result = manager.openOrAttach('w1', { cwd: '/proj', cols: 80, rows: 24 })
+    const result = manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })
     errSpy.mockRestore()
 
     expect(result.ok).toBe(true)
@@ -163,16 +163,16 @@ describe('TerminalManager openOrAttach', () => {
       },
     })
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const result = manager.openOrAttach('w1', { cwd: '/proj', cols: 80, rows: 24 })
+    const result = manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })
     errSpy.mockRestore()
 
     expect(result).toEqual({ ok: false, error: 'Could not start a shell: ENOENT' })
-    expect(manager.has('w1')).toBe(false)
+    expect(manager.has('w1', 'term-1')).toBe(false)
   })
 
   it('an EXITED session is respawned fresh on reopen (banner was seen; new shell)', () => {
     const { manager, ptys, spawns, events } = harness()
-    manager.openOrAttach('w1', { cwd: '/proj', cols: 80, rows: 24 })
+    manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })
     ptys[0].emitExit(0)
     expect(events.at(-1)).toEqual({
       workspaceId: 'w1',
@@ -180,7 +180,7 @@ describe('TerminalManager openOrAttach', () => {
       event: { type: 'exited', exitCode: 0 },
     })
 
-    const reopened = manager.openOrAttach('w1', { cwd: '/proj', cols: 80, rows: 24 })
+    const reopened = manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })
     expect(reopened).toEqual({ ok: true, terminalId: 'term-1', snapshot: '', exited: false })
     expect(spawns).toHaveLength(2)
   })
@@ -189,27 +189,27 @@ describe('TerminalManager openOrAttach', () => {
 describe('TerminalManager write / resize', () => {
   it('forwards writes and clamps resize to the shared bounds', () => {
     const { manager, ptys } = harness()
-    manager.openOrAttach('w1', { cwd: '/proj', cols: 80, rows: 24 })
+    manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })
 
-    manager.write('w1', 'ls\r')
+    manager.write('w1', 'term-1', 'ls\r')
     expect(ptys[0].written).toEqual(['ls\r'])
 
-    manager.resize('w1', 5000, 0)
+    manager.resize('w1', 'term-1', 5000, 0)
     expect(ptys[0].resized).toEqual([[1000, 1]])
   })
 
   it('refuses an oversized write whole and ignores unknown/exited sessions', () => {
     const { manager, ptys } = harness()
-    manager.openOrAttach('w1', { cwd: '/proj', cols: 80, rows: 24 })
+    manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })
 
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    manager.write('w1', 'x'.repeat(MAX_TERMINAL_WRITE_CHARS + 1))
+    manager.write('w1', 'term-1', 'x'.repeat(MAX_TERMINAL_WRITE_CHARS + 1))
     errSpy.mockRestore()
     expect(ptys[0].written).toEqual([])
 
-    manager.write('missing', 'ls\r') // unknown workspace — no throw
+    manager.write('missing', 'term-1', 'ls\r') // unknown workspace — no throw
     ptys[0].emitExit(0)
-    manager.write('w1', 'ls\r') // exited — dropped
+    manager.write('w1', 'term-1', 'ls\r') // exited — dropped
     expect(ptys[0].written).toEqual([])
   })
 })
@@ -217,11 +217,11 @@ describe('TerminalManager write / resize', () => {
 describe('TerminalManager close / disposeAll', () => {
   it('closes with SIGTERM, then SIGKILL after the grace when the process lingers', () => {
     const { manager, ptys, timers } = harness()
-    manager.openOrAttach('w1', { cwd: '/proj', cols: 80, rows: 24 })
+    manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })
 
-    manager.close('w1')
+    manager.close('w1', 'term-1')
     expect(ptys[0].killed).toEqual(['SIGTERM'])
-    expect(manager.has('w1')).toBe(false)
+    expect(manager.has('w1', 'term-1')).toBe(false)
 
     timers[0].fn() // the grace elapses without an exit
     expect(ptys[0].killed).toEqual(['SIGTERM', 'SIGKILL'])
@@ -229,9 +229,9 @@ describe('TerminalManager close / disposeAll', () => {
 
   it('skips the SIGKILL when the process exits within the grace', () => {
     const { manager, ptys, timers } = harness()
-    manager.openOrAttach('w1', { cwd: '/proj', cols: 80, rows: 24 })
+    manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })
 
-    manager.close('w1')
+    manager.close('w1', 'term-1')
     ptys[0].emitExit(143)
     timers[0].fn()
     expect(ptys[0].killed).toEqual(['SIGTERM'])
@@ -239,9 +239,9 @@ describe('TerminalManager close / disposeAll', () => {
 
   it('a dying shell\'s late output/exit never bleeds into a reopened session', () => {
     const { manager, ptys, events } = harness()
-    manager.openOrAttach('w1', { cwd: '/proj', cols: 80, rows: 24 })
-    manager.close('w1')
-    manager.openOrAttach('w1', { cwd: '/proj', cols: 80, rows: 24 })
+    manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })
+    manager.close('w1', 'term-1')
+    manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })
     events.length = 0
 
     ptys[0].emitData('late gasp') // the OLD pty
@@ -256,51 +256,51 @@ describe('TerminalManager close / disposeAll', () => {
 
   it('disposeAll closes every session (app quit)', () => {
     const { manager, ptys } = harness()
-    manager.openOrAttach('w1', { cwd: '/a', cols: 80, rows: 24 })
-    manager.openOrAttach('w2', { cwd: '/b', cols: 80, rows: 24 })
+    manager.openOrAttach('w1', 'term-1', { cwd: '/a', cols: 80, rows: 24 })
+    manager.openOrAttach('w2', 'term-1', { cwd: '/b', cols: 80, rows: 24 })
 
     manager.disposeAll()
     expect(ptys[0].killed).toEqual(['SIGTERM'])
     expect(ptys[1].killed).toEqual(['SIGTERM'])
-    expect(manager.has('w1')).toBe(false)
-    expect(manager.has('w2')).toBe(false)
+    expect(manager.has('w1', 'term-1')).toBe(false)
+    expect(manager.has('w2', 'term-1')).toBe(false)
   })
 })
 
 describe('TerminalManager clear', () => {
   it('wipes the retained scrollback so a reattach starts blank; the shell keeps running', () => {
     const { manager, ptys } = harness()
-    manager.openOrAttach('w1', { cwd: '/proj', cols: 80, rows: 24 })
+    manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })
     ptys[0].emitData('old output\r\n')
 
-    manager.clear('w1')
+    manager.clear('w1', 'term-1')
     // The pty was NOT killed (Clear ≠ Restart), and a reattach now replays nothing.
     expect(ptys[0].killed).toEqual([])
-    expect(manager.openOrAttach('w1', { cwd: '/proj', cols: 80, rows: 24 })).toMatchObject({
+    expect(manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })).toMatchObject({
       ok: true,
       snapshot: '',
     })
 
     // Post-clear output still streams and re-accumulates.
     ptys[0].emitData('new output')
-    expect(manager.openOrAttach('w1', { cwd: '/proj', cols: 80, rows: 24 })).toMatchObject({
+    expect(manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })).toMatchObject({
       snapshot: 'new output',
     })
   })
 
   it('is a no-op on an unknown session', () => {
     const { manager } = harness()
-    expect(() => manager.clear('missing')).not.toThrow()
+    expect(() => manager.clear('missing', 'term-1')).not.toThrow()
   })
 })
 
 describe('TerminalManager restart', () => {
   it('kills the old shell and spawns a fresh one in the SAME cwd, resetting scrollback', () => {
     const { manager, ptys, spawns, events } = harness()
-    manager.openOrAttach('w1', { cwd: '/proj', cols: 120, rows: 30 })
+    manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 120, rows: 30 })
     ptys[0].emitData('stale\r\n')
 
-    const result = manager.restart('w1', 100, 40)
+    const result = manager.restart('w1', 'term-1', 100, 40)
     expect(result).toMatchObject({ ok: true, snapshot: '', exited: false })
     expect(ptys[0].killed).toEqual(['SIGTERM']) // old shell killed
     expect(spawns[1]).toMatchObject({ cwd: '/proj', cols: 100, rows: 40 }) // fresh, same cwd, new size
@@ -314,8 +314,8 @@ describe('TerminalManager restart', () => {
 
   it('the killed old shell\'s late output/exit is suppressed (session was replaced)', () => {
     const { manager, ptys, events } = harness()
-    manager.openOrAttach('w1', { cwd: '/proj', cols: 80, rows: 24 })
-    manager.restart('w1', 80, 24)
+    manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })
+    manager.restart('w1', 'term-1', 80, 24)
     events.length = 0
 
     ptys[0].emitData('death rattle')
@@ -325,10 +325,10 @@ describe('TerminalManager restart', () => {
 
   it('revives an EXITED session (restart after the shell exited)', () => {
     const { manager, ptys, spawns } = harness()
-    manager.openOrAttach('w1', { cwd: '/proj', cols: 80, rows: 24 })
+    manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })
     ptys[0].emitExit(0)
 
-    const result = manager.restart('w1', 80, 24)
+    const result = manager.restart('w1', 'term-1', 80, 24)
     expect(result.ok).toBe(true)
     expect(spawns).toHaveLength(2)
     expect(ptys[0].killed).toEqual([]) // already dead — no SIGTERM
@@ -338,14 +338,14 @@ describe('TerminalManager restart', () => {
     // The manager never sees the agent; cwd is the session's own. This mirrors the
     // registrar contract: restart is addressed by workspaceId alone (no agentId).
     const { manager, spawns } = harness()
-    manager.openOrAttach('w1', { cwd: '/original/proj', cols: 80, rows: 24 })
-    manager.restart('w1', 80, 24)
+    manager.openOrAttach('w1', 'term-1', { cwd: '/original/proj', cols: 80, rows: 24 })
+    manager.restart('w1', 'term-1', 80, 24)
     expect(spawns[1].cwd).toBe('/original/proj')
   })
 
   it('an unknown session restart is a no-op error, spawning nothing', () => {
     const { manager, spawns } = harness()
-    expect(manager.restart('missing', 80, 24)).toEqual({ ok: false, error: 'No terminal session to restart.' })
+    expect(manager.restart('missing', 'term-1', 80, 24)).toEqual({ ok: false, error: 'No terminal session to restart.' })
     expect(spawns).toHaveLength(0)
   })
 
@@ -358,13 +358,67 @@ describe('TerminalManager restart', () => {
         throw new Error('ENOENT')
       },
     })
-    manager.openOrAttach('w1', { cwd: '/proj', cols: 80, rows: 24 })
+    manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const result = manager.restart('w1', 80, 24)
+    const result = manager.restart('w1', 'term-1', 80, 24)
     errSpy.mockRestore()
 
     expect(result.ok).toBe(false)
-    expect(manager.has('w1')).toBe(false)
+    expect(manager.has('w1', 'term-1')).toBe(false)
+  })
+})
+
+describe('TerminalManager multiple terminals per Workspace (slice 3)', () => {
+  it('keys sessions by (workspaceId, terminalId): two terminals are independent shells', () => {
+    const { manager, ptys, spawns, events } = harness()
+    manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })
+    manager.openOrAttach('w1', 'term-2', { cwd: '/proj', cols: 80, rows: 24 })
+    expect(spawns).toHaveLength(2) // two distinct shells in the same Workspace
+
+    manager.write('w1', 'term-2', 'in-2\r')
+    expect(ptys[1].written).toEqual(['in-2\r'])
+    expect(ptys[0].written).toEqual([]) // term-1 untouched
+
+    ptys[0].emitData('out-1')
+    expect(events).toContainEqual({
+      workspaceId: 'w1',
+      terminalId: 'term-1',
+      event: { type: 'output', data: 'out-1' },
+    })
+    // Each keeps its OWN scrollback.
+    expect(manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })).toMatchObject({
+      snapshot: 'out-1',
+    })
+    expect(manager.openOrAttach('w1', 'term-2', { cwd: '/proj', cols: 80, rows: 24 })).toMatchObject({
+      snapshot: '',
+    })
+  })
+
+  it('closing ONE terminal kills only its shell; the sibling keeps running', () => {
+    const { manager, ptys } = harness()
+    manager.openOrAttach('w1', 'term-1', { cwd: '/proj', cols: 80, rows: 24 })
+    manager.openOrAttach('w1', 'term-2', { cwd: '/proj', cols: 80, rows: 24 })
+
+    manager.close('w1', 'term-1')
+    expect(ptys[0].killed).toEqual(['SIGTERM'])
+    expect(ptys[1].killed).toEqual([]) // sibling untouched
+    expect(manager.has('w1', 'term-1')).toBe(false)
+    expect(manager.has('w1', 'term-2')).toBe(true)
+  })
+
+  it('closeWorkspace kills EVERY terminal of that Workspace, leaving other Workspaces alone', () => {
+    const { manager, ptys } = harness()
+    manager.openOrAttach('w1', 'term-1', { cwd: '/a', cols: 80, rows: 24 })
+    manager.openOrAttach('w1', 'term-2', { cwd: '/a', cols: 80, rows: 24 })
+    manager.openOrAttach('w2', 'term-1', { cwd: '/b', cols: 80, rows: 24 })
+
+    manager.closeWorkspace('w1')
+    expect(ptys[0].killed).toEqual(['SIGTERM']) // w1/term-1
+    expect(ptys[1].killed).toEqual(['SIGTERM']) // w1/term-2
+    expect(ptys[2].killed).toEqual([]) // w2/term-1 survives
+    expect(manager.has('w1', 'term-1')).toBe(false)
+    expect(manager.has('w1', 'term-2')).toBe(false)
+    expect(manager.has('w2', 'term-1')).toBe(true)
   })
 })
 

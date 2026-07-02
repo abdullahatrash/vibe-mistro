@@ -25,9 +25,12 @@ import { cn } from '../lib/utils'
  */
 export function TerminalSurface({
   workspaceId,
+  terminalId,
   agentId,
 }: {
   workspaceId: string
+  /** This tab's terminal session id (`term-N`) — the other half of the session key. */
+  terminalId: string
   /** The warm agent whose Workspace dir becomes the shell's cwd (#188 F3 addressing). */
   agentId: string
 }): JSX.Element {
@@ -68,7 +71,7 @@ export function TerminalSurface({
     // Subscribe BEFORE the open resolves so no output slips between the snapshot
     // and the live tail; filter to THIS Workspace's session (the acp:event pattern).
     const unsubscribe = window.api.onTerminalEvent((e) => {
-      if (e.workspaceId !== workspaceId) return
+      if (e.workspaceId !== workspaceId || e.terminalId !== terminalId) return
       if (e.event.type === 'output') {
         terminal.write(e.event.data)
         return
@@ -80,7 +83,7 @@ export function TerminalSurface({
     })
 
     void window.api
-      .terminalOpen({ agentId, workspaceId, cols: terminal.cols, rows: terminal.rows })
+      .terminalOpen({ agentId, workspaceId, terminalId, cols: terminal.cols, rows: terminal.rows })
       .then((result) => {
         if (disposed) return
         if (!result.ok) {
@@ -91,12 +94,12 @@ export function TerminalSurface({
         // A reattach can land with a stale size (the panel was resized while the
         // view was unmounted) — refit and tell the PTY.
         fit.fit()
-        void window.api.terminalResize({ workspaceId, cols: terminal.cols, rows: terminal.rows })
+        void window.api.terminalResize({ workspaceId, terminalId, cols: terminal.cols, rows: terminal.rows })
       })
 
     const dataDisposable = terminal.onData((data) => {
       if (exitedRef.current) return
-      void window.api.terminalWrite({ workspaceId, data })
+      void window.api.terminalWrite({ workspaceId, terminalId, data })
     })
 
     // Follow the panel's drag-resize / window resize: refit the grid, then push
@@ -104,7 +107,7 @@ export function TerminalSurface({
     const resizeObserver = new ResizeObserver(() => {
       if (disposed) return
       fit.fit()
-      void window.api.terminalResize({ workspaceId, cols: terminal.cols, rows: terminal.rows })
+      void window.api.terminalResize({ workspaceId, terminalId, cols: terminal.cols, rows: terminal.rows })
     })
     resizeObserver.observe(container)
 
@@ -120,12 +123,12 @@ export function TerminalSurface({
       terminalRef.current = null
       fitRef.current = null
     }
-  }, [workspaceId, agentId])
+  }, [workspaceId, terminalId, agentId])
 
   // Clear: wipe main's retained scrollback (so a reattach starts blank) and the
   // visible view. The shell keeps running — the next prompt is still live.
   function onClear(): void {
-    void window.api.terminalClear({ workspaceId })
+    void window.api.terminalClear({ workspaceId, terminalId })
     terminalRef.current?.clear()
     terminalRef.current?.focus()
   }
@@ -138,7 +141,7 @@ export function TerminalSurface({
     if (!terminal || !fit) return
     fit.fit()
     void window.api
-      .terminalRestart({ workspaceId, cols: terminal.cols, rows: terminal.rows })
+      .terminalRestart({ workspaceId, terminalId, cols: terminal.cols, rows: terminal.rows })
       .then((result) => {
         if (terminalRef.current !== terminal) return // unmounted mid-flight
         if (!result.ok) {

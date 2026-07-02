@@ -39,18 +39,22 @@ export const MIN_TERMINAL_ROWS = 1
 export const MAX_TERMINAL_ROWS = 500
 
 /**
- * This slice's single per-Workspace session id (t3code's client-chosen `term-1`
- * convention). Multiple terminals per Workspace (slice 3) mint `term-2`… and lift
- * the id into the args; every event already carries it so the stream shape is
- * forward-compatible.
+ * The FIRST terminal's id (t3code's client-chosen `term-1` convention). A
+ * Workspace hosts several terminals (slice 3), each a client-minted `term-N`; a
+ * session is keyed by `(workspaceId, terminalId)`, and every event carries the id.
  */
 export const DEFAULT_TERMINAL_ID = 'term-1'
+
+/** Max concurrent terminals per Workspace (t3code's per-group cap). */
+export const MAX_TERMINALS_PER_WORKSPACE = 4
 
 export interface TerminalOpenArgs {
   /** The warm agent whose Workspace dir becomes the shell's cwd (pool-resolved, #188 F3). */
   agentId: string
-  /** Our Workspace id — the session key all later calls address. */
+  /** Our Workspace id — half the session key all later calls address. */
   workspaceId: string
+  /** The client-minted terminal id (`term-1`, `term-2`, …) — the other half of the key. */
+  terminalId: string
   /** The xterm viewport's initial size (already fitted before open). */
   cols: number
   rows: number
@@ -66,26 +70,31 @@ export type TerminalOpenResult =
 
 export interface TerminalWriteArgs {
   workspaceId: string
+  terminalId: string
   /** Raw bytes from `xterm.onData` (UTF-8 text, control sequences included). */
   data: string
 }
 
 export interface TerminalResizeArgs {
   workspaceId: string
+  terminalId: string
   cols: number
   rows: number
 }
 
 export interface TerminalCloseArgs {
   workspaceId: string
+  terminalId: string
 }
 
 export interface TerminalClearArgs {
   workspaceId: string
+  terminalId: string
 }
 
 export interface TerminalRestartArgs {
   workspaceId: string
+  terminalId: string
   /** The xterm viewport's current size, so the fresh shell spawns already fitted. */
   cols: number
   rows: number

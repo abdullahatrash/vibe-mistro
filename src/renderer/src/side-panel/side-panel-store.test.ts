@@ -11,9 +11,11 @@ import {
   coerceSurface,
   EMPTY_PANEL_STATE,
   getWorkspacePanel,
+  MAX_TERMINALS_PER_WORKSPACE,
   openFileSurface,
   openSurface,
   openTerminalSurface,
+  terminalSurfaceCount,
   openWorkspaceFileSurface,
   openWorkspaceSurface,
   readPanelMap,
@@ -111,22 +113,33 @@ describe('openFileSurface', () => {
   })
 })
 
-describe('openTerminalSurface (ADR-0014)', () => {
-  const TERM: Surface = { id: 'terminal:term-1', kind: 'terminal', resourceId: 'term-1' }
+describe('openTerminalSurface (ADR-0014, slice 3 multi-terminal)', () => {
+  const T1: Surface = { id: 'terminal:term-1', kind: 'terminal', resourceId: 'term-1' }
+  const T2: Surface = { id: 'terminal:term-2', kind: 'terminal', resourceId: 'term-2' }
 
-  it('opens the term-1 terminal tab and activates it, opening the panel', () => {
-    expect(openTerminalSurface(empty())).toEqual({
-      isOpen: true,
-      activeSurfaceId: 'terminal:term-1',
-      surfaces: [TERM],
-    })
+  it('opens term-1 for the first terminal, activating it', () => {
+    expect(openTerminalSurface(empty())).toEqual({ isOpen: true, activeSurfaceId: 'terminal:term-1', surfaces: [T1] })
   })
 
-  it('re-activates the already-open terminal instead of duplicating (fixed resource id)', () => {
-    const withOthers = openSurface(openTerminalSurface(empty()), 'review')
-    const again = openTerminalSurface(withOthers)
-    expect(again.surfaces).toEqual([TERM, REVIEW])
-    expect(again.activeSurfaceId).toBe('terminal:term-1')
+  it('mints a NEW term-N each call (a second terminal, not a re-activation)', () => {
+    const one = openTerminalSurface(empty())
+    const two = openTerminalSurface(one)
+    expect(two.surfaces).toEqual([T1, T2])
+    expect(two.activeSurfaceId).toBe('terminal:term-2')
+  })
+
+  it('reuses the lowest-free id after a close (gap reuse keeps ids small)', () => {
+    const two = openTerminalSurface(openTerminalSurface(empty())) // term-1, term-2
+    const closedFirst = closeSurface(two, 'terminal:term-1') // frees term-1
+    const reopened = openTerminalSurface(closedFirst)
+    expect(reopened.surfaces.map((s) => s.id)).toEqual(['terminal:term-2', 'terminal:term-1'])
+  })
+
+  it('no-ops at the per-Workspace cap (returns the same state)', () => {
+    let state = empty()
+    for (let i = 0; i < MAX_TERMINALS_PER_WORKSPACE; i++) state = openTerminalSurface(state)
+    expect(terminalSurfaceCount(state)).toBe(MAX_TERMINALS_PER_WORKSPACE)
+    expect(openTerminalSurface(state)).toBe(state) // same ref — capped
   })
 })
 
@@ -381,15 +394,20 @@ describe('coerceSurface', () => {
     expect(coerceSurface({ id: 'file:5', kind: 'file', relativePath: 5 })).toBeNull() // non-string
   })
 
-  it('accepts the slice-1 terminal singleton and drops any other terminal blob', () => {
+  it('accepts any well-formed term-N terminal tab and drops malformed ones', () => {
     expect(coerceSurface({ id: 'terminal:term-1', kind: 'terminal', resourceId: 'term-1' })).toEqual({
       id: 'terminal:term-1',
       kind: 'terminal',
       resourceId: 'term-1',
     })
+    expect(coerceSurface({ id: 'terminal:term-3', kind: 'terminal', resourceId: 'term-3' })).toEqual({
+      id: 'terminal:term-3',
+      kind: 'terminal',
+      resourceId: 'term-3',
+    })
     expect(coerceSurface({ kind: 'terminal' })).toBeNull() // no id/resource
-    expect(coerceSurface({ id: 'terminal:term-2', kind: 'terminal', resourceId: 'term-2' })).toBeNull() // future multi-terminal blob
-    expect(coerceSurface({ id: 'terminal:term-1', kind: 'terminal', resourceId: 'term-9' })).toBeNull() // mismatched
+    expect(coerceSurface({ id: 'terminal:evil', kind: 'terminal', resourceId: 'evil' })).toBeNull() // not term-N
+    expect(coerceSurface({ id: 'terminal:term-1', kind: 'terminal', resourceId: 'term-9' })).toBeNull() // id≠resource
   })
 
   it('drops not-yet-implemented / unknown / malformed descriptors', () => {

@@ -58,9 +58,9 @@ our side panel is per-Workspace (t3code's is per-Thread; our Threads share the w
   pins a warm agent, and an evicted agent leaves the shell running. Only `terminal:open` needs the
   agent (for the cwd); a session whose agent was later evicted keeps working — write/resize/close
   address the session, not the agent.
-- Deferred to later slices, recorded here so they're choices not gaps: multiple terminals per
-  Workspace (slice 3), link provider / selection-to-composer / live re-theme (slice 4), splits,
-  disk-persisted history, subprocess-name tab labels, Windows/conpty + WSL.
+- Deferred to later slices, recorded here so they're choices not gaps: link provider /
+  selection-to-composer / live re-theme (slice 4), splits, disk-persisted history, subprocess-name
+  tab labels, Windows/conpty + WSL.
 
 ## Slice 2 — Clear + Restart affordances
 
@@ -76,3 +76,13 @@ Output **coalescing / sequence-numbered attach** (t3code has both) is deliberate
 reattach replays the full scrollback snapshot then streams live, so there is no delta to reconcile and
 no gap to sequence — and per-chunk emit rendered real shell output (including a build log) without
 jank in slice 1. Revisit only if profiling shows IPC churn under sustained high-throughput output.
+
+## Slice 3 — multiple terminals per Workspace
+
+A session is now keyed by `(workspaceId, terminalId)` (t3code's `threadId\0terminalId`), so a Workspace
+hosts several shells, each its own `terminal:<term-N>` Surface tab. The renderer mints the lowest-free
+`term-N` (gap-reuse keeps ids small after a close), capped at `MAX_TERMINALS_PER_WORKSPACE = 4`; the
+launcher card and "+"-menu open a NEW terminal each (disabled at the cap). Every IPC now carries
+`terminalId`; the event stream already did. Per-tab close kills only that shell; `closeWorkspace`
+(Workspace removal) kills all of a Workspace's shells; the session-identity guard is unchanged (keyed
+by the composite string). Splits, subprocess-name labels, and disk history stay deferred.

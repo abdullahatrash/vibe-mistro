@@ -115,29 +115,49 @@ export function openFileSurface(state: WorkspacePanelState, relativePath: string
   return upsertSurface(state, fileSurface(relativePath))
 }
 
-/**
- * This slice's single per-Workspace terminal session id (ADR-0014; t3code's
- * client-chosen `term-1`). Slice 3 mints `term-2`… for additional tabs.
- */
-export const DEFAULT_TERMINAL_RESOURCE_ID = 'term-1'
+/** Max concurrent terminals per Workspace (ADR-0014; t3code's per-group cap). */
+export const MAX_TERMINALS_PER_WORKSPACE = 4
 
-/** The slice-1 terminal descriptor: one session per Workspace, id keyed by the resource. */
-function terminalSurface(): Surface {
-  return {
-    id: `terminal:${DEFAULT_TERMINAL_RESOURCE_ID}`,
-    kind: 'terminal',
-    resourceId: DEFAULT_TERMINAL_RESOURCE_ID,
-  }
+/** A terminal descriptor for a client-minted `term-N` resource id (ADR-0014). */
+function terminalSurface(resourceId: string): Surface {
+  return { id: `terminal:${resourceId}`, kind: 'terminal', resourceId }
+}
+
+/** The `N` of a `term-N` resource id, or 0 if it doesn't match (defensive). */
+function terminalNumberOf(resourceId: string): number {
+  const match = /^term-(\d+)$/.exec(resourceId)
+  return match ? Number(match[1]) : 0
 }
 
 /**
- * Open (or re-activate) the Workspace's terminal Surface (ADR-0014). Effectively a
- * singleton this slice — the fixed `term-1` resource id makes `upsertSurface` dedupe
- * it — but deliberately NOT a `SingletonKind`: the descriptor already carries the
- * resource id, so slice 3's multi-terminal tabs extend this without a shape change.
+ * Mint the LOWEST-free `term-N` id for the Workspace: reuse a gap left by a closed
+ * terminal (so ids stay small + stable) rather than always incrementing. `term-1`
+ * for the first, `term-2` next, etc.
+ */
+function nextTerminalResourceId(state: WorkspacePanelState): string {
+  const used = new Set(
+    state.surfaces.filter((s) => s.kind === 'terminal').map((s) => terminalNumberOf(s.resourceId)),
+  )
+  let n = 1
+  while (used.has(n)) n += 1
+  return `term-${n}`
+}
+
+/**
+ * Open a NEW terminal Surface for the Workspace (ADR-0014, slice 3) and activate it —
+ * up to {@link MAX_TERMINALS_PER_WORKSPACE}, past which it's a no-op (returns the same
+ * state; the UI disables the affordance). Unlike the singletons, each call adds a
+ * distinct `term-N` tab, so the launcher card / "+"-menu spawn additional shells.
  */
 export function openTerminalSurface(state: WorkspacePanelState): WorkspacePanelState {
-  return upsertSurface(state, terminalSurface())
+  const count = state.surfaces.filter((s) => s.kind === 'terminal').length
+  if (count >= MAX_TERMINALS_PER_WORKSPACE) return state
+  return upsertSurface(state, terminalSurface(nextTerminalResourceId(state)))
+}
+
+/** How many terminal Surfaces the Workspace has open (drives the at-cap affordance). */
+export function terminalSurfaceCount(state: WorkspacePanelState): number {
+  return state.surfaces.filter((s) => s.kind === 'terminal').length
 }
 
 /**
@@ -265,12 +285,12 @@ export function coerceSurface(raw: unknown): Surface | null {
     return null
   }
   if (kind === 'terminal') {
-    // A persisted terminal tab restores ONLY as this slice's fixed `term-1` singleton
-    // (activating it opens a fresh shell — the session itself never persists). Any
-    // other resource id is a future multi-terminal blob — dropped, not trusted.
+    // A persisted terminal tab restores its `term-N` slot (a fresh shell spawns on
+    // activate — the session itself never persists). Accept a well-formed `term-<n>`
+    // whose `id` matches the convention; drop anything malformed.
     const resourceId = (raw as { resourceId?: unknown }).resourceId
     const id = (raw as { id?: unknown }).id
-    if (resourceId === DEFAULT_TERMINAL_RESOURCE_ID && id === `terminal:${resourceId}`) {
+    if (typeof resourceId === 'string' && /^term-\d+$/.test(resourceId) && id === `terminal:${resourceId}`) {
       return { id: `terminal:${resourceId}`, kind: 'terminal', resourceId }
     }
     return null
