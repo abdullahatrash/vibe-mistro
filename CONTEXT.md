@@ -38,10 +38,10 @@ _Avoid_: approval, confirmation, prompt (reserve "prompt" for the user's message
 
 **Surface**:
 One open area in the side panel, shown as a tab in its tab strip. Review (the git Changes panel) and
-Files (the Files browser) are singletons; each previewed file is its own Surface; Terminal and Browser
-are reserved (not yet built). Many Surfaces can be open at once; one is active (visible). Open-Surface
-state is per-Workspace.
-_Avoid_: view, pane, dock (reserve "dock" for the future embedded terminal's chrome).
+Files (the Files browser) are singletons; each previewed file is its own Surface; Terminal is the
+Workspace shell (one session this slice); Browser is reserved (not yet built). Many Surfaces can be
+open at once; one is active (visible). Open-Surface state is per-Workspace.
+_Avoid_: view, pane, dock.
 
 **Side panel**:
 The right-hand panel hosting Surfaces. Closed by default; toggled from the window header or a
@@ -55,6 +55,14 @@ The Files Surface's content — a searchable tree of the Workspace's files. Open
 that file's own Surface: a read-only preview topped by a read-only breadcrumb of its path. Browsing
 and previewing never change files and never involve the agent.
 _Avoid_: file tree (the widget, not the feature), explorer, finder.
+
+**Terminal session**:
+The real user shell (PTY) a Workspace's Terminal Surface drives, hosted in the main process
+(ADR-0014). Deliberately UNCONFINED — full CLI parity, unlike the confined Files reads — and
+independent of the warm agent: it outlives tab switches and panel closes (the view reattaches and
+replays its scrollback), and dies only on its tab's explicit close, Workspace removal, or app quit.
+One session per Workspace this slice (`term-1`).
+_Avoid_: console; "terminal dock" (the epic's working name, not a UI term).
 
 ## Agent controls
 

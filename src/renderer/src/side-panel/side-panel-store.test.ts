@@ -13,6 +13,7 @@ import {
   getWorkspacePanel,
   openFileSurface,
   openSurface,
+  openTerminalSurface,
   openWorkspaceFileSurface,
   openWorkspaceSurface,
   readPanelMap,
@@ -107,6 +108,25 @@ describe('openFileSurface', () => {
     const withFile = openFileSurface(withReview, 'src/app.ts')
     expect(withFile.surfaces).toEqual([REVIEW, APP])
     expect(withFile.activeSurfaceId).toBe('file:src/app.ts')
+  })
+})
+
+describe('openTerminalSurface (ADR-0014)', () => {
+  const TERM: Surface = { id: 'terminal:term-1', kind: 'terminal', resourceId: 'term-1' }
+
+  it('opens the term-1 terminal tab and activates it, opening the panel', () => {
+    expect(openTerminalSurface(empty())).toEqual({
+      isOpen: true,
+      activeSurfaceId: 'terminal:term-1',
+      surfaces: [TERM],
+    })
+  })
+
+  it('re-activates the already-open terminal instead of duplicating (fixed resource id)', () => {
+    const withOthers = openSurface(openTerminalSurface(empty()), 'review')
+    const again = openTerminalSurface(withOthers)
+    expect(again.surfaces).toEqual([TERM, REVIEW])
+    expect(again.activeSurfaceId).toBe('terminal:term-1')
   })
 })
 
@@ -361,8 +381,19 @@ describe('coerceSurface', () => {
     expect(coerceSurface({ id: 'file:5', kind: 'file', relativePath: 5 })).toBeNull() // non-string
   })
 
+  it('accepts the slice-1 terminal singleton and drops any other terminal blob', () => {
+    expect(coerceSurface({ id: 'terminal:term-1', kind: 'terminal', resourceId: 'term-1' })).toEqual({
+      id: 'terminal:term-1',
+      kind: 'terminal',
+      resourceId: 'term-1',
+    })
+    expect(coerceSurface({ kind: 'terminal' })).toBeNull() // no id/resource
+    expect(coerceSurface({ id: 'terminal:term-2', kind: 'terminal', resourceId: 'term-2' })).toBeNull() // future multi-terminal blob
+    expect(coerceSurface({ id: 'terminal:term-1', kind: 'terminal', resourceId: 'term-9' })).toBeNull() // mismatched
+  })
+
   it('drops not-yet-implemented / unknown / malformed descriptors', () => {
-    expect(coerceSurface({ kind: 'terminal' })).toBeNull()
+    expect(coerceSurface({ kind: 'browser' })).toBeNull()
     expect(coerceSurface({ kind: 'nope' })).toBeNull()
     expect(coerceSurface(null)).toBeNull()
     expect(coerceSurface('review')).toBeNull()
