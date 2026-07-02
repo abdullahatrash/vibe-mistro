@@ -327,6 +327,7 @@ function PanelBody({
                 workspaceId={workspaceId}
                 terminalId={active.resourceId}
                 agentId={agentId}
+                activeThreadId={activeThreadId}
               />
             )}
             {active?.kind === 'file' && (

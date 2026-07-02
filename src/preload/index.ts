@@ -22,6 +22,7 @@ import {
   type FilesListResult,
   type FilesReadArgs,
   type FilesReadResult,
+  type OpenExternalArgs,
   type TerminalClearArgs,
   type TerminalCloseArgs,
   type TerminalEvent,
@@ -128,6 +129,7 @@ const api = {
   revealPath: (args: RevealPathArgs): Promise<void> => ipcRenderer.invoke(IPC.revealPath, args),
   filesList: (args: FilesListArgs): Promise<FilesListResult> => ipcRenderer.invoke(IPC.filesList, args),
   filesRead: (args: FilesReadArgs): Promise<FilesReadResult> => ipcRenderer.invoke(IPC.filesRead, args),
+  openExternal: (args: OpenExternalArgs): Promise<void> => ipcRenderer.invoke(IPC.openExternal, args),
   terminalOpen: (args: TerminalOpenArgs): Promise<TerminalOpenResult> =>
     ipcRenderer.invoke(IPC.terminalOpen, args),
   terminalWrite: (args: TerminalWriteArgs): Promise<void> =>

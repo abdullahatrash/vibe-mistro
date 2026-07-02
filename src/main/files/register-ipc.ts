@@ -6,12 +6,14 @@ import {
   type FilesListResult,
   type FilesReadArgs,
   type FilesReadResult,
+  type OpenExternalArgs,
   type RevealPathArgs,
 } from '../../shared/ipc'
 import type { AgentPool } from '../agent-pool'
 import { listFiles } from './list-files'
 import { readWorkspaceFile } from './read-file'
 import { confineExistingFile } from './confine'
+import { safeExternalUrl } from './safe-external-url'
 import type { FilesListCache } from './cache'
 
 /**
@@ -76,5 +78,18 @@ export function registerFilesIpc(deps: { pool: AgentPool; cache: FilesListCache 
     const agent = deps.pool.get(args.agentId)
     if (!agent) return { kind: 'error' }
     return readWorkspaceFile(agent.workspaceDir, args.relativePath)
+  })
+
+  ipcMain.handle(IPC.openExternal, (_event, args: OpenExternalArgs): void => {
+    // Open an http(s) URL clicked in terminal output in the system browser (ADR-0014).
+    // The URL is UNTRUSTED (a command can print anything), so `safeExternalUrl` admits
+    // ONLY http/https — a `file:`/custom scheme is refused so a click can't launch a
+    // local handler or disclose a file. Best-effort: a rejected URL is a logged no-op.
+    const url = safeExternalUrl(args.url)
+    if (!url) {
+      console.error(`[vibe-mistro:open-external] refused non-http(s) URL: ${args.url}`)
+      return
+    }
+    void shell.openExternal(url)
   })
 }

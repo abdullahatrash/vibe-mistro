@@ -58,9 +58,8 @@ our side panel is per-Workspace (t3code's is per-Thread; our Threads share the w
   pins a warm agent, and an evicted agent leaves the shell running. Only `terminal:open` needs the
   agent (for the cwd); a session whose agent was later evicted keeps working — write/resize/close
   address the session, not the agent.
-- Deferred to later slices, recorded here so they're choices not gaps: link provider /
-  selection-to-composer / live re-theme (slice 4), splits, disk-persisted history, subprocess-name
-  tab labels, Windows/conpty + WSL.
+- Deferred, recorded here so they're choices not gaps: splits, disk-persisted history,
+  subprocess-name tab labels, Windows/conpty + WSL.
 
 ## Slice 2 — Clear + Restart affordances
 
@@ -86,3 +85,25 @@ launcher card and "+"-menu open a NEW terminal each (disabled at the cap). Every
 `terminalId`; the event stream already did. Per-tab close kills only that shell; `closeWorkspace`
 (Workspace removal) kills all of a Workspace's shells; the session-identity guard is unchanged (keyed
 by the composite string). Splits, subprocess-name labels, and disk history stay deferred.
+
+## Slice 4 — integration polish
+
+Three touches make the terminal a first-class panel Surface:
+
+- **Live re-theme** — the xterm theme is computed CSS read at mount; a `MutationObserver` on the root's
+  `class`/`style` re-reads it on a dark/light flip (t3code's approach), so an open terminal doesn't
+  strand stale colors.
+- **Clickable URLs** — `@xterm/addon-web-links` (added; still no webgl/search) with a custom handler
+  routing to a NEW `shell:open-external` IPC. Because terminal output is UNTRUSTED, main opens the URL
+  ONLY when `safeExternalUrl` admits it — `http`/`https` only, never a `file:`/custom scheme that could
+  launch a local handler. This is the one net-new capability in the slice; the guard is its boundary.
+- **Selection → composer** ("Add to chat") — a toolbar button inserts the terminal's current selection
+  into the ACTIVE Thread's composer draft, verbatim, via a raw-text sibling of the #189
+  `composer-insert` channel (`emitComposerInsertText` / `appendText` — no `@` prefix, newline-separated).
+  The terminal is per-Workspace but the composer per-Thread, so it targets `activeThreadId` (null → the
+  button disables); plain text only, so the agent sees exactly what the user pasted (ADR-0002 intact).
+
+**File-path links → file preview** are deliberately NOT built: resolving a printed path reliably needs
+the shell's live cwd (a `cd` into a subdir makes `src/foo` relative to there, not the Workspace root),
+which needs shell-integration cwd tracking (OSC 7). Without it the resolution would silently mis-open;
+deferred until cwd tracking lands. URLs need no such context, hence they ship now.
