@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { gitCommit } from './commit'
-import type { GitRun } from './status'
+import type { GitRun } from './run'
 
 /**
  * `gitCommit` is the first git WRITE (#86). Its testable seam is the COMMAND SEQUENCE +

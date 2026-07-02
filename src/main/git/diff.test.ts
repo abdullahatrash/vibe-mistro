@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { createHash } from 'node:crypto'
 import { finalizeDiff, readGitDiff } from './diff'
-import type { GitRun } from './status'
+import type { GitRun } from './run'
 
 /**
  * The pure `finalizeDiff` (hash + cap) is the testable seam; `readGitDiff` is the thin

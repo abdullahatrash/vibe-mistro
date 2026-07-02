@@ -1,6 +1,7 @@
 import { useEffect, useState, type JSX } from 'react'
 import type { ThreadMeta } from '../../../shared/ipc'
-import { Item, UsageBar } from './Conversation'
+import { Item } from './items/Item'
+import { UsageBar } from './items/UsageBar'
 import { initialConversationState, type ConversationState } from './reducer'
 import { replayTranscript } from './replay'
 

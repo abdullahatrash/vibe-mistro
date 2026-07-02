@@ -1,8 +1,7 @@
 import { open, realpath, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import type { FilesReadResult } from '../../shared/ipc'
-import { resolveWorkspacePath } from '../resolve-workspace-path'
-import { isWithinDir } from '../open-target'
+import { confineExistingFile } from './confine'
 
 /**
  * The Workspace file reader for the read-only preview (#189, ADR-0013 decisions 2-3). Given a
@@ -10,15 +9,10 @@ import { isWithinDir } from '../open-target'
  * for binary content, and returns a discriminated {@link FilesReadResult} the preview renders
  * without ever showing garbage. STRICTLY read-only — there is no write path anywhere in here.
  *
- * CONFINEMENT (the security core; the SAME posture + machinery as the `revealPath` handler, so
- * the two are easy to compare):
- *   1. `realpath` the Workspace root once.
- *   2. Resolve the (relative) target against the root via `resolveWorkspacePath` — an absolute or
- *      `~` input resolves too, but step 4 rejects it if it lands outside.
- *   3. `stat` it; a non-regular-file (directory, socket, missing) → `error`.
- *   4. `realpath` the target (collapsing any symlink) and require `isWithinDir(realRoot, realTarget)`;
- *      a `..`/absolute escape or a symlink pointing OUT of the tree → `error` (logged). We only ever
- *      `readFile` the realpath'd, in-tree target, so an out-of-tree file's bytes are never read.
+ * CONFINEMENT (the security core): the SHARED `confineExistingFile` (files/confine.ts) — the same
+ * machinery the `revealPath` handler uses, maintained once. A non-regular-file, a `..`/absolute
+ * escape, or a symlink pointing OUT of the tree → `error` (logged). We only ever read the
+ * realpath'd, in-tree target, so an out-of-tree file's bytes are never read.
  *
  * CLASSIFY: a huge file is rejected `tooLarge` WITHOUT loading it fully. `stat.size` is a cheap
  * fast-path (skip opening an obviously-huge file), but the AUTHORITATIVE cap is a BOUNDED read:
@@ -88,24 +82,21 @@ export async function readWorkspaceFile(
   const homeDir = opts.homeDir ?? homedir()
 
   try {
-    const realRoot = await fs.realpath(workspaceDir)
-    const requested = resolveWorkspacePath(workspaceDir, relativePath, homeDir)
-    const stats = await fs.stat(requested)
-    if (!stats.isFile()) return { kind: 'error' } // a dir / socket / missing target — refuse
-
-    const realTarget = await fs.realpath(requested)
-    if (!isWithinDir(realRoot, realTarget)) {
-      // An out-of-tree target (a `..`/absolute path, or a symlink escaping the root). Log the
-      // realpath for main's console only — the renderer gets a bare `error`, never the path.
-      console.error(`[vibe-mistro:files-read] refused (outside Workspace): ${realTarget}`)
-      return { kind: 'error' }
+    const confined = await confineExistingFile(workspaceDir, relativePath, homeDir, fs)
+    if (!confined.ok) {
+      if (confined.reason === 'outside-workspace') {
+        // An out-of-tree target (a `..`/absolute path, or a symlink escaping the root). Log the
+        // realpath for main's console only — the renderer gets a bare `error`, never the path.
+        console.error(`[vibe-mistro:files-read] refused (outside Workspace): ${confined.realTarget}`)
+      }
+      return { kind: 'error' } // a dir / socket / out-of-tree target — refuse
     }
 
-    if (stats.size > maxBytes) return { kind: 'tooLarge' } // cheap fast-path: skip an obviously-huge file
+    if (confined.size > maxBytes) return { kind: 'tooLarge' } // cheap fast-path: skip an obviously-huge file
 
     // Authoritative cap (closes the stat→read TOCTOU): read at most maxBytes+1 bytes from the
     // realpath'd, in-tree target. If maxBytes+1 come back, the file grew past the cap → tooLarge.
-    const buf = await fs.readBounded(realTarget, maxBytes + 1)
+    const buf = await fs.readBounded(confined.realTarget, maxBytes + 1)
     if (buf.length > maxBytes) return { kind: 'tooLarge' }
     if (looksBinary(buf)) return { kind: 'binary' }
     return { kind: 'text', content: buf.toString('utf8') }

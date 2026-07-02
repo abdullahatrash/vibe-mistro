@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { parseGitStatus, readGitStatus, type GitRun } from './status'
+import { parseGitStatus, readGitStatus } from './status'
+import type { GitRun } from './run'
 
 /**
  * The parser is the pure seam — fixtures are VERBATIM from real `git status

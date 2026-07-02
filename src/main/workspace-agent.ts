@@ -639,11 +639,19 @@ export class WorkspaceAgent extends EventEmitter {
       ...(images ?? []).map((img) => ({ type: 'image', data: img.data, mime_type: img.mimeType })),
       { type: 'text', text },
     ]
+    return this.requestInitialized<PromptResult>('session/prompt', { sessionId, prompt: blocks })
+  }
+
+  /**
+   * Send one initialized-only request, mapping any failure through
+   * `mapErrorAndCacheAuth` (so a mid-session -32000 flips the cached auth state).
+   * Every session-scoped method goes through this, so none can forget the
+   * initialization guard or the auth-cache mapping.
+   */
+  private async requestInitialized<T>(method: string, params: unknown): Promise<T> {
+    if (!this.initialized) throw new WorkspaceAgentError('Agent is not initialized; call start() first.')
     try {
-      return await this.client.request<PromptResult>('session/prompt', {
-        sessionId,
-        prompt: blocks,
-      })
+      return await this.client.request<T>(method, params)
     } catch (err) {
       throw this.mapErrorAndCacheAuth(err)
     }
@@ -656,12 +664,7 @@ export class WorkspaceAgent extends EventEmitter {
    * IPC handler can surface the error and the renderer can revert.
    */
   async setMode(sessionId: string, modeId: string): Promise<void> {
-    if (!this.initialized) throw new WorkspaceAgentError('Agent is not initialized; call start() first.')
-    try {
-      await this.client.request('session/set_mode', { sessionId, modeId })
-    } catch (err) {
-      throw this.mapErrorAndCacheAuth(err)
-    }
+    await this.requestInitialized('session/set_mode', { sessionId, modeId })
   }
 
   /**
@@ -671,12 +674,7 @@ export class WorkspaceAgent extends EventEmitter {
    * `models.availableModels` — a `{}` is not proof the value was valid.
    */
   async setModel(sessionId: string, modelId: string): Promise<void> {
-    if (!this.initialized) throw new WorkspaceAgentError('Agent is not initialized; call start() first.')
-    try {
-      await this.client.request('session/set_model', { sessionId, modelId })
-    } catch (err) {
-      throw this.mapErrorAndCacheAuth(err)
-    }
+    await this.requestInitialized('session/set_model', { sessionId, modelId })
   }
 
   /**
@@ -686,16 +684,11 @@ export class WorkspaceAgent extends EventEmitter {
    * of the `thinking` option values (`off`/`low`/`medium`/`high`/`max`).
    */
   async setReasoningEffort(sessionId: string, value: string): Promise<void> {
-    if (!this.initialized) throw new WorkspaceAgentError('Agent is not initialized; call start() first.')
-    try {
-      await this.client.request('session/set_config_option', {
-        sessionId,
-        configId: REASONING_EFFORT_CONFIG_ID,
-        value,
-      })
-    } catch (err) {
-      throw this.mapErrorAndCacheAuth(err)
-    }
+    await this.requestInitialized('session/set_config_option', {
+      sessionId,
+      configId: REASONING_EFFORT_CONFIG_ID,
+      value,
+    })
   }
 
   /**
@@ -708,12 +701,7 @@ export class WorkspaceAgent extends EventEmitter {
    * auth-cached) so the handler can log it.
    */
   async setTitle(sessionId: string, title: string): Promise<void> {
-    if (!this.initialized) throw new WorkspaceAgentError('Agent is not initialized; call start() first.')
-    try {
-      await this.client.request('_session/set_title', { sessionId, title })
-    } catch (err) {
-      throw this.mapErrorAndCacheAuth(err)
-    }
+    await this.requestInitialized('_session/set_title', { sessionId, title })
   }
 
   /**

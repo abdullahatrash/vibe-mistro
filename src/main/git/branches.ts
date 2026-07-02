@@ -1,4 +1,4 @@
-import { defaultGitRun, type GitRun } from './status'
+import { defaultGitRun, errorMessage, failReason, type GitRun } from './run'
 import type { GitBranch, GitBranchesResult, GitOpResult } from '../../shared/ipc'
 
 /**
@@ -93,17 +93,20 @@ export async function gitBranches(cwd: string, run: GitRun = defaultGitRun): Pro
   try {
     // `-c core.quotePath=false` keeps unicode branch names plain UTF-8 (consistent with
     // #84-#86). `--format` is ONE argv element (no shell, so no surrounding quotes).
-    const refs = await run(
-      ['-c', 'core.quotePath=false', 'for-each-ref', '--format=%(HEAD) %(refname)', 'refs/heads', 'refs/remotes'],
-      cwd,
-    )
+    // The two reads are independent, so run them together (like `readGitStatus`); the
+    // default-branch probe is best-effort — a non-zero exit (no origin/HEAD) leaves it null.
+    const [refs, sym] = await Promise.all([
+      run(
+        ['-c', 'core.quotePath=false', 'for-each-ref', '--format=%(HEAD) %(refname)', 'refs/heads', 'refs/remotes'],
+        cwd,
+      ),
+      run(['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], cwd),
+    ])
     if (refs.code !== 0) return { ok: false, error: failReason(refs) }
-    // Best-effort default-branch probe — a non-zero exit (no origin/HEAD) leaves it null.
-    const sym = await run(['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], cwd)
     const defaultName = sym.code === 0 ? defaultBranchName(sym.stdout) : null
     return { ok: true, branches: parseBranches(refs.stdout, defaultName) }
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    return { ok: false, error: errorMessage(err) }
   }
 }
 
@@ -137,7 +140,7 @@ export async function gitCheckout(
     if (res.code !== 0) return { ok: false, error: failReason(res) }
     return { ok: true }
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    return { ok: false, error: errorMessage(err) }
   }
 }
 
@@ -152,15 +155,6 @@ export async function gitCreateBranch(cwd: string, name: string, run: GitRun = d
     if (res.code !== 0) return { ok: false, error: failReason(res) }
     return { ok: true }
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    return { ok: false, error: errorMessage(err) }
   }
-}
-
-/**
- * Map a non-zero git step to its failure reason. git puts switch refusals / collisions on
- * STDERR, so prefer stderr and fall back to stdout — never collapse to a generic message
- * (#78 / #86 style).
- */
-function failReason(res: { stdout: string; stderr?: string; code: number }): string {
-  return (res.stderr ?? '').trim() || res.stdout.trim() || 'git command failed'
 }
