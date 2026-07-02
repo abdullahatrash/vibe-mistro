@@ -1,32 +1,13 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type WebContents } from 'electron'
 import { mkdir } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
-import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import {
   IPC,
   type CancelTurnArgs,
   type DeleteThreadResult,
-  type GitBranchesArgs,
-  type GitBranchesResult,
-  type GitBranchOpArgs,
-  type GitCommitArgs,
-  type GitCommitResult,
-  type GitDiffArgs,
-  type GitDiffResult,
-  type GitOpResult,
-  type GhCreatePrArgs,
-  type GhCreateResult,
-  type GhCurrentPrArgs,
-  type GhPrResult,
   type GitStatusEvent,
-  type GitStatusSubscriptionArgs,
-  type FilesListArgs,
-  type FilesListResult,
-  type FilesReadArgs,
-  type FilesReadResult,
   type ListMetadataResult,
-  type RevealPathArgs,
   type OpenThreadArgs,
   type ReadTranscriptResult,
   type RemoveWorkspaceResult,
@@ -47,7 +28,6 @@ import {
   type SignOutResult,
   type StartThreadArgs,
   type StartThreadResult,
-  type ThreadAgentControls,
   type ThreadConnection,
   type ThreadStatusEvent,
   type ThreadTitleEvent,
@@ -65,25 +45,20 @@ import {
   turnCompleteEntry,
   turnErrorEntry,
   userPromptEntry,
-  type TranscriptEntry,
 } from './persistence/transcript'
+import { TranscriptBridge } from './persistence/transcript-bridge'
 import { WorkspaceAgent, WorkspaceAgentError } from './workspace-agent'
 import { AgentPool } from './agent-pool'
-import { isProtected } from './agent-protection'
-import { controlsOf, ensureBoundSession, resolveContinueTarget } from './thread-binding'
+import { AgentActivity } from './agent-activity'
+import { ensureBoundSession, resolveContinueTarget } from './thread-binding'
 import { deleteThread } from './persistence/delete-thread'
 import { removeWorkspace } from './persistence/remove-workspace'
 import { permissionRequestIdOf, ThreadStatusTracker, type ThreadStatusChange } from './thread-status'
 import { gitFetch, readGitStatus } from './git/status'
-import { readGitDiff } from './git/diff'
-import { gitCommit } from './git/commit'
-import { gitBranches, gitCheckout, gitCreateBranch } from './git/branches'
-import { ghCreatePr, ghCurrentPr } from './git/github'
 import { GitStatusManager } from './git/status-stream'
 import { chokidarWatchFactory, realClock } from './git/runtime'
-import { listFiles } from './files/list-files'
-import { readWorkspaceFile } from './files/read-file'
-import { confineExistingFile } from './files/confine'
+import { registerGitIpc } from './git/register-ipc'
+import { registerFilesIpc } from './files/register-ipc'
 import { FilesListCache, shouldInvalidateFilesCacheOnGitStatus } from './files/cache'
 
 /**
@@ -127,36 +102,33 @@ const MAX_WARM_AGENTS = 4
 const SWEEP_INTERVAL_MS = 60 * 1000
 
 /**
- * The agentId of the Workspace currently ON SCREEN (TB5 #50), reported by the
- * renderer via `setActiveAgent`. Protected from eviction so the Workspace the user
- * is looking at is never trimmed by the idle/cap policy. Null when the selection
- * has no warm agent (idle/connecting/error) — nothing to protect.
+ * The eviction-protection signals (TB5 #50) — which agent is ON SCREEN, which have a
+ * turn in flight, which are mid-sign-in — as one tested unit (agent-activity.ts). The
+ * pool's policies consult `isAgentProtected` below; the DECISION itself is the pure
+ * `isProtected` (agent-protection.ts), which the class feeds with live state.
  *
- * Single-window assumption: this is an app-GLOBAL protecting the one window's
- * on-screen agent (the pool itself is process-global today — see
- * `window-all-closed`). If a multi-window slice ever lands, protection must become
- * per-window (a set/map of active agents, one per window) or one window's eviction
- * sweep could evict another window's on-screen agent.
+ * Single-window assumption: `setActive` tracks the one window's on-screen agent (the
+ * pool itself is process-global today — see `window-all-closed`). If a multi-window
+ * slice ever lands, protection must become per-window (a set/map of active agents, one
+ * per window) or one window's eviction sweep could evict another window's on-screen agent.
  */
-let activeAgentId: string | null = null
+const activity = new AgentActivity()
 
 /**
- * Agents with a prompt turn IN FLIGHT (TB5 #50), by agentId -> open-turn count.
- * An agent mid-turn is protected from eviction so a streaming Workspace is never
- * disposed under the user. A count (not a flag) tolerates overlapping prompts; the
- * entry is removed when it hits zero so the map can't leak.
+ * The eviction-protection predicate (TB5 #50) handed to the pool's pure policies:
+ * NEVER evict the on-screen Workspace's agent, one mid-turn, or one mid-sign-in.
  */
-const inFlightTurns = new Map<string, number>()
+const isAgentProtected = (agentId: string): boolean => activity.isProtected(agentId)
 
 /**
  * Per-THREAD live status, the single source of truth for the sidebar's
- * `streaming` / `needsAttention` indicators (#53). Distinct from `inFlightTurns`
- * (which is per-AGENT, for eviction protection): this keys off our durable
- * `threadId` so a NON-active live Thread's turn or blocked permission surfaces in
- * the sidebar even though only the active Thread's `Conversation` is mounted. Fed
- * from the lifecycle signals main already sees — turn begin/end, a forwarded
- * `session/request_permission` out/answered, agent evict — and pushed to the
- * renderer (`emitThreadStatus`) on every change.
+ * `streaming` / `needsAttention` indicators (#53). Distinct from the activity
+ * tracker's turn counts (which are per-AGENT, for eviction protection): this keys off
+ * our durable `threadId` so a NON-active live Thread's turn or blocked permission
+ * surfaces in the sidebar even though only the active Thread's `Conversation` is
+ * mounted. Fed from the lifecycle signals main already sees — turn begin/end, a
+ * forwarded `session/request_permission` out/answered, agent evict — and pushed to
+ * the renderer (`emitThreadStatus`) on every change.
  */
 const threadStatus = new ThreadStatusTracker()
 
@@ -184,27 +156,12 @@ function emitThreadTitle(event: ThreadTitleEvent): void {
 }
 
 /**
- * Persist a Thread's auto-title from a `session_info_update` and push it to the
- * renderer. vibe-acp titles a session from its first prompt and emits the title
- * LAZILY (never in `session/new`), so without this every Thread stays "Untitled".
- * Resolve the Thread by the event's OWN sessionId, set the title in place via
- * `setThreadTitle` (preserves createdAt / sessionId / flags AND holds list position —
- * a title is not activity), then ping the renderer ONLY if it changed. Using the
- * non-reordering setter also makes this idempotent, so the echo of our own rename
- * (§set_title emits a `session_info_update` back) is absorbed silently. Best-effort:
- * no store, no matching Thread, or a persist failure just skips — the active Thread's
- * header still updates live via the renderer reducer regardless.
+ * Per-Workspace cache of the Files Surface listing (#188, ADR-0013 decision 4). Served by
+ * the `files:list` handler (files/register-ipc.ts); invalidated by the panel's Refresh (a
+ * `refresh:true` invoke, which bypasses it) and — piggybacked, no new watcher — by the git
+ * status-stream watcher firing (see the `emit` hook below).
  */
-async function recordThreadTitle(sessionId: string | null, title: string): Promise<void> {
-  if (!metadataStore || !sessionId) return
-  const threadId = metadataStore.findThreadIdBySessionId(sessionId)
-  if (!threadId) return
-  try {
-    if (await metadataStore.setThreadTitle(threadId, title)) emitThreadTitle({ threadId, title })
-  } catch {
-    // a persistence failure is non-fatal — skip the push, keep the live title
-  }
-}
+const filesListCache = new FilesListCache()
 
 /**
  * The streamed git-status manager (#84, ADR-0008): per active Workspace it ref-counts
@@ -214,14 +171,6 @@ async function recordThreadTitle(sessionId: string | null, title: string): Promi
  * here), so its emit is wired to `webContents.send` below — mirroring
  * `emitThreadStatus`. Torn down on quit so no watcher/timer outlives the app.
  */
-/**
- * Per-Workspace cache of the Files Surface listing (#188, ADR-0013 decision 4). Served by
- * the `files:list` handler; invalidated by the panel's Refresh (a `refresh:true` invoke,
- * which bypasses it) and — piggybacked, no new watcher — by the git status-stream watcher
- * firing (see the `emit` hook below).
- */
-const filesListCache = new FilesListCache()
-
 const gitStatus = new GitStatusManager({
   read: (workspaceDir) => readGitStatus(workspaceDir),
   fetch: (workspaceDir) => gitFetch(workspaceDir),
@@ -240,62 +189,37 @@ const gitStatus = new GitStatusManager({
   },
 })
 
-function beginTurn(agentId: string): void {
-  inFlightTurns.set(agentId, (inFlightTurns.get(agentId) ?? 0) + 1)
-}
-
-function endTurn(agentId: string): void {
-  const next = (inFlightTurns.get(agentId) ?? 0) - 1
-  if (next > 0) inFlightTurns.set(agentId, next)
-  else inFlightTurns.delete(agentId)
-}
-
-/**
- * Agents with a sign-in flow IN PROGRESS (TB5 #50). A backgrounded delegated
- * browser OAuth can pend longer than `IDLE_EVICT_MS` while the user is on another
- * Workspace (so the agent is neither `activeAgentId` nor mid-turn) — without this
- * the sweep would evict it mid-`signIn`, rejecting the call with "AcpClient
- * stopped". Mirrors the turn protection: `beginAuth` at the top of the sign-in
- * handler, `endAuth` in its `finally`. A one-shot `touch` wouldn't suffice — the
- * flow can outlast the idle window — so we protect for its whole duration.
- */
-const signingInAgents = new Set<string>()
-
-function beginAuth(agentId: string): void {
-  signingInAgents.add(agentId)
-}
-
-function endAuth(agentId: string): void {
-  signingInAgents.delete(agentId)
-}
-
-/**
- * The eviction-protection predicate (TB5 #50) handed to the pool's pure policies:
- * NEVER evict the on-screen Workspace's agent, one mid-turn, or one mid-sign-in. A
- * thin wrapper over the PURE `isProtected` (agent-protection.ts) — the load-bearing
- * safety logic is unit-tested there; this just feeds it the live main-process state.
- */
-function isAgentProtected(agentId: string): boolean {
-  return isProtected(agentId, { activeAgentId, inFlightTurns, signingInAgents })
-}
-
 /** The periodic idle-evict sweep timer (cleared on quit). */
 let sweepTimer: ReturnType<typeof setInterval> | null = null
 
 /**
+ * The stores + transcript bridge every conversation-flow handler needs, created at
+ * app-ready (they need `userData`) and injected into `registerIpc` — the DI seam
+ * `docs/conventions.md` prescribes. `store` is NON-null: `MetadataStore.load()`
+ * degrades to empty state internally (never a throw), so the old `| null` type and
+ * its per-handler degraded forks were unreachable. `transcript` nullability IS real
+ * (the dir `mkdir` can fail) — the bridge folds that into a silent-no-op tee.
+ */
+interface MainDeps {
+  store: MetadataStore
+  transcript: TranscriptStore | null
+  bridge: TranscriptBridge
+}
+
+/**
  * Push an eviction notice to every renderer (TB5 #50) so it drops the now-dead
  * agents' Workspace connections and re-warms them lazily on next select. Also
- * clears the agents' transcript-bridge entries so the `agentId -> threadId` map
- * can't leak across evictions. A no-op when nothing was evicted.
+ * clears the agents' activity + transcript-bridge entries so neither can leak
+ * across evictions, and any streaming/pending status the evicted agents' Threads
+ * held (#53) — a torn-down agent leaves no stale indicator behind (protection keeps
+ * a busy agent from idle/cap eviction, but an explicit stop/dispose can still land).
+ * A no-op when nothing was evicted.
  */
-function notifyAgentsEvicted(agentIds: string[]): void {
+function notifyAgentsEvicted(bridge: TranscriptBridge, agentIds: string[]): void {
   if (agentIds.length === 0) return
   for (const agentId of agentIds) {
-    inFlightTurns.delete(agentId)
-    transcriptThreads.delete(agentId)
-    // Clear any streaming/pending status the evicted agent's Threads held (#53) so
-    // a torn-down agent leaves no stale indicator behind (protection keeps a busy
-    // agent from idle/cap eviction, but an explicit stop/dispose can still land).
+    activity.evict(agentId)
+    bridge.evictAgent(agentId)
     emitThreadStatus(threadStatus.evictAgent(agentId))
   }
   for (const win of BrowserWindow.getAllWindows()) {
@@ -304,66 +228,26 @@ function notifyAgentsEvicted(agentIds: string[]): void {
 }
 
 /**
- * The single-writer metadata index (ADR-0005). Assigned at app-ready (needs
- * `userData`) and loaded before the first window so the renderer's cold list
- * fetch sees the persisted state. A failed load degrades to empty, never throws.
+ * Persist a Thread's auto-title from a `session_info_update` and push it to the
+ * renderer. vibe-acp titles a session from its first prompt and emits the title
+ * LAZILY (never in `session/new`), so without this every Thread stays "Untitled".
+ * Resolve the Thread by the event's OWN sessionId, set the title in place via
+ * `setThreadTitle` (preserves createdAt / sessionId / flags AND holds list position —
+ * a title is not activity), then ping the renderer ONLY if it changed. Using the
+ * non-reordering setter also makes this idempotent, so the echo of our own rename
+ * (§set_title emits a `session_info_update` back) is absorbed silently. Best-effort:
+ * no matching Thread or a persist failure just skips — the active Thread's header
+ * still updates live via the renderer reducer regardless.
  */
-let metadataStore: MetadataStore | null = null
-
-/**
- * The per-Thread transcript writer (ADR-0005, TB2). Assigned at app-ready (needs
- * `userData`) alongside `metadataStore`. Best-effort like the metadata writes —
- * a failed tee never breaks the live conversation.
- */
-let transcriptStore: TranscriptStore | null = null
-
-/**
- * Bridge the ACP-keyed event flow to the JSONL key (the minted Thread `id`, TB1).
- * The PRIMARY route is the event's own ACP `sessionId` (via the store) so each
- * event/prompt lands in ITS Thread even when one agent has opened several Threads
- * in sequence — the `agentId -> threadId` map below is last-write-wins, so a late
- * event from a prior session would misroute under it. The map is the FALLBACK,
- * for chokepoints with no sessionId in hand (e.g. `respondPermission`).
- *
- * Residual (documented): both routes miss during the brief window after
- * `session/new` returns but before the first-prompt bind (`mintAndBind`) persists
- * the sessionId + seeds the map — a `session/update` streamed THEN (notably the immediate
- * `available_commands_update`, not rendered this slice) is dropped from replay.
- * The Thread title is unaffected — it's also persisted in the metadata record.
- */
-const transcriptThreads = new Map<string, string>()
-
-/**
- * Thread ids whose JSONL has been (or is being) removed and must NEVER be re-created
- * ("Remove project" — a Workspace can be removed MID-TURN). `TranscriptStore.delete`
- * only drops the tail of the append chain; it can't cancel a tee that arrives AFTER
- * the unlink — notably the `turn-error` teed from `runPromptTurn`'s catch when the
- * disposed agent rejects its in-flight prompt (that tee uses `args.threadId` directly,
- * bypassing the bridge). Without this guard `append` would start a FRESH chain and
- * re-write a header + line, leaking an orphaned transcript no metadata references.
- * We tombstone a Workspace's Thread ids BEFORE removal so every such late tee is
- * suppressed at the choke point below. Thread ids are unique-and-never-reused, so the
- * set is monotonic and bounded by removals this session — no cleanup needed.
- */
-const tombstonedThreadIds = new Set<string>()
-
-/** Resolve the Thread id for a chokepoint, or null to skip the tee (best-effort). */
-function threadIdForTee(agentId: string, sessionId?: string | null): string | null {
-  return (
-    metadataStore?.findThreadIdBySessionId(sessionId ?? null) ?? transcriptThreads.get(agentId) ?? null
-  )
-}
-
-/**
- * Tee one conversation INPUT to the active Thread's JSONL (ADR-0005). Best-effort
- * and fire-and-forget, guarded exactly like `recordWorkspaceOpen`: an absent store, an
- * unresolved Thread id, or a TOMBSTONED (removed) Thread skips the write; the append
- * itself swallows I/O errors. The tombstone check is what makes mid-turn "Remove
- * project" safe — see `tombstonedThreadIds`.
- */
-function teeTranscript(threadId: string | null, entry: TranscriptEntry): void {
-  if (!transcriptStore || !threadId || tombstonedThreadIds.has(threadId)) return
-  void transcriptStore.append(threadId, entry)
+async function recordThreadTitle(deps: MainDeps, sessionId: string | null, title: string): Promise<void> {
+  if (!sessionId) return
+  const threadId = deps.store.findThreadIdBySessionId(sessionId)
+  if (!threadId) return
+  try {
+    if (await deps.store.setThreadTitle(threadId, title)) emitThreadTitle({ threadId, title })
+  } catch {
+    // a persistence failure is non-fatal — skip the push, keep the live title
+  }
 }
 
 /**
@@ -374,11 +258,39 @@ function teeTranscript(threadId: string | null, entry: TranscriptEntry): void {
  * agent and `closeSession` no-ops on the rest. A cold Thread / unbound draft (no
  * `sessionId`) returns `undefined`, so the deletion just removes our records.
  */
-function bestEffortCloseFor(threadId: string): (() => Promise<void>) | undefined {
-  const sessionId = metadataStore?.snapshot().threads.find((t) => t.id === threadId)?.sessionId
+function bestEffortCloseFor(deps: MainDeps, threadId: string): (() => Promise<void>) | undefined {
+  const sessionId = deps.store.snapshot().threads.find((t) => t.id === threadId)?.sessionId
   if (!sessionId) return undefined
   return async () => {
     for (const agent of pool.agents()) await agent.closeSession(sessionId)
+  }
+}
+
+/**
+ * Build a `ThreadConnection` for the renderer — the shared tail of the draft and
+ * continue flows (previously duplicated across both). Seeds the picker from the
+ * Workspace's eager primary session (ADR-0012) so a fresh draft / reopened Thread
+ * shows Mode/Model/effort on first paint; null-safe -> all-null when no primary
+ * session opened (best-effort failure).
+ */
+function buildConnection(
+  agentId: string,
+  agent: WorkspaceAgent,
+  seed: { threadId: string; workspaceId: string; sessionId: string | null; title: string | null },
+): ThreadConnection {
+  const controls = agent.primarySessionControls
+  return {
+    agentId,
+    workspaceDir: agent.workspaceDir,
+    sessionId: seed.sessionId,
+    title: seed.title,
+    modes: controls?.modes ?? null,
+    models: controls?.models ?? null,
+    reasoningEffort: controls?.reasoningEffort ?? null,
+    threadId: seed.threadId,
+    workspaceId: seed.workspaceId,
+    signOutAvailable: agent.signOutAvailable,
+    authMethods: agent.authMethods,
   }
 }
 
@@ -387,104 +299,66 @@ function bestEffortCloseFor(threadId: string): (() => Promise<void>) | undefined
  * id but open NO ACP session and persist NO record. The Thread stays a renderer-
  * only draft until its FIRST prompt, which drives `session/new` + the persist via
  * `ensureBoundSession`/`mintAndBind`. This is the fix for the empty-Thread bug —
- * opening a Workspace no longer records a Thread nobody prompted.
- *
- * Mirrors `continueConnection`'s session-less shape (null session, null controls
- * until the first prompt binds — consistent with the Continue flow); the only
- * difference is a brand-new minted id rather than a resolved existing record. Also
- * seeds the `agentId -> threadId` transcript bridge so a session-less lifecycle
- * event tees to this Thread. `workspaceId` is the persisted Workspace id (from
- * `recordWorkspaceOpen`) so the first-prompt `upsertThread` records under the real
- * Workspace; a synthesized id is used only in degraded mode (no store), where the
- * draft never persists anyway.
+ * opening a Workspace no longer records a Thread nobody prompted. `sessionId` stays
+ * null — the eager primary session (if any) is a main-side detail its first prompt
+ * claims. Seeds the `agentId -> threadId` transcript bridge so a session-less
+ * lifecycle event tees to this Thread. `workspaceId` is the persisted Workspace id
+ * (from `recordWorkspaceOpen`) so the first-prompt `upsertThread` records under the
+ * real Workspace; a synthesized id is used only when the open's persist failed (the
+ * draft never persists then anyway).
  */
 function draftConnection(
+  deps: MainDeps,
   agentId: string,
   agent: WorkspaceAgent,
   workspaceId: string | null,
 ): ThreadConnection {
   const threadId = randomUUID()
-  transcriptThreads.set(agentId, threadId)
-  // Seed the picker from the Workspace's eager primary session (ADR-0012) so a
-  // fresh draft shows Mode/Model/effort on first paint. `sessionId` stays null —
-  // the draft is still a renderer-only unbound Thread (ADR-0011); the primary
-  // sessionId is a main-side detail its first prompt claims. Null-safe -> today's
-  // all-null behavior when no primary session opened (best-effort failure).
-  const controls = agent.primarySessionControls
-  return {
-    agentId,
-    workspaceDir: agent.workspaceDir,
-    sessionId: null,
-    title: null,
-    modes: controls?.modes ?? null,
-    models: controls?.models ?? null,
-    reasoningEffort: controls?.reasoningEffort ?? null,
+  deps.bridge.bind(agentId, threadId)
+  return buildConnection(agentId, agent, {
     threadId,
     workspaceId: workspaceId ?? randomUUID(),
-    signOutAvailable: agent.signOutAvailable,
-    authMethods: agent.authMethods,
-  }
+    sessionId: null,
+    title: null,
+  })
 }
 
 /**
- * Resolve the ACP session to prompt, binding a draft on its first prompt (TB5) and
- * RESUMING a reopened Thread on its first prompt (TB4 #33). With a metadata store,
- * delegate to `ensureBoundSession`, which distinguishes the three cases: draft ->
- * `session/new`; reopened (stored session not hosted by this fresh agent) ->
- * `session/load`, re-binding fresh on a resume failure; already-hosted -> reuse.
- * `minted` is true for a draft mint OR a re-bind; `rebound` flags the re-bind so
- * the caller tees the "context reset" notice and re-emits `thread:bound`.
- *
- * Without a store (best-effort degraded mode), open a session directly so a draft
- * can still prompt; reuse a session the agent already hosts, else open a fresh one
- * (never the bug's `No open Thread` throw — degraded mode has no cursor to resume).
+ * Build a connection that CONTINUES an existing persisted Thread (TB4 #33) WITHOUT
+ * opening a new one: look its record up in the metadata store and seed the
+ * connection with its ids + stored `sessionId` cursor (the lazy `session/load`
+ * resume happens on first prompt). Also seeds the transcript bridge so a
+ * session-less lifecycle event tees to this Thread. Returns `null` when there's no
+ * matching record, so the caller falls back to opening a fresh draft.
  */
-async function bindThreadSession(
+function continueConnection(
+  deps: MainDeps,
+  agentId: string,
   agent: WorkspaceAgent,
-  args: SendPromptArgs,
-): Promise<{ sessionId: string; minted: boolean; rebound: boolean; controls: ThreadAgentControls | null }> {
-  // Point the bridge at the Thread being prompted, so a session-less lifecycle
-  // event tees to the ACTIVE Thread when several share an agent — refreshed every
-  // prompt (last-write-wins, and only the active Thread prompts at a time).
-  transcriptThreads.set(args.agentId, args.threadId)
-  if (metadataStore) {
-    // A draft's first prompt (sessionId null) claims the Workspace's eager primary
-    // session (ADR-0012), so it binds to that instead of minting a SECOND
-    // `session/new`; consumed once, so a second concurrent draft mints its own.
-    // Never claimed for a reopened/already-bound Thread (those aren't case (i)).
-    const preopened = args.sessionId === null ? (agent.consumePrimarySession() ?? undefined) : undefined
-    const bound = await ensureBoundSession({
-      agent,
-      store: metadataStore,
-      threadId: args.threadId,
-      workspaceId: args.workspaceId,
-      sessionId: args.sessionId,
-      preopened,
-    })
-    return { sessionId: bound.sessionId, minted: bound.minted, rebound: bound.rebound, controls: bound.controls }
-  }
-  // Degraded (no store): a reused session brings no fresh result (null controls);
-  // a freshly opened one carries its `session/new` controls (#70).
-  if (args.sessionId && agent.hasSession(args.sessionId)) {
-    return { sessionId: args.sessionId, minted: false, rebound: false, controls: null }
-  }
-  const thread = await agent.openThread()
-  return { sessionId: thread.sessionId, minted: true, rebound: false, controls: controlsOf(thread) }
+  threadId: string,
+): ThreadConnection | null {
+  const target = resolveContinueTarget(deps.store, threadId)
+  if (!target) return null
+  deps.bridge.bind(agentId, target.threadId)
+  return buildConnection(agentId, agent, {
+    threadId: target.threadId,
+    workspaceId: target.workspaceId,
+    sessionId: target.sessionId,
+    title: target.title,
+  })
 }
 
 /**
  * Persist that a Workspace was opened, BEFORE the agent starts, so even a
  * not-signed-in Workspace lists. Returns the persisted Workspace id (so a fresh
  * draft's first-prompt `upsertThread` can record its Thread under the real
- * Workspace), or `null` with no store / on failure. Best-effort: a failing
- * `persist()` (disk full / read-only userData) must NEVER reject the connect
- * flow — the renderer's onClick has no `.catch`, so a throw here would wedge the
- * UI on "Launching…".
+ * Workspace), or `null` on failure. Best-effort: a failing `persist()` (disk full /
+ * read-only userData) must NEVER reject the connect flow — the renderer's onClick
+ * has no `.catch`, so a throw here would wedge the UI on "Launching…".
  */
-async function recordWorkspaceOpen(workspaceDir: string): Promise<string | null> {
-  if (!metadataStore) return null
+async function recordWorkspaceOpen(deps: MainDeps, workspaceDir: string): Promise<string | null> {
   try {
-    const ws = await metadataStore.upsertWorkspace({
+    const ws = await deps.store.upsertWorkspace({
       dir: workspaceDir,
       displayName: basename(workspaceDir),
     })
@@ -492,43 +366,6 @@ async function recordWorkspaceOpen(workspaceDir: string): Promise<string | null>
   } catch {
     // A persistence failure is non-fatal — the connect flow proceeds (degraded).
     return null
-  }
-}
-
-/**
- * Build a connection that CONTINUES an existing persisted Thread (TB4 #33) WITHOUT
- * opening a new one: look its record up in the metadata store and seed the
- * connection with its ids + stored `sessionId` cursor (modes/models stay null until
- * the lazy `session/load` on first prompt). Also seeds the transcript bridge so a
- * session-less lifecycle event tees to this Thread. Returns `null` when there's no
- * store or no matching record, so the caller falls back to opening a fresh Thread.
- */
-function continueConnection(
-  agentId: string,
-  agent: WorkspaceAgent,
-  threadId: string,
-): ThreadConnection | null {
-  if (!metadataStore) return null
-  const target = resolveContinueTarget(metadataStore, threadId)
-  if (!target) return null
-  transcriptThreads.set(agentId, target.threadId)
-  // Seed the picker from the Workspace's eager primary session (ADR-0012 #4), closing
-  // the Continue-flow gap ADR-0011 left open: a reopened, not-yet-resumed Thread shows
-  // the Workspace's option lists instead of null controls until its lazy `session/load`
-  // reports its own. Null-safe -> today's all-null when no primary session opened.
-  const controls = agent.primarySessionControls
-  return {
-    agentId,
-    workspaceDir: agent.workspaceDir,
-    sessionId: target.sessionId,
-    title: target.title,
-    modes: controls?.modes ?? null,
-    models: controls?.models ?? null,
-    reasoningEffort: controls?.reasoningEffort ?? null,
-    threadId: target.threadId,
-    workspaceId: target.workspaceId,
-    signOutAvailable: agent.signOutAvailable,
-    authMethods: agent.authMethods,
   }
 }
 
@@ -558,22 +395,22 @@ function threadFailureResult(agentId: string, agent: WorkspaceAgent, err: unknow
  * Workspace is focused, then forwarded to the renderer tagged by `agentId`.
  * Best-effort: the tee never gates the live forward.
  */
-function wireAgentEvents(agentId: string, agent: WorkspaceAgent, sender: WebContents): void {
+function wireAgentEvents(deps: MainDeps, agentId: string, agent: WorkspaceAgent, sender: WebContents): void {
   agent.on('event', (payload: unknown) => {
     const sessionId = sessionIdFromPayload(payload)
-    teeTranscript(threadIdForTee(agentId, sessionId), acpEventEntry(payload))
+    deps.bridge.tee(deps.bridge.threadIdFor(agentId, sessionId), acpEventEntry(payload))
     // vibe-acp pushes the session's auto-title lazily after the first prompt via a
     // `session_info_update` (never in `session/new`) — capture it so the Thread stops
     // showing "Untitled". Persist + push by the event's OWN sessionId; best-effort.
     const title = titleFromSessionInfoUpdate(payload)
-    if (title !== null) void recordThreadTitle(sessionId, title)
+    if (title !== null) void recordThreadTitle(deps, sessionId, title)
     // A forwarded `session/request_permission` blocks the turn until the renderer
     // answers — surface it as the Thread's `needsAttention` (#53). Resolve its
     // Thread the same way the tee does (the event's OWN sessionId via the store,
     // falling back to the agent's active Thread); skip when unattributable.
     const requestId = permissionRequestIdOf(payload)
     if (requestId !== null) {
-      const threadId = threadIdForTee(agentId, sessionId)
+      const threadId = deps.bridge.threadIdFor(agentId, sessionId)
       if (threadId) emitThreadStatus(threadStatus.addPermission(agentId, threadId, requestId))
     }
     if (!sender.isDestroyed()) {
@@ -585,24 +422,41 @@ function wireAgentEvents(agentId: string, agent: WorkspaceAgent, sender: WebCont
 /**
  * Run one prompt turn: bind-on-first-prompt, tee the input, send `session/prompt`,
  * and map the outcome to a `SendPromptResult`. Extracted from the IPC handler so
- * the handler stays a thin eviction-protection wrapper (TB5 #50) — the turn's
- * lifecycle is unchanged from TB4/TB5 (#33/#46). `sender` is the request's
- * webContents (for the up-front `thread:bound` signal).
+ * the handler stays a thin eviction-protection wrapper (TB5 #50). `sender` is the
+ * request's webContents (for the up-front `thread:bound` signal).
  */
 async function runPromptTurn(
+  deps: MainDeps,
   sender: WebContents,
   agent: WorkspaceAgent,
   args: SendPromptArgs,
 ): Promise<SendPromptResult> {
   // Bind on first prompt (ADR-0005, TB5): a draft (sessionId null) mints its
-  // session via `session/new` NOW and binds it onto this Thread id; an
-  // already-bound Thread reuses its session — no second `session/new`. A
-  // binding failure surfaces WITHOUT teeing: nothing was logged yet, so a
-  // failed first prompt leaves no transcript residue.
+  // session via `session/new` NOW and binds it onto this Thread id; a reopened
+  // Thread whose stored session isn't hosted resumes via `session/load` (re-binding
+  // fresh on a resume failure); an already-bound Thread reuses its session — no
+  // second `session/new`. A binding failure surfaces WITHOUT teeing: nothing was
+  // logged yet, so a failed first prompt leaves no transcript residue.
   let sessionId: string
   let rebound: boolean
   try {
-    const bound = await bindThreadSession(agent, args)
+    // Point the bridge at the Thread being prompted, so a session-less lifecycle
+    // event tees to the ACTIVE Thread when several share an agent — refreshed every
+    // prompt (last-write-wins, and only the active Thread prompts at a time).
+    deps.bridge.bind(args.agentId, args.threadId)
+    // A draft's first prompt (sessionId null) claims the Workspace's eager primary
+    // session (ADR-0012), so it binds to that instead of minting a SECOND
+    // `session/new`; consumed once, so a second concurrent draft mints its own.
+    // Never claimed for a reopened/already-bound Thread (those aren't case (i)).
+    const preopened = args.sessionId === null ? (agent.consumePrimarySession() ?? undefined) : undefined
+    const bound = await ensureBoundSession({
+      agent,
+      store: deps.store,
+      threadId: args.threadId,
+      workspaceId: args.workspaceId,
+      sessionId: args.sessionId,
+      preopened,
+    })
     sessionId = bound.sessionId
     rebound = bound.rebound
     // Tell the renderer this Thread is now bound, the INSTANT `session/new` /
@@ -638,17 +492,17 @@ async function runPromptTurn(
   // v1 does NOT persist image base64 — the transcript tees text only (#100). Image
   // attachments live only in the in-memory echo for this session's live view; a
   // reopen replays the text-only prompt. Intentional for this slice.
-  teeTranscript(args.threadId, userPromptEntry(randomUUID(), args.text))
+  deps.bridge.tee(args.threadId, userPromptEntry(randomUUID(), args.text))
   // On a re-bind (TB4 #33), persist the "context reset" notice right AFTER the
   // user's prompt and BEFORE the turn's events — so a later reopen replays it
   // in the same position the live view rendered it (`thread:bound` -> notice).
-  if (rebound) teeTranscript(args.threadId, agentReboundEntry())
+  if (rebound) deps.bridge.tee(args.threadId, agentReboundEntry())
   try {
     const result = await agent.prompt(sessionId, args.text, args.images)
     // Tee the clean turn end: this signal lives ONLY in this IPC response
     // (never an `acp:event`), so without it a replay leaves `isProcessing`
     // stuck true. Serialized after the turn's events (TranscriptStore chain).
-    teeTranscript(args.threadId, turnCompleteEntry())
+    deps.bridge.tee(args.threadId, turnCompleteEntry())
     return { ok: true, result, sessionId }
   } catch (err) {
     // Mid-session expiry (-32000): keep the agent alive so the renderer can
@@ -656,11 +510,11 @@ async function runPromptTurn(
     // flow, NOT a conversation error — tee `turn-complete` (the renderer
     // synthesizes no ErrorItem here either), so replay isn't left processing.
     if (err instanceof WorkspaceAgentError && err.authState === 'not-signed-in') {
-      teeTranscript(args.threadId, turnCompleteEntry())
+      deps.bridge.tee(args.threadId, turnCompleteEntry())
       return { ok: false, kind: 'not-signed-in', agentId: args.agentId, authMethods: agent.authMethods }
     }
     const message = err instanceof Error ? err.message : String(err)
-    teeTranscript(args.threadId, turnErrorEntry(message))
+    deps.bridge.tee(args.threadId, turnErrorEntry(message))
     // Carry the JSON-RPC/app code (e.g. -31008 for an unsupported/oversized image,
     // #100) so the renderer can special-case it rather than show a generic error.
     return {
@@ -702,7 +556,13 @@ function createWindow(): void {
   }
 }
 
-function registerIpc(): void {
+function registerIpc(deps: MainDeps): void {
+  // Feature registrars (conventions.md `registerIpc(deps)` DI): the git and files
+  // handler groups are self-contained pass-throughs to their modules, registered
+  // next to them.
+  registerGitIpc({ gitStatus })
+  registerFilesIpc({ pool, cache: filesListCache })
+
   ipcMain.handle(IPC.detectVibe, () => detectVibe())
 
   ipcMain.handle(IPC.openWorkspaceDialog, async (event): Promise<string | null> => {
@@ -720,18 +580,18 @@ function registerIpc(): void {
     // agent skips the handshake (start() early-returns below) and its event tee is
     // already wired, so a re-select / continue never re-handshakes.
     const { agentId, agent, created } = pool.acquire(args.workspaceDir)
-    if (created) wireAgentEvents(agentId, agent, event.sender)
+    if (created) wireAgentEvents(deps, agentId, agent, event.sender)
 
     // Enforce the warm-count cap right after warming this Workspace (TB5 #50): if
     // we're now over MAX_WARM_AGENTS, trim the least-recently-active UNPROTECTED
     // agent and tell the renderer to re-warm it lazily on next select. The agent we
     // just acquired is most-recently-active, so it's never the one trimmed.
-    notifyAgentsEvicted(pool.enforceCap({ maxWarm: MAX_WARM_AGENTS, isProtected: isAgentProtected }))
+    notifyAgentsEvicted(deps.bridge, pool.enforceCap({ maxWarm: MAX_WARM_AGENTS, isProtected: isAgentProtected }))
 
     // Persist the Workspace open up front (ADR-0005), so even a not-signed-in
     // Workspace shows in the cold list. Best-effort — must not reject connect.
     // Its id seeds a fresh draft's first-prompt upsert (below).
-    const workspaceId = await recordWorkspaceOpen(args.workspaceDir)
+    const workspaceId = await recordWorkspaceOpen(deps, args.workspaceDir)
 
     try {
       // Idempotent: spawns + handshakes a fresh agent, no-ops a warm one (already
@@ -760,9 +620,9 @@ function registerIpc(): void {
       // Continue from the cold launch list (TB4 #33): connect to the EXISTING
       // Thread (its first prompt drives the lazy `session/load` resume) without
       // opening — and persisting — a throwaway empty Thread. Falls through to a
-      // fresh draft when the record can't be resolved (degraded / no store).
+      // fresh draft when the record can't be resolved.
       if (args.continueThreadId) {
-        const continued = continueConnection(agentId, agent, args.continueThreadId)
+        const continued = continueConnection(deps, agentId, agent, args.continueThreadId)
         if (continued) return { ok: true, thread: continued }
       }
 
@@ -770,7 +630,7 @@ function registerIpc(): void {
       // The draft binds a session + persists only on its first prompt, so clicking
       // a Workspace never leaves a Thread nobody prompted. The `agent.start()`
       // above still surfaces a not-signed-in / handshake error via the catch.
-      return { ok: true, thread: draftConnection(agentId, agent, workspaceId) }
+      return { ok: true, thread: draftConnection(deps, agentId, agent, workspaceId) }
     } catch (err) {
       return threadFailureResult(agentId, agent, err)
     }
@@ -784,7 +644,7 @@ function registerIpc(): void {
     const agent = pool.get(args.agentId)
     if (!agent) return { ok: false, kind: 'error', error: `No active agent for id ${args.agentId}.`, hint: null }
     pool.touch(args.agentId) // landing in a Thread is activity — outrank idle peers (TB5 #50)
-    const workspaceId = await recordWorkspaceOpen(agent.workspaceDir)
+    const workspaceId = await recordWorkspaceOpen(deps, agent.workspaceDir)
     // Open the eager primary session (ADR-0012) for this post-sign-in draft too, so
     // its picker reads real controls and its first prompt reuses it. Best-effort —
     // a failure falls back to a null-controls draft. No-op if one is already open.
@@ -793,7 +653,7 @@ function registerIpc(): void {
     } catch {
       // Swallow: the draft connection is still returned (null-controls fallback).
     }
-    return { ok: true, thread: draftConnection(args.agentId, agent, workspaceId) }
+    return { ok: true, thread: draftConnection(deps, args.agentId, agent, workspaceId) }
   })
 
   ipcMain.handle(
@@ -808,15 +668,15 @@ function registerIpc(): void {
       // a streaming Workspace out from under the user. `endTurn` runs no matter how
       // the turn settles (success, error, or a thrown bind), so the flag can't leak.
       pool.touch(args.agentId)
-      beginTurn(args.agentId)
+      activity.beginTurn(args.agentId)
       // Per-THREAD streaming (#53): mark THIS Thread streaming for the whole turn
       // (covering the bind), so a non-active live Thread's in-flight turn shows in
       // the sidebar. Cleared in the same `finally` as the per-agent protection.
       emitThreadStatus(threadStatus.beginTurn(args.agentId, args.threadId))
       try {
-        return await runPromptTurn(event.sender, agent, args)
+        return await runPromptTurn(deps, event.sender, agent, args)
       } finally {
-        endTurn(args.agentId)
+        activity.endTurn(args.agentId)
         // Clear streaming, then sweep any permission left unanswered when the turn
         // settled abnormally (error / -32000) — the agent isn't blocking anymore,
         // so no `needsAttention` should linger past the turn (#53). The blanket
@@ -844,7 +704,7 @@ function registerIpc(): void {
     // a sibling B must land in A's log, not B's.
     const agent = pool.get(args.agentId)
     pool.touch(args.agentId) // answering a permission is activity (TB5 #50)
-    teeTranscript(args.threadId, resolvePermissionEntry(args.requestId, args.optionId))
+    deps.bridge.tee(args.threadId, resolvePermissionEntry(args.requestId, args.optionId))
     // Clear the Thread's `needsAttention` (#53): the blocking permission is answered.
     emitThreadStatus(threadStatus.resolvePermission(args.agentId, args.requestId))
     agent?.respondPermission(args.requestId, args.optionId)
@@ -863,7 +723,7 @@ function registerIpc(): void {
     // The renderer reports which Workspace agent is currently ON SCREEN (TB5 #50).
     // Tracked so `isAgentProtected` shields it from idle/cap eviction — the
     // Workspace the user is looking at is never trimmed out from under them.
-    activeAgentId = agentId
+    activity.setActive(agentId)
   })
 
   ipcMain.handle(IPC.signIn, async (_event, args: SignInArgs): Promise<SignInResult> => {
@@ -877,7 +737,7 @@ function registerIpc(): void {
     // this the sweep would evict it mid-flight and reject the call. `endAuth` always
     // runs in `finally`, so the flag can't leak even on failure/early-exit.
     pool.touch(args.agentId)
-    beginAuth(args.agentId)
+    activity.beginAuth(args.agentId)
     try {
       const authState = await agent.signIn(args.methodId)
       return { ok: true, authState }
@@ -889,7 +749,7 @@ function registerIpc(): void {
       console.error(`[vibe-mistro:auth] sign-in failed (agent ${args.agentId}): ${error}`)
       return { ok: false, error }
     } finally {
-      endAuth(args.agentId)
+      activity.endAuth(args.agentId)
     }
   })
 
@@ -934,19 +794,19 @@ function registerIpc(): void {
     // Explicit close: the pool stops the child and drops it; the Workspace
     // re-warms transparently on its next select (metadata + JSONL survive).
     pool.dispose(agentId)
-    // Drop the agent's per-Thread status + transcript bridge so an explicit stop
-    // leaves no stale indicator (#53) — mirrors the eviction cleanup.
-    transcriptThreads.delete(agentId)
-    inFlightTurns.delete(agentId)
+    // Drop the agent's per-Thread status + activity + transcript bridge so an
+    // explicit stop leaves no stale indicator (#53) — mirrors the eviction cleanup.
+    deps.bridge.evictAgent(agentId)
+    activity.evict(agentId)
     emitThreadStatus(threadStatus.evictAgent(agentId))
   })
 
   ipcMain.handle(IPC.deleteThread, async (_event, threadId: string): Promise<DeleteThreadResult> => {
     // Delete a Thread end-to-end (ADR-0005, TB6 #35): best-effort close its live
     // ACP session (if one is hosted), then remove OUR records — the metadata entry
-    // and the JSONL transcript. Every step is best-effort: an absent store skips
-    // the record drop, a null transcript skips the file drop, no live session
-    // skips the close — never a throw, so a misclick-deleted draft can't wedge.
+    // and the JSONL transcript. Every step is best-effort: a null transcript skips
+    // the file drop, no live session skips the close — never a throw, so a
+    // misclick-deleted draft can't wedge.
     //
     // AUTHORITATIVE streaming guard (#53): delete is now wired into the live Thread
     // list (an idle live Thread is deletable). Main owns `threadStatus`, so re-check
@@ -956,20 +816,17 @@ function registerIpc(): void {
     // tracker state, so it passes and deletes cleanly via `bestEffortCloseFor` +
     // the renderer's `wt remove`; only a mid-turn one is bounced (`reason:'streaming'`).
     if (threadStatus.statusFor(threadId).streaming) return { ok: false, reason: 'streaming' }
-    if (!metadataStore) return { ok: true }
     // Clear any transcript-bridge entry pointing at this Thread BEFORE the
     // orchestration, to shrink the window in which a fresh tee could re-create its
     // JSONL. With the streaming guard above no live turn is appending to a deletable
     // Thread, so this clear plus `bestEffortCloseFor` (which reads the bound session
-    // from the metadata snapshot, not this bridge) tears the session down safely.
-    for (const [agentId, bound] of transcriptThreads) {
-      if (bound === threadId) transcriptThreads.delete(agentId)
-    }
+    // from the metadata snapshot, not the bridge) tears the session down safely.
+    deps.bridge.clearThread(threadId)
     await deleteThread({
       threadId,
-      store: metadataStore,
-      transcript: transcriptStore ?? { delete: () => Promise.resolve() },
-      closeSession: bestEffortCloseFor(threadId),
+      store: deps.store,
+      transcript: deps.transcript ?? { delete: () => Promise.resolve() },
+      closeSession: bestEffortCloseFor(deps, threadId),
     })
     return { ok: true }
   })
@@ -982,9 +839,8 @@ function registerIpc(): void {
       // Workspace + Thread metadata and their JSONL transcripts. NEVER deletes files
       // on disk. A thin wrapper: all real logic lives in the pure `removeWorkspace`
       // orchestrator + `MetadataStore.removeWorkspace`. Best-effort throughout, so a
-      // missing store / cold Workspace just no-ops — never a throw.
-      if (!metadataStore) return { ok: true }
-      const snapshot = metadataStore.snapshot()
+      // cold Workspace just no-ops — never a throw.
+      const snapshot = deps.store.snapshot()
       // Resolve the Workspace dir → its warm agentId (null when cold). The dir is the
       // pool's key, so a warm agent for this Workspace is found here before removal.
       const dir = snapshot.workspaces.find((w) => w.id === workspaceId)?.dir
@@ -992,23 +848,23 @@ function registerIpc(): void {
       // Tombstone this Workspace's Thread ids BEFORE anything tears down, so a late
       // tee from the disposed agent's rejected in-flight turn (or a straggling event)
       // can't re-create a just-deleted JSONL. Safe for a mid-turn removal — see
-      // `tombstonedThreadIds`. Done first: dispose (below) rejects the pending prompt.
+      // `TranscriptBridge`. Done first: dispose (below) rejects the pending prompt.
       for (const t of snapshot.threads) {
-        if (t.workspaceId === workspaceId) tombstonedThreadIds.add(t.id)
+        if (t.workspaceId === workspaceId) deps.bridge.tombstone(t.id)
       }
       await removeWorkspace({
         workspaceId,
-        store: metadataStore,
-        transcript: transcriptStore ?? { delete: () => Promise.resolve() },
+        store: deps.store,
+        transcript: deps.transcript ?? { delete: () => Promise.resolve() },
         // When a warm agent hosts this Workspace, stop it via the SAME path the
         // sweep/stop uses: `pool.dispose` (graceful teardown of hosted sessions) plus
-        // `notifyAgentsEvicted` (clears inFlightTurns + transcript bridge + per-Thread
+        // `notifyAgentsEvicted` (clears the activity + transcript bridge + per-Thread
         // status AND tells the renderer to drop the now-dead connection). Order mirrors
         // `stopAgent`/the sweep: dispose the child, then broadcast the eviction cleanup.
         stopAgent: agentId
           ? () => {
               pool.dispose(agentId)
-              notifyAgentsEvicted([agentId])
+              notifyAgentsEvicted(deps.bridge, [agentId])
             }
           : undefined,
       })
@@ -1021,13 +877,12 @@ function registerIpc(): void {
     async (_event, args: SetThreadFlagsArgs): Promise<SetThreadFlagsResult> => {
       // Toggle a Thread's persisted per-Thread flags (#132 pin / #133 archive) on OUR
       // metadata record. A SAFE metadata op — no ACP session teardown — so unlike
-      // delete it has no streaming guard. Best-effort per ADR-0005: an absent store or
-      // a failed persist returns `{ok:false}` (never throws into the live flow); the
-      // renderer then leaves the list unchanged. `setThreadFlags` is a no-op for an
-      // unknown id. Persisting the metadata index is not agent activity → no `pool.touch`.
-      if (!metadataStore) return { ok: false }
+      // delete it has no streaming guard. Best-effort per ADR-0005: a failed persist
+      // returns `{ok:false}` (never throws into the live flow); the renderer then
+      // leaves the list unchanged. `setThreadFlags` is a no-op for an unknown id.
+      // Persisting the metadata index is not agent activity → no `pool.touch`.
       try {
-        await metadataStore.setThreadFlags(args.threadId, {
+        await deps.store.setThreadFlags(args.threadId, {
           pinned: args.pinned,
           archived: args.archived,
         })
@@ -1052,11 +907,10 @@ function registerIpc(): void {
       // and its `session_info_update` echo is absorbed by the idempotent store write. A
       // cold Thread (no agentId/session) renames on the store alone. `{ok:false}` only on
       // a store failure, so the renderer reverts just when nothing persisted.
-      if (!metadataStore) return { ok: false }
       const title = args.title.trim()
       if (!title) return { ok: false } // never persist an empty title
       try {
-        await metadataStore.setThreadTitle(args.threadId, title)
+        await deps.store.setThreadTitle(args.threadId, title)
       } catch (err) {
         console.error(
           `[vibe-mistro:metadata] setThreadTitle failed (${args.threadId}): ` +
@@ -1115,187 +969,48 @@ function registerIpc(): void {
   ipcMain.handle(IPC.listMetadata, (): ListMetadataResult => {
     // The cold launch list (ADR-0005): persisted Workspaces + Threads from
     // metadata alone — no agent spawned, no transcript loaded.
-    if (!metadataStore) return []
-    return groupThreadsByWorkspace(metadataStore.snapshot())
+    return groupThreadsByWorkspace(deps.store.snapshot())
   })
 
   ipcMain.handle(IPC.readTranscript, (_event, threadId: string): Promise<ReadTranscriptResult> => {
     // The process-free reopen source (ADR-0005, TB3): hand the renderer the
     // Thread's logged input stream so it can replay through the reducer with NO
     // `vibe-acp` spawned. A missing/absent log reads back as [] (never throws).
-    if (!transcriptStore) return Promise.resolve([])
-    return transcriptStore.read(threadId)
-  })
-
-  ipcMain.handle(IPC.gitSubscribeStatus, (_event, args: GitStatusSubscriptionArgs) => {
-    // Subscribe the active Workspace's Changes panel to its streamed git status (#84).
-    // Ref-counted in the manager: the first subscribe starts the watcher + fetch and
-    // emits a snapshot, later ones just bump the count + re-emit the snapshot.
-    gitStatus.subscribe(args.workspaceDir)
-  })
-
-  ipcMain.handle(IPC.gitUnsubscribeStatus, (_event, args: GitStatusSubscriptionArgs) => {
-    // Panel unmount / Workspace switch-away (#84): the last unsubscribe tears the
-    // watcher + fetch timer down (active-Workspace-only streaming, ADR-0008).
-    gitStatus.unsubscribe(args.workspaceDir)
-  })
-
-  ipcMain.handle(IPC.gitDiff, (_event, args: GitDiffArgs): Promise<GitDiffResult> => {
-    // Read one changed path's working-tree diff for the viewer (#85). Resolve cwd from
-    // the Workspace dir (where #84's status ran, so the path keys match). This is NOT
-    // agent activity, so it does NOT `pool.touch` — opening a diff must not keep a warm
-    // agent alive past its idle window (TB5 #50). Swallows git failure into the empty
-    // result inside `readGitDiff` (never throws).
-    return readGitDiff(args.workspaceDir, args.path, args.untracked, args.ignoreWhitespace ?? false)
-  })
-
-  ipcMain.handle(IPC.gitCommit, async (_event, args: GitCommitArgs): Promise<GitCommitResult> => {
-    // Commit working-tree changes from the Changes panel (#86, the first git WRITE).
-    // cwd is the Workspace dir (where #84's status ran, so `paths` key the same). NOT
-    // agent activity, so — like `git:diff` — it does NOT `pool.touch` (a commit must not
-    // keep a warm agent alive past its idle window, TB5 #50). `gitCommit` swallows every
-    // git failure into `{ok:false, error}` (never throws).
-    const result = await gitCommit(args.workspaceDir, args.message, args.paths)
-    if (result.ok) {
-      // Re-read status so the committed files drop off the panel: a commit touches only
-      // `.git/`, which the working-tree fs watcher ignores (exactly like #84's turn-end
-      // refresh for the agent's own commits). No-op unless the panel is subscribed.
-      gitStatus.refresh(args.workspaceDir)
-    } else {
-      console.error(`[vibe-mistro:git] commit failed (${args.workspaceDir}): ${result.error}`)
-    }
-    return result
-  })
-
-  ipcMain.handle(IPC.gitBranches, (_event, args: GitBranchesArgs): Promise<GitBranchesResult> => {
-    // List the active Workspace's branches for the header dropdown (#87). cwd is the
-    // Workspace dir (where #84's status ran). Read-only, so — like `git:diff` — it does
-    // NOT `pool.touch`. `gitBranches` swallows git failure into `{ok:false, error}`.
-    return gitBranches(args.workspaceDir)
-  })
-
-  ipcMain.handle(IPC.gitCheckout, async (_event, args: GitBranchOpArgs): Promise<GitOpResult> => {
-    // Check out a branch on the active Workspace (#87). A switch changes `.git/HEAD` +
-    // the working tree, so on success re-read status (`gitStatus.refresh`) to update the
-    // panel header (branch / ahead-behind) and file list. NOT agent activity, so no
-    // `pool.touch` (consistent with git:diff/commit). Never throws.
-    const result = await gitCheckout(args.workspaceDir, args.name, args.track ?? false)
-    if (result.ok) gitStatus.refresh(args.workspaceDir)
-    else console.error(`[vibe-mistro:git] checkout failed (${args.workspaceDir} -> ${args.name}): ${result.error}`)
-    return result
-  })
-
-  ipcMain.handle(IPC.gitCreateBranch, async (_event, args: GitBranchOpArgs): Promise<GitOpResult> => {
-    // Create + switch to a new branch on the active Workspace (#87). Like checkout, a
-    // successful create moves HEAD, so re-read status to update the header. No
-    // `pool.touch`. Never throws.
-    const result = await gitCreateBranch(args.workspaceDir, args.name)
-    if (result.ok) gitStatus.refresh(args.workspaceDir)
-    else console.error(`[vibe-mistro:git] create-branch failed (${args.workspaceDir} -> ${args.name}): ${result.error}`)
-    return result
-  })
-
-  ipcMain.handle(IPC.ghCurrentPr, (_event, args: GhCurrentPrArgs): Promise<GhPrResult> => {
-    // Read the current branch's GitHub PR via `gh` (#88, slice 4). cwd is the Workspace
-    // dir (where #84's status ran). A NETWORK call, but read-only, so — like git:diff — it
-    // does NOT `pool.touch` (surfacing a PR must not keep a warm agent alive past its idle
-    // window, TB5 #50). `ghCurrentPr` swallows every gh failure into a result (never throws).
-    return ghCurrentPr(args.workspaceDir)
-  })
-
-  ipcMain.handle(IPC.ghCreatePr, async (_event, args: GhCreatePrArgs): Promise<GhCreateResult> => {
-    // Create a PR for the current branch via `gh pr create` (#88). cwd is the Workspace
-    // dir. NOT agent activity, so no `pool.touch`. `ghCreatePr` swallows every gh failure
-    // into `{ok:false, error}` (never throws); no status refresh needed (a PR creation
-    // doesn't change the working tree — the renderer swaps in the new chip from the URL).
-    const result = await ghCreatePr(args.workspaceDir, { title: args.title, body: args.body })
-    if (!result.ok) console.error(`[vibe-mistro:gh] create-pr failed (${args.workspaceDir}): ${result.error}`)
-    return result
-  })
-
-  ipcMain.handle(IPC.revealPath, async (_event, args: RevealPathArgs): Promise<void> => {
-    // REVEAL a file behind a clickable file-path chip (#116). The href is AGENT-AUTHORED
-    // (untrusted), so a click must never OPEN/execute it — we use `shell.showItemInFolder`,
-    // which only highlights the file in the OS file manager (no Launch Services, no code
-    // execution, no matter the file type). Confinement is the SHARED `confineExistingFile`
-    // (files/confine.ts) — the same machinery `files:read` uses: resolve against the agent's
-    // Workspace cwd, require a regular FILE (blocks dirs / missing paths), symlink-resolve,
-    // and refuse a target outside the realpath'd Workspace (`/etc/passwd`, `~/.ssh/*`) so a
-    // click can't disclose an out-of-tree file's location. No file-TYPE gate is needed:
-    // reveal never runs anything. Best-effort throughout: any refusal or fs failure is a
-    // logged no-op, never thrown.
-    const agent = pool.get(args.agentId)
-    if (!agent) return
-    try {
-      const confined = await confineExistingFile(agent.workspaceDir, args.path, homedir())
-      if (!confined.ok) {
-        if (confined.reason === 'outside-workspace') {
-          console.error(`[vibe-mistro:reveal-path] refused (outside Workspace): ${confined.realTarget}`)
-        }
-        return // a dir or out-of-tree target — refuse
-      }
-      shell.showItemInFolder(confined.realTarget) // reveal only — never opens/executes
-    } catch (err) {
-      // Missing path / stat / realpath failure — swallow (best-effort, never throws).
-      console.error(`[vibe-mistro:reveal-path] ${args.path}: ${String(err)}`)
-    }
-  })
-
-  ipcMain.handle(IPC.filesList, async (_event, args: FilesListArgs): Promise<FilesListResult> => {
-    // LIST the active Workspace's files for the Files Surface tree (#188, ADR-0013). The
-    // listing root is the warm agent's OWN workspaceDir — resolved via `pool.get`, NOT a
-    // renderer-supplied path (review F3, matching `revealPath` above) — so the renderer can
-    // only list a CONNECTED Workspace's tree, never an arbitrary main-readable directory.
-    // The walk's confinement (never follows a symlink) is inside `listFiles`. Cache-served
-    // (keyed by the resolved dir) unless `refresh` forces a rebuild; the git status-stream
-    // watcher invalidates that cache (the `emit` hook above), so an agent-created file
-    // appears on the next read with NO new fs watcher. NOT agent activity, so — like
-    // `git:diff` — it does NOT `pool.touch`. An unknown agent / walk failure → empty result.
-    const agent = pool.get(args.agentId)
-    if (!agent) return { entries: [], truncated: false }
-    const workspaceDir = agent.workspaceDir
-    if (!args.refresh) {
-      const cached = filesListCache.get(workspaceDir)
-      if (cached) return cached
-    }
-    const result = await listFiles(workspaceDir)
-    filesListCache.set(workspaceDir, result)
-    return result
-  })
-
-  ipcMain.handle(IPC.filesRead, async (_event, args: FilesReadArgs): Promise<FilesReadResult> => {
-    // READ one Workspace file for the read-only preview (#189, ADR-0013). The read root is the
-    // warm agent's OWN workspaceDir — resolved via `pool.get`, NOT a renderer-supplied path
-    // (review F3, matching `filesList` / `revealPath`) — so the renderer can only read a
-    // CONNECTED Workspace's files. `readWorkspaceFile` does the SAME confinement as `revealPath`
-    // (resolveWorkspacePath + realpath + isWithinDir): a `..`/absolute target or a symlink escaping
-    // the root → `error`, never reading out of tree. It caps at ~1MB (via stat, before reading),
-    // sniffs a NUL byte for binary, and is STRICTLY read-only. NOT agent activity, so — like
-    // `files:list` / `git:diff` — it does NOT `pool.touch`. Unknown agent / any throw → `error`.
-    const agent = pool.get(args.agentId)
-    if (!agent) return { kind: 'error' }
-    return readWorkspaceFile(agent.workspaceDir, args.relativePath)
+    if (!deps.transcript) return Promise.resolve([])
+    return deps.transcript.read(threadId)
   })
 }
 
 app.whenReady().then(async () => {
   // Load the persisted index before the first window so the renderer's launch
   // fetch sees prior Workspaces/Threads. `userData` is only valid once ready.
-  metadataStore = new MetadataStore({ filePath: join(app.getPath('userData'), 'metadata.json') })
-  await metadataStore.load()
+  // A failed load degrades to empty state INSIDE `load()` (never a throw), so the
+  // store is unconditionally present — see `MainDeps`.
+  const store = new MetadataStore({ filePath: join(app.getPath('userData'), 'metadata.json') })
+  await store.load()
 
   // The per-Thread transcript dir (ADR-0005). `appendFile` won't create parent
-  // dirs, so ensure it exists once here; a failure leaves `transcriptStore` null
-  // and teeing becomes a silent no-op (best-effort — the conversation is fine).
+  // dirs, so ensure it exists once here; a failure leaves `transcript` null and
+  // teeing becomes a silent no-op inside the bridge (best-effort — the
+  // conversation is fine).
   const transcriptsDir = join(app.getPath('userData'), 'transcripts')
+  let transcript: TranscriptStore | null
   try {
     await mkdir(transcriptsDir, { recursive: true })
-    transcriptStore = new TranscriptStore({ dir: transcriptsDir })
+    transcript = new TranscriptStore({ dir: transcriptsDir })
   } catch {
-    transcriptStore = null
+    transcript = null
   }
 
-  registerIpc()
+  // The ACP-event -> Thread-JSONL router (see `TranscriptBridge`): primary route by
+  // the event's own sessionId (via the store), fallback by the agent's active Thread.
+  const bridge = new TranscriptBridge({
+    sink: transcript,
+    resolveBySession: (sessionId) => store.findThreadIdBySessionId(sessionId),
+  })
+  const deps: MainDeps = { store, transcript, bridge }
+
+  registerIpc(deps)
   createWindow()
 
   // The periodic sweep (TB5 #50): release any agent untouched past IDLE_EVICT_MS,
@@ -1308,8 +1023,8 @@ app.whenReady().then(async () => {
   // own, and is cleared on quit. Resilient across the macOS window-close/reopen
   // cycle — after `disposeAll` the pool is empty, so the sweep no-ops until re-warmed.
   sweepTimer = setInterval(() => {
-    notifyAgentsEvicted(pool.evictIdle({ idleMs: IDLE_EVICT_MS, isProtected: isAgentProtected }))
-    notifyAgentsEvicted(pool.enforceCap({ maxWarm: MAX_WARM_AGENTS, isProtected: isAgentProtected }))
+    notifyAgentsEvicted(bridge, pool.evictIdle({ idleMs: IDLE_EVICT_MS, isProtected: isAgentProtected }))
+    notifyAgentsEvicted(bridge, pool.enforceCap({ maxWarm: MAX_WARM_AGENTS, isProtected: isAgentProtected }))
   }, SWEEP_INTERVAL_MS)
   sweepTimer.unref?.()
 
