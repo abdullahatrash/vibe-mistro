@@ -22,7 +22,7 @@ import { IconButton } from '../ui/icon-button'
 import { Textarea } from '../ui/textarea'
 import type { AcpCommand } from './reducer'
 import { getDraft, setDraft as persistDraft, clearDraft } from './composer-draft-store'
-import { appendMention, subscribeComposerInsert } from './composer-insert'
+import { appendMention, appendText, subscribeComposerInsert, subscribeComposerInsertText } from './composer-insert'
 import { ACCEPTED_IMAGE_TYPES, isAcceptedImageType, parseDataUrl } from './image-attach'
 import { nextQueueId, type FollowUpQueue } from './follow-up-queue'
 import { useComposerAutocomplete, CompletionPopover } from './use-composer-autocomplete'
@@ -158,6 +158,17 @@ export function Composer({
   useEffect(() => {
     return subscribeComposerInsert(threadId, (relativePath) => {
       writeDraft(appendMention(getDraft(window.localStorage, threadId), relativePath))
+      inputRef.current?.focus()
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId])
+
+  // Insert RAW text from the Terminal Surface's "Add to chat" (ADR-0014 slice 4): the
+  // terminal is a side-panel sibling, so its selection reaches the composer through the
+  // same module-level channel keyed by threadId — appended verbatim (no `@`).
+  useEffect(() => {
+    return subscribeComposerInsertText(threadId, (text) => {
+      writeDraft(appendText(getDraft(window.localStorage, threadId), text))
       inputRef.current?.focus()
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps

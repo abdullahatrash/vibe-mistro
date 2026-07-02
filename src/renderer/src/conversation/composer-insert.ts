@@ -16,6 +16,7 @@
 type InsertListener = (mention: string) => void
 
 const listenersByThread = new Map<string, Set<InsertListener>>()
+const textListenersByThread = new Map<string, Set<InsertListener>>()
 
 /**
  * Append a plain-text `@path` reference to `draft`, keeping it space-separated: a trailing space
@@ -51,4 +52,40 @@ export function emitComposerInsert(threadId: string, relativePath: string): void
   const set = listenersByThread.get(threadId)
   if (!set) return
   for (const listener of set) listener(relativePath)
+}
+
+/**
+ * Append RAW text to `draft` (the Terminal Surface's "Add to chat", ADR-0014 slice 4):
+ * unlike {@link appendMention} there is no `@` prefix and no forced trailing space — the
+ * selection is inserted verbatim. A newline separates it from prior draft content
+ * (terminal selections are often multi-line), unless the draft is empty or already ends
+ * in whitespace. Pure — the composer writes state + persisted draft together with the result.
+ */
+export function appendText(draft: string, text: string): string {
+  if (draft.length === 0) return text
+  const separator = /\s$/.test(draft) ? '' : '\n'
+  return `${draft}${separator}${text}`
+}
+
+/** Subscribe a Thread's composer to RAW-text insert requests; returns an unsubscribe. */
+export function subscribeComposerInsertText(threadId: string, listener: InsertListener): () => void {
+  let set = textListenersByThread.get(threadId)
+  if (!set) {
+    set = new Set()
+    textListenersByThread.set(threadId, set)
+  }
+  set.add(listener)
+  return () => {
+    const current = textListenersByThread.get(threadId)
+    if (!current) return
+    current.delete(listener)
+    if (current.size === 0) textListenersByThread.delete(threadId)
+  }
+}
+
+/** Request the given Thread's composer append raw `text`; a no-op if none is mounted. */
+export function emitComposerInsertText(threadId: string, text: string): void {
+  const set = textListenersByThread.get(threadId)
+  if (!set) return
+  for (const listener of set) listener(text)
 }

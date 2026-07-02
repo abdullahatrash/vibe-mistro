@@ -13,6 +13,8 @@ export const filesChannels = {
   filesList: 'files:list',
   /** Renderer -> main: READ one Workspace file for the read-only preview (#189) — see {@link FilesReadArgs}. */
   filesRead: 'files:read',
+  /** Renderer -> main: open an http(s) URL in the system browser (terminal links, ADR-0014) — see {@link OpenExternalArgs}. */
+  openExternal: 'shell:open-external',
 } as const
 
 /**
@@ -107,3 +109,14 @@ export type FilesReadResult =
   | { kind: 'binary' }
   | { kind: 'tooLarge' }
   | { kind: 'error' }
+
+/**
+ * Args for `openExternal` (ADR-0014): open a URL from clickable terminal output in the
+ * system browser. The URL is UNTRUSTED (a command can print any text), so main opens it
+ * ONLY when its scheme is `http`/`https` — never a `file:`/custom scheme that could launch
+ * a local handler. Fire-and-forget (`Promise<void>`); a rejected/malformed URL is a logged
+ * no-op, never thrown.
+ */
+export interface OpenExternalArgs {
+  url: string
+}
