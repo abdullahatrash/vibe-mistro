@@ -110,6 +110,12 @@ export interface PathInsertion {
  * a SLASH for a directory (`@dir/`, no space, so re-deriving continues into the dir). Text
  * after the caret is kept, so accepting mid-sentence splices the reference in without
  * eating what follows.
+ *
+ * KNOWN LIMITATION (matches the Vibe CLI PathCompleter; plain-text design, ADR-0002): a
+ * path containing a SPACE inserts as `@my file.ts ` — a token the space-free trigger can't
+ * re-derive, and which the agent likely reads only up to the space. We neither quote nor
+ * drop such paths (quoting is unverified against the agent's `render_path_prompt`; dropping
+ * would silently hide real files) — spaced paths are simply not usefully referenceable here.
  */
 export function applyPath(
   value: string,
