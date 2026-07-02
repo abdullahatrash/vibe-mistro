@@ -1,5 +1,5 @@
-import { execFile, type ExecFileException } from 'node:child_process'
-import { getShellEnv } from '../shell-env'
+import { defaultGitRun, type GitRun } from './run'
+import { splitLeading } from './porcelain'
 import type { GitFile, GitStatus } from '../../shared/ipc'
 
 /**
@@ -13,35 +13,6 @@ import type { GitFile, GitStatus } from '../../shared/ipc'
  * Workspace, a missing `git`, a broken index) is swallowed into `isRepo:false` — it
  * NEVER throws into the stream, so a watcher tick or a fetch can't crash the manager.
  */
-
-/**
- * Run a git command and capture its stdout + exit code (+ stderr). Injectable for
- * tests so they never shell real git (Seam, mirroring `AcpClient.spawn`). The default
- * resolves `git` via the shell-env PATH (so a Finder/Dock launch still finds it, like
- * the agent spawn) and resolves — never rejects — with the exit code even on failure.
- *
- * `stderr` is OPTIONAL so #84/#85's read callers (and their fakes) need no change —
- * they only read `stdout`/`code`. The WRITE path (#86 `gitCommit`) needs it: git puts
- * a failed pre-commit hook / lock error on STDERR (and "nothing to commit" on stdout),
- * so a commit failure must surface the actual reason from whichever stream carried it.
- */
-export type GitRun = (args: string[], cwd: string) => Promise<{ stdout: string; stderr?: string; code: number }>
-
-export const defaultGitRun: GitRun = (args, cwd) =>
-  new Promise((resolve) => {
-    execFile(
-      'git',
-      args,
-      { cwd, env: getShellEnv(), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
-      (err: ExecFileException | null, stdout: string, stderr: string) => {
-        // execFile's `err.code` is the numeric exit code on a non-zero exit, or a
-        // string (e.g. 'ENOENT' when git is missing) on a spawn failure — map both
-        // to a non-zero code so the caller degrades to `isRepo:false`.
-        const code = err == null ? 0 : typeof err.code === 'number' ? err.code : 1
-        resolve({ stdout: stdout ?? '', stderr: stderr ?? '', code })
-      },
-    )
-  })
 
 /** The empty, not-a-repo status — also the swallow-all-errors fallback. */
 function notARepo(): GitStatus {
@@ -172,22 +143,6 @@ function parseChangedEntry(
     staged: xy[0] !== '.' && xy[0] !== '?',
     untracked: false,
   }
-}
-
-/** Split off the first `n` space-delimited fields, keeping the remainder (the path) intact. */
-function splitLeading(line: string, n: number): { fields: string[]; rest: string } {
-  const fields: string[] = []
-  let i = 0
-  for (let f = 0; f < n; f++) {
-    const sp = line.indexOf(' ', i)
-    if (sp < 0) {
-      fields.push(line.slice(i))
-      return { fields, rest: '' }
-    }
-    fields.push(line.slice(i, sp))
-    i = sp + 1
-  }
-  return { fields, rest: line.slice(i) }
 }
 
 /**

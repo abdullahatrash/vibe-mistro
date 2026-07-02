@@ -1,5 +1,4 @@
-import { execFile, type ExecFileException } from 'node:child_process'
-import { getShellEnv } from '../shell-env'
+import { errorMessage, makeCommandRunner } from './run'
 import type { GhCreateResult, GhPr, GhPrResult } from '../../shared/ipc'
 
 /**
@@ -21,8 +20,8 @@ import type { GhCreateResult, GhPr, GhPrResult } from '../../shared/ipc'
 /**
  * Run a `gh` command and capture its stdout + exit code (+ stderr). Injectable for tests
  * (Seam, mirroring `GitRun`) so they never shell real `gh` — and so they NEVER open a
- * real PR. The default resolves `gh` via the shell-env PATH (like the git/agent spawns)
- * and resolves — never rejects — with the exit code even on failure.
+ * real PR. The default is the shared `makeCommandRunner` (git/run.ts): shell-env PATH,
+ * resolve-never-reject, exit code captured even on failure.
  *
  * On a SPAWN failure (`gh` not installed — `err.code` is a string like `ENOENT`, not a
  * numeric exit), it resolves with the `GH_NOT_FOUND` sentinel code so the pure mapper can
@@ -37,21 +36,10 @@ export type GhRun = (args: string[], cwd: string) => Promise<{ stdout: string; s
  */
 export const GH_NOT_FOUND = -1
 
-export const defaultGhRun: GhRun = (args, cwd) =>
-  new Promise((resolve) => {
-    execFile(
-      'gh',
-      args,
-      { cwd, env: getShellEnv(), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 },
-      (err: ExecFileException | null, stdout: string, stderr: string) => {
-        // A numeric `err.code` is gh's exit code; a STRING code (e.g. 'ENOENT') is a spawn
-        // failure (gh not installed) -> the `GH_NOT_FOUND` sentinel so the caller maps it
-        // to the install hint rather than a generic non-zero.
-        const code = err == null ? 0 : typeof err.code === 'number' ? err.code : GH_NOT_FOUND
-        resolve({ stdout: stdout ?? '', stderr: stderr ?? '', code })
-      },
-    )
-  })
+export const defaultGhRun: GhRun = makeCommandRunner('gh', {
+  maxBuffer: 16 * 1024 * 1024,
+  spawnFailureCode: GH_NOT_FOUND,
+})
 
 /** The error messages, kept as named constants so the tests assert the exact copy. */
 export const GH_NOT_FOUND_MESSAGE = 'GitHub CLI (gh) not found — install it to use PR features.'
@@ -189,7 +177,7 @@ export async function ghCurrentPr(cwd: string, run: GhRun = defaultGhRun): Promi
     const res = await run(['pr', 'view', '--json', 'number,title,url,state'], cwd)
     return mapPrView(res.stdout, res.stderr, res.code)
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    return { ok: false, error: errorMessage(err) }
   }
 }
 
@@ -215,6 +203,6 @@ export async function ghCreatePr(
     const res = await run(['pr', 'create', '--title', fields.title, '--body', fields.body], cwd)
     return mapCreate(res.stdout, res.stderr, res.code)
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    return { ok: false, error: errorMessage(err) }
   }
 }

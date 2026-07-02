@@ -1,6 +1,7 @@
 import { constants as fsConstants } from 'node:fs'
 import { open, realpath, writeFile, type FileHandle } from 'node:fs/promises'
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
+import { isWithinDir } from '../open-target'
 
 /**
  * Serve the agent's `fs/write_text_file` request (agent → client). Like reads,
@@ -127,7 +128,9 @@ async function confinedWriteTarget(
 ): Promise<{ realRoot: string; realTarget: string } | null> {
   const realRoot = await realpath(workspaceDir).catch(() => resolve(workspaceDir))
   const realTarget = await resolveLikeKernel(target)
-  return isPathWithin(realRoot, realTarget) ? { realRoot, realTarget } : null
+  // Both sides are normalized absolute paths (realpath / kernel-style resolution), so
+  // the shared lexical containment primitive applies directly (no second `resolve`).
+  return isWithinDir(realRoot, realTarget) ? { realRoot, realTarget } : null
 }
 
 /** Boolean form of {@link confinedWriteTarget}. */
@@ -218,15 +221,4 @@ async function resolveLikeKernel(target: string): Promise<string> {
     }
   }
   return acc
-}
-
-/**
- * True when `target` resolves to `dir` or a descendant of it — a pure lexical
- * comparison. Callers pass realpath-resolved paths (see `isWriteWithinWorkspace`)
- * so symlinks are already resolved; on raw paths this rejects `..`/absolute
- * escapes only.
- */
-export function isPathWithin(dir: string, target: string): boolean {
-  const rel = relative(resolve(dir), resolve(target))
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
 }

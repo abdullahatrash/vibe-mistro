@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync }
 import { open } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { handleFsWriteTextFile, isPathWithin, secureWriteWithinRoot, type WriteTextFn } from './fs-write'
+import { handleFsWriteTextFile, secureWriteWithinRoot, type WriteTextFn } from './fs-write'
 
 /**
  * Seam C: the `fs/write_text_file` handler main uses to serve the agent's
@@ -321,15 +321,5 @@ describe('secureWriteWithinRoot (#21)', () => {
 
     rmSync(ws, { recursive: true, force: true })
     rmSync(outside, { recursive: true, force: true })
-  })
-})
-
-describe('isPathWithin', () => {
-  it('accepts the dir itself and descendants, rejects siblings and parents', () => {
-    expect(isPathWithin('/ws', '/ws')).toBe(true)
-    expect(isPathWithin('/ws', '/ws/a/b.txt')).toBe(true)
-    expect(isPathWithin('/ws', '/ws/../etc/passwd')).toBe(false)
-    expect(isPathWithin('/ws', '/wsX/file')).toBe(false)
-    expect(isPathWithin('/ws', '/etc/passwd')).toBe(false)
   })
 })

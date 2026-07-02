@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { defaultGitRun, type GitRun } from './status'
+import { defaultGitRun, type GitRun } from './run'
 import type { GitDiffResult } from '../../shared/ipc'
 
 /**

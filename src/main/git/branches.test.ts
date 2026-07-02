@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { defaultBranchName, gitBranches, gitCheckout, gitCreateBranch, parseBranches } from './branches'
-import type { GitRun } from './status'
+import type { GitRun } from './run'
 
 /**
  * #87 branch ops. The testable seams are (1) the PURE `parseBranches` over real

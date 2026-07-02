@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type WebContents } from 'electron'
-import { mkdir, realpath, stat } from 'node:fs/promises'
+import { mkdir } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
@@ -53,8 +53,6 @@ import {
   type ThreadTitleEvent,
 } from '../shared/ipc'
 import { detectVibe } from './vibe-detect'
-import { resolveWorkspacePath } from './resolve-workspace-path'
-import { isWithinDir } from './open-target'
 import { getShellEnv } from './shell-env'
 import { groupThreadsByWorkspace, MetadataStore } from './persistence/metadata-store'
 import {
@@ -85,6 +83,7 @@ import { GitStatusManager } from './git/status-stream'
 import { chokidarWatchFactory, realClock } from './git/runtime'
 import { listFiles } from './files/list-files'
 import { readWorkspaceFile } from './files/read-file'
+import { confineExistingFile } from './files/confine'
 import { FilesListCache, shouldInvalidateFilesCacheOnGitStatus } from './files/cache'
 
 /**
@@ -1218,29 +1217,27 @@ function registerIpc(): void {
     // REVEAL a file behind a clickable file-path chip (#116). The href is AGENT-AUTHORED
     // (untrusted), so a click must never OPEN/execute it — we use `shell.showItemInFolder`,
     // which only highlights the file in the OS file manager (no Launch Services, no code
-    // execution, no matter the file type). We still CONFINE it so a click can't disclose
-    // the location of an out-of-tree file:
-    //   1. Resolve the (possibly relative) path against the agent's Workspace cwd.
-    //   2. Require a regular FILE (blocks dirs / missing paths), then symlink-resolve
-    //      (`realpath`) and confine to the realpath'd Workspace — an in-tree symlink can't
-    //      escape, and a `..`/absolute target outside the root is refused (`/etc/passwd`,
-    //      `~/.ssh/*`). No file-TYPE gate is needed: reveal never runs anything.
-    // Best-effort throughout: any refusal or fs failure is a logged no-op, never thrown.
+    // execution, no matter the file type). Confinement is the SHARED `confineExistingFile`
+    // (files/confine.ts) — the same machinery `files:read` uses: resolve against the agent's
+    // Workspace cwd, require a regular FILE (blocks dirs / missing paths), symlink-resolve,
+    // and refuse a target outside the realpath'd Workspace (`/etc/passwd`, `~/.ssh/*`) so a
+    // click can't disclose an out-of-tree file's location. No file-TYPE gate is needed:
+    // reveal never runs anything. Best-effort throughout: any refusal or fs failure is a
+    // logged no-op, never thrown.
     const agent = pool.get(args.agentId)
     if (!agent) return
-    const requested = resolveWorkspacePath(agent.workspaceDir, args.path, homedir())
     try {
-      const [realRoot, stats] = await Promise.all([realpath(agent.workspaceDir), stat(requested)])
-      if (!stats.isFile()) return // a dir or missing path — refuse
-      const realTarget = await realpath(requested)
-      if (!isWithinDir(realRoot, realTarget)) {
-        console.error(`[vibe-mistro:reveal-path] refused (outside Workspace): ${realTarget}`)
-        return
+      const confined = await confineExistingFile(agent.workspaceDir, args.path, homedir())
+      if (!confined.ok) {
+        if (confined.reason === 'outside-workspace') {
+          console.error(`[vibe-mistro:reveal-path] refused (outside Workspace): ${confined.realTarget}`)
+        }
+        return // a dir or out-of-tree target — refuse
       }
-      shell.showItemInFolder(realTarget) // reveal only — never opens/executes
+      shell.showItemInFolder(confined.realTarget) // reveal only — never opens/executes
     } catch (err) {
       // Missing path / stat / realpath failure — swallow (best-effort, never throws).
-      console.error(`[vibe-mistro:reveal-path] ${requested}: ${String(err)}`)
+      console.error(`[vibe-mistro:reveal-path] ${args.path}: ${String(err)}`)
     }
   })
 

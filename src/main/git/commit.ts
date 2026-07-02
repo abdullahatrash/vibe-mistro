@@ -1,4 +1,5 @@
-import { defaultGitRun, type GitRun } from './status'
+import { defaultGitRun, errorMessage, failReason, type GitRun } from './run'
+import { renamePaths } from './porcelain'
 import type { GitCommitResult } from '../../shared/ipc'
 
 /**
@@ -44,23 +45,23 @@ export async function gitCommit(
       // Mixed reset (keeps the working tree) so the index starts from HEAD, then stage
       // exactly the selection — any other previously-staged path drops out of the index.
       const reset = await run(['reset', '-q'], cwd)
-      if (reset.code !== 0) return fail(reset)
+      if (reset.code !== 0) return { ok: false, error: failReason(reset) }
       // `add -- <paths + rename-origins>` stages modifications, untracked adds, deletions
       // of the selected tracked paths (git ≥2.0 default), AND a selected rename's deleted
       // source — so a deleted/renamed selected file commits whole.
       const add = await run(['add', '--', ...paths, ...renameOrigins], cwd)
-      if (add.code !== 0) return fail(add)
+      if (add.code !== 0) return { ok: false, error: failReason(add) }
     } else {
       // Commit-all: stage everything (incl. untracked + deletions).
       const add = await run(['add', '-A'], cwd)
-      if (add.code !== 0) return fail(add)
+      if (add.code !== 0) return { ok: false, error: failReason(add) }
     }
     const commit = await run(['-c', 'core.quotePath=false', 'commit', '-m', message], cwd)
-    if (commit.code !== 0) return fail(commit)
+    if (commit.code !== 0) return { ok: false, error: failReason(commit) }
     return { ok: true }
   } catch (err) {
     // A truly unexpected throw (a runner that rejects) still degrades to a result.
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    return { ok: false, error: errorMessage(err) }
   }
 }
 
@@ -79,34 +80,8 @@ async function collectRenameOrigins(cwd: string, paths: string[], run: GitRun): 
   const origins: string[] = []
   for (const line of res.stdout.split('\n')) {
     if (!line.startsWith('2 ')) continue // `2` = rename/copy entry
-    // The pathnames follow 9 space-delimited fields, as `<new>\t<orig>`.
-    const rest = afterFields(line, 9)
-    const tab = rest.indexOf('\t')
-    if (tab < 0) continue
-    const newPath = rest.slice(0, tab)
-    const orig = rest.slice(tab + 1)
-    if (orig && selected.has(newPath)) origins.push(orig)
+    const rename = renamePaths(line)
+    if (rename && selected.has(rename.newPath)) origins.push(rename.orig)
   }
   return origins
-}
-
-/** Drop the first `n` space-delimited fields of a line, returning the remainder verbatim. */
-function afterFields(line: string, n: number): string {
-  let i = 0
-  for (let f = 0; f < n; f++) {
-    const sp = line.indexOf(' ', i)
-    if (sp < 0) return ''
-    i = sp + 1
-  }
-  return line.slice(i)
-}
-
-/**
- * Map a non-zero git step to the failure result, surfacing the real reason. git writes
- * hook / lock failures to STDERR and "nothing to commit" to STDOUT, so prefer stderr
- * and fall back to stdout — never collapse to a generic message (#78 style).
- */
-function fail(res: { stdout: string; stderr?: string; code: number }): GitCommitResult {
-  const reason = (res.stderr ?? '').trim() || res.stdout.trim() || 'git command failed'
-  return { ok: false, error: reason }
 }
