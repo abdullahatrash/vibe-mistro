@@ -1,0 +1,147 @@
+#!/usr/bin/env node
+/**
+ * A scripted fake `vibe-acp` for the e2e visual smoke suite (slice 2): speaks
+ * just enough ACP — newline-delimited JSON-RPC 2.0 over stdio — for the app to
+ * connect, open a session, and stream one fully deterministic turn. Every shape
+ * below is copied from the verbatim captures in `docs/acp-capture.md` (§1, §2,
+ * §3, §4, §8), so if the app's parser tightens against the real agent, this
+ * fake breaks the same way.
+ *
+ * Deliberately dumb: fixed session ids, fixed reply text, fixed usage numbers,
+ * no tool calls, no permission requests, no auth dance (always signed in).
+ * Anything unexpected gets a -32601 so a new app-side call FAILS LOUDLY in the
+ * suite instead of hanging a request.
+ */
+
+const out = (msg) => process.stdout.write(JSON.stringify(msg) + '\n')
+const reply = (id, result) => out({ jsonrpc: '2.0', id, result })
+const fail = (id, code, message) => out({ jsonrpc: '2.0', id, error: { code, message, data: null } })
+const notify = (method, params) => out({ jsonrpc: '2.0', method, params })
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+let sessionSeq = 0
+
+/** acp-capture §2 — the modes/models/configOptions bundle `session/new` reports. */
+const MODES = {
+  currentModeId: 'default',
+  availableModes: [
+    { id: 'default', name: 'Default', description: 'Requires approval for tool executions' },
+    { id: 'plan', name: 'Plan', description: 'Read-only agent for exploration and planning' },
+    { id: 'accept-edits', name: 'Accept Edits', description: 'Auto-approves file edits only' },
+    { id: 'auto-approve', name: 'Auto Approve', description: 'Auto-approves all tool executions' },
+    { id: 'chat', name: 'Chat', description: 'Read-only conversational mode' },
+  ],
+}
+const MODELS = {
+  currentModelId: 'mistral-medium-3.5',
+  availableModels: [
+    { modelId: 'mistral-medium-3.5', name: 'mistral-medium-3.5' },
+    { modelId: 'devstral-small', name: 'devstral-small' },
+    { modelId: 'local', name: 'local' },
+  ],
+}
+const CONFIG_OPTIONS = [
+  {
+    id: 'thinking',
+    currentValue: 'high',
+    options: [
+      { value: 'off' },
+      { value: 'low' },
+      { value: 'medium' },
+      { value: 'high' },
+      { value: 'max' },
+    ],
+  },
+]
+
+async function dispatch(msg) {
+  switch (msg.method) {
+    case 'initialize':
+      // acp-capture §1.
+      reply(msg.id, {
+        agentCapabilities: {
+          loadSession: true,
+          promptCapabilities: { audio: false, embeddedContext: true, image: true },
+          sessionCapabilities: { close: {}, fork: {}, list: {} },
+        },
+        agentInfo: { name: 'fake-vibe-acp', title: 'Fake Vibe (e2e)', version: '0.0.0' },
+        authMethods: [
+          {
+            id: 'browser-auth',
+            name: 'Sign in through Mistral AI Studio',
+            description: 'Fake sign-in (never needed — _auth/status is always signed in).',
+          },
+        ],
+        protocolVersion: 1,
+      })
+      return
+    case '_auth/status':
+      // acp-capture §8 — always signed in, so the suite never sees the sign-in panel.
+      reply(msg.id, { authenticated: true, authState: 'os_keyring', signOutAvailable: true })
+      return
+    case 'session/new':
+      // acp-capture §2. Deterministic ids so replays/screens can't drift.
+      sessionSeq += 1
+      reply(msg.id, {
+        sessionId: `fake-session-${sessionSeq}`,
+        modes: MODES,
+        models: MODELS,
+        configOptions: CONFIG_OPTIONS,
+      })
+      return
+    case 'session/prompt':
+      await streamTurn(msg)
+      return
+    case 'session/cancel':
+    case 'session/close':
+    case 'session/set_mode':
+    case 'session/set_model':
+    case 'session/set_config_option':
+      reply(msg.id, {})
+      return
+    default:
+      // A request we don't script: fail loudly (a silent drop would hang the
+      // app-side request and stall the suite until its timeout).
+      if (msg.id !== undefined) fail(msg.id, -32601, `fake-vibe-acp: method not found: ${msg.method}`)
+  }
+}
+
+/** One deterministic turn (acp-capture §3/§4): title, three message chunks, usage, end_turn. */
+async function streamTurn(msg) {
+  const sessionId = msg.params?.sessionId
+  const update = (u) => notify('session/update', { sessionId, update: u })
+  update({ sessionUpdate: 'session_info_update', title: 'Fake deterministic thread' })
+  const chunks = [
+    'Hello from the **fake agent**. ',
+    'This reply is fully deterministic, ',
+    'so the visual smoke suite can pin it to the pixel.',
+  ]
+  for (const text of chunks) {
+    update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text }, messageId: 'fake-msg-1' })
+    await sleep(30)
+  }
+  update({ sessionUpdate: 'usage_update', used: 1234, size: 200000, cost: { amount: 0.0042, currency: 'USD' } })
+  reply(msg.id, {
+    stopReason: 'end_turn',
+    usage: { inputTokens: 1000, outputTokens: 34, totalTokens: 1034 },
+    userMessageId: 'fake-user-1',
+  })
+}
+
+let buffer = ''
+process.stdin.setEncoding('utf8')
+process.stdin.on('data', (data) => {
+  buffer += data
+  let newline
+  while ((newline = buffer.indexOf('\n')) !== -1) {
+    const line = buffer.slice(0, newline).trim()
+    buffer = buffer.slice(newline + 1)
+    if (!line) continue
+    try {
+      void dispatch(JSON.parse(line))
+    } catch {
+      // Unparseable line: ignore (the real agent tolerates garbage on stdin too).
+    }
+  }
+})
+process.stdin.on('end', () => process.exit(0))

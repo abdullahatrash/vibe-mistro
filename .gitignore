@@ -15,3 +15,6 @@ bun.lock
 # Playwright e2e artifacts (baselines in e2e/*-snapshots/ ARE committed).
 test-results/
 playwright-report/
+
+# Claude Code session worktrees (local tooling, never part of the repo).
+.claude/worktrees/
