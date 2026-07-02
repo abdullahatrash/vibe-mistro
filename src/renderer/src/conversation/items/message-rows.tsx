@@ -1,14 +1,37 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
-import { Check, Copy, RotateCcw, ThumbsDown, ThumbsUp } from 'lucide-react'
+import { Check, Copy, RotateCcw, Sparkles, ThumbsDown, ThumbsUp } from 'lucide-react'
 import { IconButton } from '../../ui/icon-button'
 import { Response } from '../Response'
-import type { AssistantItem, UserItem } from '../reducer'
+import { matchInvokedCommand } from '../command-autocomplete'
+import type { AcpCommand, AssistantItem, UserItem } from '../reducer'
 
-export function UserRow({ item }: { item: UserItem }): JSX.Element {
+export function UserRow({
+  item,
+  availableCommands,
+}: {
+  item: UserItem
+  /** The session's slash commands/skills — a leading `/name` match renders a chip. */
+  availableCommands?: readonly AcpCommand[]
+}): JSX.Element {
+  // Skill/command chip: vibe-acp invokes a skill when the prompt opens with a
+  // known `/name`, but gives NO wire-level acknowledgment — so we surface the
+  // match ourselves. Matched at RENDER time against the CURRENT list (not stamped
+  // at send): a draft's first prompt is sent before `available_commands_update`
+  // streams, so the chip appears retroactively once the list arrives.
+  const command = matchInvokedCommand(item.text, availableCommands ?? [])
   // User turn (#114): a right-aligned rounded bubble, capped so long prose wraps
   // instead of spanning the pane. Echoed attachments (#100) re-home into the bubble.
   return (
     <div className="flex flex-col items-end gap-1.5">
+      {command && (
+        <span
+          data-command-chip
+          title={command.description}
+          className="inline-flex items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] px-1.5 py-0.5 font-mono text-xs leading-none text-accent-text"
+        >
+          <Sparkles className="size-3 shrink-0" aria-hidden />/{command.name}
+        </span>
+      )}
       <div className="max-w-[80%] rounded-2xl border border-border bg-surface px-3.5 py-2.5 text-[15px] leading-relaxed break-words whitespace-pre-wrap text-text-body">
         {item.images && item.images.length > 0 && (
           <div className="mb-2 flex flex-wrap justify-end gap-2">

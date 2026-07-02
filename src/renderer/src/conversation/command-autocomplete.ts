@@ -99,6 +99,26 @@ export function applyCommand(
 }
 
 /**
+ * Match a SENT message against the commands list, mirroring vibe-acp's own
+ * server-side parse (`SkillManager.parse_skill_command` + the builtin-command
+ * normalization): the whole text, after trim, must open with `/`, and the first
+ * whitespace-delimited word (lowercased, leading whitespace after the `/`
+ * tolerated — Python's `split(None)` semantics) must equal a command name.
+ * Returns the matched command or null. This is how the user-message row knows a
+ * prompt invoked a skill/command — the agent gives no wire-level signal.
+ */
+export function matchInvokedCommand(
+  text: string,
+  commands: readonly AcpCommand[],
+): AcpCommand | null {
+  const stripped = text.trim()
+  if (!stripped.startsWith('/')) return null
+  const name = stripped.slice(1).trimStart().split(TOKEN_WHITESPACE, 1)[0]?.toLowerCase()
+  if (!name) return null
+  return commands.find((command) => command.name.toLowerCase() === name) ?? null
+}
+
+/**
  * Move a wrapping selection index by `delta` (typically ±1 for ↑/↓) over a list of
  * `length` rows, wrapping past either end. An empty list clamps to 0 so callers can
  * pass the result back without a special case.

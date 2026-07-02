@@ -387,6 +387,7 @@ export function Conversation({
               // history's "Thinking" blocks (they belong to prior, settled turns).
               streaming={state.isProcessing && idx > lastUserIndex}
               onPermission={respondPermission}
+              availableCommands={state.availableCommands}
             />
           ))}
           {/* Working indicator (#115): while a turn is in flight, a self-ticking
