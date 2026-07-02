@@ -36,7 +36,7 @@ const NARROW_QUERY = '(max-width: 980px)'
  * active id) lives in the shared `side-panel-store`; this component renders it and drives
  * ⌘P/⌃⇧G. Open Surfaces show as a TAB STRIP; with zero open, the panel shows the launcher
  * CARDS (its empty state). Review re-homes the git Changes panel behavior-identical
- * (#84–#88, ADR-0008); Files is the slice-2 placeholder; Terminal/Browser are inert.
+ * (#84–#88, ADR-0008); Files is the searchable tree (#188); Terminal/Browser are inert.
  *
  * Presentation is DUAL: inline beside the conversation on wide windows, and inside a Sheet
  * (right-edge slide-over, dimmed/blurred backdrop, Esc/outside-click closes) on narrow ones
@@ -47,11 +47,14 @@ const NARROW_QUERY = '(max-width: 980px)'
 export function SurfacePanel({
   workspaceId,
   workspaceDir,
+  agentId,
   isActive,
   busy,
 }: {
   workspaceId: string
   workspaceDir: string
+  /** The warm agent handle — Files addresses `files:list` by this (confinement, #188 F3). */
+  agentId: string
   /** Whether this is the on-screen Workspace (#84) — gates git streaming AND shortcuts. */
   isActive: boolean
   /** Whether a turn is streaming (#86) — threaded to the Review panel's commit guard. */
@@ -92,7 +95,14 @@ export function SurfacePanel({
   // git behaviour stays frozen (#84/ADR-0008). A closed wide panel renders nothing; a
   // closed narrow Sheet renders its empty shell.
   const body = panel.isOpen ? (
-    <PanelBody workspaceId={workspaceId} workspaceDir={workspaceDir} isActive={isActive} busy={busy} panel={panel} />
+    <PanelBody
+      workspaceId={workspaceId}
+      workspaceDir={workspaceDir}
+      agentId={agentId}
+      isActive={isActive}
+      busy={busy}
+      panel={panel}
+    />
   ) : null
 
   if (narrow) {
@@ -121,12 +131,14 @@ export function SurfacePanel({
 function PanelBody({
   workspaceId,
   workspaceDir,
+  agentId,
   isActive,
   busy,
   panel,
 }: {
   workspaceId: string
   workspaceDir: string
+  agentId: string
   isActive: boolean
   busy: boolean
   panel: ReturnType<typeof useWorkspacePanel>
@@ -157,11 +169,28 @@ function PanelBody({
             onCollapse={() => closeWorkspaceSurface(workspaceId, 'review')}
           />
         )}
-        {active?.kind === 'files' && <FilesSurface onCollapse={() => closeWorkspaceSurface(workspaceId, 'files')} />}
+        {active?.kind === 'files' && (
+          // The Files Surface tree (#188). It only mounts here — when `files` is the ACTIVE
+          // tab and the panel is open — and focuses its own search on mount, so ⌘P (which
+          // opens/activates Files via the store) and a Files card/tab click both land in a
+          // search-focused tree (ADR-0013 decision 1), with no per-trigger plumbing.
+          // Selecting a file emits an open-file intent that slice 3 (#189) will route to a
+          // `file:` Surface via the store; a no-op until then.
+          <FilesSurface
+            onCollapse={() => closeWorkspaceSurface(workspaceId, 'files')}
+            agentId={agentId}
+            onOpenFile={NO_OPEN_FILE}
+          />
+        )}
       </div>
     </div>
   )
 }
+
+// Selecting a file emits an open-file intent; slice 3 (#189) swaps this for opening a
+// `file:` Surface (a panel-level file tab) via the store. A no-op until then (a zero-arg
+// fn satisfies the callback type).
+const NO_OPEN_FILE = (): void => undefined
 
 /** A Surface's tab-strip presentation: its kind icon + a short human label. */
 function surfaceMeta(surface: Surface): { icon: ReactNode; label: string } {

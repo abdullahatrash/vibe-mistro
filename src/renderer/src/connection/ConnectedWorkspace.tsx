@@ -111,6 +111,7 @@ export function ConnectedWorkspace({
       <SurfacePanel
         workspaceId={connection.workspaceId}
         workspaceDir={connection.workspaceDir}
+        agentId={connection.agentId}
         isActive={isActive}
         busy={busy}
       />
