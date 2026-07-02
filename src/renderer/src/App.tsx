@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState, type JSX, type ReactNode } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState, type JSX, type ReactNode } from 'react'
 import type {
   AuthMethod,
   ListMetadataResult,
@@ -113,10 +113,12 @@ export function App(): JSX.Element {
   // WHICH Surface shows inside stays per-Workspace (surface-state-store). A Surface
   // shortcut (⌘P/⌃⇧G) can also open/close it via `setSidePanelOpenState`.
   const [sidePanelOpen, setSidePanelOpen] = useState(() => getSidePanelOpen(window.localStorage))
-  function setSidePanelOpenState(open: boolean): void {
+  // Stable identity (review fold): this reaches SurfacePanel's keydown-effect deps, and a
+  // fresh function every App render would re-bind the window listener on every ACP tick.
+  const setSidePanelOpenState = useCallback((open: boolean): void => {
     setSidePanelOpen(open)
     setSidePanelOpenStore(window.localStorage, open)
-  }
+  }, [])
   // Navigation (decision 2): WHICH Workspace/Thread the user is looking at —
   // lifted here so the connect flow (Open project, Continue, sign-in) can drive it.
   const [nav, navDispatch] = useReducer(navReducer, initialNavState)
