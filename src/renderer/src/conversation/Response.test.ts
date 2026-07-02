@@ -89,6 +89,87 @@ describe('Response — the wrapped harden still runs (#168 guard liveness)', () 
   })
 })
 
+describe('Response — bare file paths in prose render as chips (#185)', () => {
+  const barePathCases: ReadonlyArray<[string, string]> = [
+    ['relative path with line ref', 'fix src/main/agent-pool.ts:42 now'],
+    ['dot-relative path', 'open ./rel/path.md please'],
+    ['home-relative path', 'open ~/x/y.ts please'],
+    // The next two are scheme-shaped for rehype-sanitize (colon before any slash) and only
+    // chip because `schemeSafeUrl` percent-encodes the colon — see prose-file-links.ts.
+    ['bare filename with line ref', 'check package.json:12 please'],
+    ['windows drive path', 'open C:\\repo\\a.ts now'],
+    ['parenthesised path with trailing punctuation', 'worth a look (see src/x.ts:42).'],
+  ]
+
+  for (const [name, input] of barePathCases) {
+    it(`chips a ${name} without an explicit markdown link`, () => {
+      const html = render(input)
+      expect(html).toContain('data-file-chip')
+      expect(html).not.toContain('[blocked]')
+      expect(html).not.toContain('Blocked URL')
+    })
+  }
+
+  it('renders the auto-linkified chip with the parsed line ref (L42)', () => {
+    const html = render('fix src/main/agent-pool.ts:42 now')
+    expect(html).toContain('data-file-chip')
+    expect(html).toContain('L42')
+  })
+
+  it('disambiguates colliding basenames across prose-detected paths (shared label pool)', () => {
+    const html = render('compare src/a/reducer.ts:1 with src/b/reducer.ts:2')
+    expect(html).toContain('reducer.ts · a')
+    expect(html).toContain('reducer.ts · b')
+  })
+})
+
+describe('Response — auto-linkify never fires inside code (#185)', () => {
+  it('leaves a path inside inline code as plain code', () => {
+    const html = render('run `src/foo.ts:42` here')
+    expect(html).not.toContain('data-file-chip')
+    expect(html).toContain('src/foo.ts:42')
+  })
+
+  it('leaves a path inside a fenced code block as plain code', () => {
+    const html = render('```\nsrc/foo.ts:42\n```')
+    expect(html).not.toContain('data-file-chip')
+  })
+})
+
+describe('Response — auto-linkify false positives stay plain prose (#185)', () => {
+  it('does not chip or link slashed/dotted prose', () => {
+    const html = render('use and/or, e.g. v1.2.3 on Node.js')
+    expect(html).not.toContain('data-file-chip')
+    expect(html).not.toContain('<a')
+  })
+
+  it('does not chip or link a scheme-less domain path', () => {
+    const html = render('see github.com/foo/bar.ts there')
+    expect(html).not.toContain('data-file-chip')
+    expect(html).not.toContain('<a')
+  })
+})
+
+describe('Response — GFM survives the remarkPlugins replacement (#185 regression)', () => {
+  // The `remarkPlugins` prop REPLACES streamdown's defaults; `response-remark.ts` re-supplies
+  // them. If it ever stops, these break loudly rather than tables/autolinks dying silently.
+  it('still renders a GFM table', () => {
+    const html = render('| a | b |\n| - | - |\n| 1 | 2 |')
+    expect(html).toContain('<table')
+  })
+
+  it('still renders GFM strikethrough', () => {
+    const html = render('this is ~~gone~~ now')
+    expect(html).toContain('<del')
+  })
+
+  it('still autolinks a bare URL — as a real anchor, never a chip', () => {
+    const html = render('see https://github.com/a/b.ts now')
+    expect(html).toContain('href="https://github.com/a/b.ts"')
+    expect(html).not.toContain('data-file-chip')
+  })
+})
+
 describe('Response — raw HTML is sanitized, not skipped', () => {
   it('drops a raw <script> tag', () => {
     const html = render('Hello <script>alert(1)</script> world')

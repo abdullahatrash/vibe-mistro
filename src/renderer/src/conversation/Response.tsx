@@ -4,7 +4,9 @@ import { code } from '@streamdown/code'
 import { cn } from '../lib/utils'
 import { extractLinkHrefs, fileLinkLabels, isSafeExternalHref, parseFileLink } from './file-link'
 import { FileChip } from './FileChip'
+import { findProsePathMatches } from './prose-file-links'
 import { responseRehypePlugins } from './response-rehype'
+import { responseRemarkPlugins } from './response-remark'
 
 /**
  * Renders agent-authored text as streaming-safe Markdown (#114, spike #112). Wraps
@@ -33,6 +35,13 @@ import { responseRehypePlugins } from './response-rehype'
  * **do NOT drop `raw`/`sanitize` from that list** — either would reintroduce raw-HTML/href XSS.
  * Do not remove `skipHtml` either.
  *
+ * `remarkPlugins` (#185) has the same REPLACES-defaults hazard, solved the same way: see
+ * `response-remark.ts`, which re-supplies streamdown's `gfm`/`codeMeta` and appends
+ * `remarkProseFileLinks` — a markdown-AST transform that turns bare file paths in prose into
+ * standard `link` nodes. Those run UPSTREAM of the whole sanitize/harden chain above, so an
+ * auto-linkified path is secured exactly like an authored `[label](path)` link. Never inline
+ * either plugin array — streamdown memoizes blocks by the arrays' identities.
+ *
  * Three `components` overrides:
  *  - `inlineCode` — resolves the spike's `muted` token collision: streamdown's default
  *    inline code is `bg-muted`, but our `--color-muted` is a text-grey, so we repaint
@@ -56,6 +65,11 @@ export function Response({ text, className }: { text: string; className?: string
       const link = parseFileLink(href)
       if (link) paths.push(link.path)
     }
+    // Bare paths auto-linkified by `remarkProseFileLinks` (#185) must disambiguate in the
+    // same pool. This raw-text scan also sees paths inside code fences the transform will
+    // never touch — harmless: a pooled-but-unchipped path can only add a `· parent` suffix
+    // to a colliding chip label, never render a wrong chip.
+    for (const { link } of findProsePathMatches(text)) paths.push(link.path)
     const labels = fileLinkLabels(paths)
 
     // Only bind the props we forward — leaving `node` (and other react-markdown
@@ -106,6 +120,7 @@ export function Response({ text, className }: { text: string; className?: string
       plugins={{ code }}
       controls={{ code: { copy: true } }}
       rehypePlugins={responseRehypePlugins}
+      remarkPlugins={responseRemarkPlugins}
       parseIncompleteMarkdown
       skipHtml
       components={components}
