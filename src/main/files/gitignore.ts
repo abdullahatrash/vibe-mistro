@@ -15,7 +15,9 @@
  *   - `!pattern`                             → negation / re-include (last match wins)
  *   - nested `.gitignore` files              → via {@link isIgnored}'s layered evaluation
  *
- * OUT OF SCOPE (documented gaps): POSIX character classes (`[a-z]`, `[!x]`); backslash
+ * OUT OF SCOPE (documented gaps): pathological patterns (> `MAX_GLOB_STARS` `*`s or longer
+ * than `MAX_LINE_LEN`) are SKIPPED to defuse ReDoS on the main thread (see the guard below);
+ * POSIX character classes (`[a-z]`, `[!x]`); backslash
  * escaping of a literal leading `#`/`!` or trailing space; and the subtle git rule that a
  * file cannot be re-included once a PARENT directory is excluded — beyond what directory
  * PRUNING already gives us (the walker never descends an ignored directory, so a negation
@@ -49,10 +51,31 @@ export function compileGitignore(content: string): GitignoreRule[] {
   return rules
 }
 
+/**
+ * ReDoS guard (#188 security review F1). A `.gitignore` is UNTRUSTED input (a cloned repo's
+ * author controls it), and our glob→regex maps `**`→`.*` / `*`→`[^/]*`; many variable-length
+ * quantifiers separated by literals (`a**a**a**…b`) backtrack EXPONENTIALLY, and the walk runs
+ * `regex.test` synchronously on the Electron MAIN thread — a hostile pattern would freeze the
+ * whole app (and the git watcher re-triggers the walk). So we bound each pattern: a line with
+ * more than `MAX_GLOB_STARS` `*`s or longer than `MAX_LINE_LEN` is SKIPPED. Skipping only
+ * over-lists (shows a file a pathological rule wanted hidden) — never hides content or escapes
+ * confinement — so degrading these bizarre patterns to no-ops is safe. Real ignore patterns use
+ * a handful of stars; the cap leaves them untouched with wide margin (worst bounded case ~tens
+ * of ms). Verified by the time-bounded test in `gitignore.test.ts`.
+ */
+export const MAX_GLOB_STARS = 8
+export const MAX_LINE_LEN = 4096
+
 function compileLine(raw: string): GitignoreRule | null {
   // Strip trailing whitespace (we do NOT support escaped trailing spaces — out of scope).
   let line = raw.replace(/\s+$/, '')
   if (line === '' || line.startsWith('#')) return null
+  // ReDoS guard (see above): skip a pathological pattern rather than compile an
+  // exponential-backtracking regex onto the main thread. Counted on the raw line.
+  if (line.length > MAX_LINE_LEN) return null
+  let stars = 0
+  for (let i = 0; i < line.length; i++) if (line[i] === '*') stars++
+  if (stars > MAX_GLOB_STARS) return null
 
   let negated = false
   if (line.startsWith('!')) {

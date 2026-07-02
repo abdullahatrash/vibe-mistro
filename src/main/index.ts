@@ -1242,20 +1242,24 @@ function registerIpc(): void {
   })
 
   ipcMain.handle(IPC.filesList, async (_event, args: FilesListArgs): Promise<FilesListResult> => {
-    // LIST the active Workspace's files for the Files Surface tree (#188, ADR-0013). We
-    // address the Workspace exactly as the git handlers do — a renderer-passed
-    // `workspaceDir` (the value main minted at connect and handed back), trusted the same
-    // way; the confinement here is over the WALK (never following a symlink), inside
-    // `listFiles`. Cache-served unless `refresh` forces a rebuild; the git status-stream
-    // watcher invalidates the cache (the `emit` hook above), so an agent-created file
+    // LIST the active Workspace's files for the Files Surface tree (#188, ADR-0013). The
+    // listing root is the warm agent's OWN workspaceDir — resolved via `pool.get`, NOT a
+    // renderer-supplied path (review F3, matching `revealPath` above) — so the renderer can
+    // only list a CONNECTED Workspace's tree, never an arbitrary main-readable directory.
+    // The walk's confinement (never follows a symlink) is inside `listFiles`. Cache-served
+    // (keyed by the resolved dir) unless `refresh` forces a rebuild; the git status-stream
+    // watcher invalidates that cache (the `emit` hook above), so an agent-created file
     // appears on the next read with NO new fs watcher. NOT agent activity, so — like
-    // `git:diff` — it does NOT `pool.touch`. A walk failure degrades to the empty result.
+    // `git:diff` — it does NOT `pool.touch`. An unknown agent / walk failure → empty result.
+    const agent = pool.get(args.agentId)
+    if (!agent) return { entries: [], truncated: false }
+    const workspaceDir = agent.workspaceDir
     if (!args.refresh) {
-      const cached = filesListCache.get(args.workspaceDir)
+      const cached = filesListCache.get(workspaceDir)
       if (cached) return cached
     }
-    const result = await listFiles(args.workspaceDir)
-    filesListCache.set(args.workspaceDir, result)
+    const result = await listFiles(workspaceDir)
+    filesListCache.set(workspaceDir, result)
     return result
   })
 }

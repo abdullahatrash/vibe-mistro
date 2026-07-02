@@ -132,4 +132,24 @@ describe('listFiles — confinement (symlinks never followed)', () => {
       expect(path.includes('\\')).toBe(false)
     }
   })
+
+  // #188 security review F2: a `.gitignore` that is itself a symlink pointing OUTSIDE the
+  // Workspace must NOT be followed — reading it would pull an outside file's content into
+  // the ignore rules, breaking the no-follow confinement invariant.
+  it('does not follow a symlinked .gitignore (no outside content read)', async () => {
+    const root = tmp('vibe-ws-')
+    const outside = tmp('vibe-outside-')
+    write(outside, 'evil-rules', 'app.ts\n') // outside "rules" that would hide app.ts
+    write(root, 'app.ts', '')
+    write(root, 'keep.ts', '')
+    symlinkSync(join(outside, 'evil-rules'), join(root, '.gitignore'))
+
+    const { entries } = await listFiles(root)
+    const all = paths(entries)
+    // The symlinked .gitignore is ignored, so its outside rules never apply: app.ts stays.
+    expect(all).toContain('app.ts')
+    expect(all).toContain('keep.ts')
+    // The .gitignore symlink itself is listed as an ordinary leaf (never descended/read as rules).
+    expect(entries).toContainEqual({ path: '.gitignore', kind: 'file' })
+  })
 })

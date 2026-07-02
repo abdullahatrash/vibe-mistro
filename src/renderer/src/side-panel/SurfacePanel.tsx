@@ -47,11 +47,14 @@ const NARROW_QUERY = '(max-width: 980px)'
 export function SurfacePanel({
   workspaceId,
   workspaceDir,
+  agentId,
   isActive,
   busy,
 }: {
   workspaceId: string
   workspaceDir: string
+  /** The warm agent handle — Files addresses `files:list` by this (confinement, #188 F3). */
+  agentId: string
   /** Whether this is the on-screen Workspace (#84) — gates git streaming AND shortcuts. */
   isActive: boolean
   /** Whether a turn is streaming (#86) — threaded to the Review panel's commit guard. */
@@ -92,7 +95,14 @@ export function SurfacePanel({
   // git behaviour stays frozen (#84/ADR-0008). A closed wide panel renders nothing; a
   // closed narrow Sheet renders its empty shell.
   const body = panel.isOpen ? (
-    <PanelBody workspaceId={workspaceId} workspaceDir={workspaceDir} isActive={isActive} busy={busy} panel={panel} />
+    <PanelBody
+      workspaceId={workspaceId}
+      workspaceDir={workspaceDir}
+      agentId={agentId}
+      isActive={isActive}
+      busy={busy}
+      panel={panel}
+    />
   ) : null
 
   if (narrow) {
@@ -121,12 +131,14 @@ export function SurfacePanel({
 function PanelBody({
   workspaceId,
   workspaceDir,
+  agentId,
   isActive,
   busy,
   panel,
 }: {
   workspaceId: string
   workspaceDir: string
+  agentId: string
   isActive: boolean
   busy: boolean
   panel: ReturnType<typeof useWorkspacePanel>
@@ -166,7 +178,7 @@ function PanelBody({
           // `file:` Surface via the store; a no-op until then.
           <FilesSurface
             onCollapse={() => closeWorkspaceSurface(workspaceId, 'files')}
-            workspaceDir={workspaceDir}
+            agentId={agentId}
             onOpenFile={NO_OPEN_FILE}
           />
         )}

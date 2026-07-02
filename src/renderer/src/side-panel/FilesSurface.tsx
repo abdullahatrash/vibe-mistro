@@ -32,12 +32,13 @@ const TREE_UNSAFE_CSS = `
 
 export function FilesSurface({
   onCollapse,
-  workspaceDir,
+  agentId,
   onOpenFile,
 }: {
   onCollapse: () => void
-  /** Active Workspace root — the listing is fetched (and re-fetched) for this dir. */
-  workspaceDir: string
+  /** The warm agent handle — `files:list` resolves the Workspace root from it (#188 F3),
+   *  so the renderer never names a path to list. */
+  agentId: string
   /** Emit an open-file intent for a selected FILE (slice 3 / #189 consumes it). */
   onOpenFile: (relativePath: string) => void
 }): JSX.Element {
@@ -75,14 +76,14 @@ export function FilesSurface({
       setLoading(true)
       setError(null)
       try {
-        setData(await window.api.filesList({ workspaceDir, refresh }))
+        setData(await window.api.filesList({ agentId, refresh }))
       } catch {
         setError('Could not list files.')
       } finally {
         setLoading(false)
       }
     },
-    [workspaceDir],
+    [agentId],
   )
 
   // Initial load + reload when the Workspace changes.

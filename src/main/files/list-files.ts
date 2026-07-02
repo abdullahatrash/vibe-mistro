@@ -1,4 +1,4 @@
-import { readdir, readFile, realpath } from 'node:fs/promises'
+import { lstat, readdir, readFile, realpath } from 'node:fs/promises'
 import type { Dirent } from 'node:fs'
 import { join } from 'node:path'
 import type { FileEntry, FilesListResult } from '../../shared/ipc'
@@ -19,6 +19,8 @@ import { compileGitignore, isIgnored, type GitignoreLayer } from './gitignore'
  *     from an `lstat`, so a symlinked directory is LISTED as a leaf entry but NOT
  *     descended into. That single rule prevents BOTH out-of-tree escapes (a link to
  *     `/etc`, `~/.ssh`, `../sibling`) AND directory cycles (a link back to an ancestor).
+ *     The ONE file we open — a directory's `.gitignore` — is also symlink-guarded
+ *     (`readGitignoreRules`), so nothing outside the tree is ever read (review F2).
  *   - `.git` is skipped at every depth.
  *
  * Pure over an injectable fs boundary (default: `node:fs/promises`); the colocated tests
@@ -41,12 +43,21 @@ export interface ListFilesFs {
   realpath(path: string): Promise<string>
   readdir(path: string): Promise<DirentLike[]>
   readFile(path: string): Promise<string>
+  /** Whether `path` is itself a symlink (lstat, no follow) — for the .gitignore guard. */
+  isSymlink(path: string): Promise<boolean>
 }
 
 const nodeFs: ListFilesFs = {
   realpath: (p) => realpath(p),
   readdir: (p) => readdir(p, { withFileTypes: true }) as Promise<Dirent[]>,
   readFile: (p) => readFile(p, 'utf8'),
+  isSymlink: async (p) => {
+    try {
+      return (await lstat(p)).isSymbolicLink()
+    } catch {
+      return false
+    }
+  },
 }
 
 /** A directory is a REAL (descendable) directory: not a symlink, reports as a dir. */
@@ -62,10 +73,17 @@ function compareDirents(a: DirentLike, b: DirentLike): number {
   return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
 }
 
-/** Read + compile a directory's `.gitignore`, or `[]` when there is none / it is unreadable. */
+/**
+ * Read + compile a directory's `.gitignore`, or `[]` when there is none / it is unreadable.
+ * A `.gitignore` that is ITSELF a symlink is SKIPPED (#188 security review F2): following it
+ * would read one file's content from OUTSIDE the Workspace into the ignore rules, breaking the
+ * "never follows a symlink" confinement invariant. Real repos never symlink their .gitignore.
+ */
 async function readGitignoreRules(fs: ListFilesFs, dirAbs: string): Promise<GitignoreLayer['rules']> {
+  const path = join(dirAbs, '.gitignore')
   try {
-    return compileGitignore(await fs.readFile(join(dirAbs, '.gitignore')))
+    if (await fs.isSymlink(path)) return []
+    return compileGitignore(await fs.readFile(path))
   } catch {
     return []
   }

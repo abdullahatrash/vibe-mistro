@@ -88,3 +88,30 @@ describe('isIgnored — layered, last-match-wins', () => {
     expect(isIgnored(rootLayer('*.log'), 'src/app.ts', false)).toBe(false)
   })
 })
+
+// #188 security review F1: a hostile .gitignore must not be able to freeze the main thread
+// via exponential-backtracking regex. Pathological patterns (too many `*`s / too long) are
+// skipped at compile time, so matching stays fast regardless of input.
+describe('ReDoS guard (MAX_GLOB_STARS / MAX_LINE_LEN)', () => {
+  it('skips a pattern with too many wildcards, and matching is fast', () => {
+    const hostile = `${'a**'.repeat(20)}b` // 40 `*`s — would backtrack exponentially
+    const layers = rootLayer(hostile)
+    // The pattern is skipped (no rule compiled), so it never matches — over-lists, safe.
+    expect(layers[0].rules).toEqual([])
+    const victim = `${'a'.repeat(60)}c`
+    const start = performance.now()
+    expect(isIgnored(layers, victim, false)).toBe(false)
+    expect(performance.now() - start).toBeLessThan(50)
+  })
+
+  it('skips an over-long pattern line', () => {
+    const layers = rootLayer(`${'x'.repeat(5000)}`)
+    expect(layers[0].rules).toEqual([])
+  })
+
+  it('still compiles ordinary multi-wildcard patterns', () => {
+    // A realistic deep pattern (≤ MAX_GLOB_STARS stars) is unaffected.
+    expect(isIgnored(rootLayer('**/dist/**/*.map'), 'a/b/dist/x/y.map', false)).toBe(true)
+    expect(isIgnored(rootLayer('*.min.*'), 'vendor.min.js', false)).toBe(true)
+  })
+})
