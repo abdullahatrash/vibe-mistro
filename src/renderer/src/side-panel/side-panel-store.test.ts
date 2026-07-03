@@ -12,6 +12,7 @@ import {
   EMPTY_PANEL_STATE,
   getWorkspacePanel,
   MAX_TERMINALS_PER_WORKSPACE,
+  openBrowserSurface,
   openFileSurface,
   openSurface,
   openTerminalSurface,
@@ -140,6 +141,26 @@ describe('openTerminalSurface (ADR-0014, slice 3 multi-terminal)', () => {
     for (let i = 0; i < MAX_TERMINALS_PER_WORKSPACE; i++) state = openTerminalSurface(state)
     expect(terminalSurfaceCount(state)).toBe(MAX_TERMINALS_PER_WORKSPACE)
     expect(openTerminalSurface(state)).toBe(state) // same ref — capped
+  })
+})
+
+describe('openBrowserSurface (#216, singleton dev-server preview)', () => {
+  const B: Surface = { id: 'browser:main', kind: 'browser', resourceId: 'main' }
+
+  it('opens the singleton browser tab, activating it and opening the panel', () => {
+    expect(openBrowserSurface(empty())).toEqual({
+      isOpen: true,
+      activeSurfaceId: 'browser:main',
+      surfaces: [B],
+    })
+  })
+
+  it('re-activates rather than duplicates when already open (singleton semantics)', () => {
+    const withBrowser = openBrowserSurface(empty())
+    const behindOther = openSurface(withBrowser, 'files')
+    const again = openBrowserSurface(behindOther)
+    expect(again.surfaces.filter((s) => s.kind === 'browser')).toHaveLength(1)
+    expect(again.activeSurfaceId).toBe('browser:main')
   })
 })
 
@@ -410,8 +431,18 @@ describe('coerceSurface', () => {
     expect(coerceSurface({ id: 'terminal:term-1', kind: 'terminal', resourceId: 'term-9' })).toBeNull() // id≠resource
   })
 
+  it('accepts the singleton browser tab and drops malformed browser blobs (#216)', () => {
+    expect(coerceSurface({ id: 'browser:main', kind: 'browser', resourceId: 'main' })).toEqual({
+      id: 'browser:main',
+      kind: 'browser',
+      resourceId: 'main',
+    })
+    expect(coerceSurface({ kind: 'browser' })).toBeNull() // no id/resource
+    expect(coerceSurface({ id: 'browser:evil', kind: 'browser', resourceId: 'evil' })).toBeNull() // not the singleton
+    expect(coerceSurface({ id: 'browser:main', kind: 'browser', resourceId: 'other' })).toBeNull() // id≠resource
+  })
+
   it('drops not-yet-implemented / unknown / malformed descriptors', () => {
-    expect(coerceSurface({ kind: 'browser' })).toBeNull()
     expect(coerceSurface({ kind: 'nope' })).toBeNull()
     expect(coerceSurface(null)).toBeNull()
     expect(coerceSurface('review')).toBeNull()

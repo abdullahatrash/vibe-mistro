@@ -18,6 +18,7 @@ import { ChangesPanel } from '../git/ChangesPanel'
 import { FilesSurface } from './FilesSurface'
 import { FilePreview } from './FilePreview'
 import { TerminalSurface } from './TerminalSurface'
+import { BrowserSurface } from './BrowserSurface'
 import { surfaceForChord } from './surface-keys'
 import { basename } from '../lib/paths'
 import {
@@ -28,6 +29,7 @@ import {
   closeWorkspaceSurface,
   closeWorkspaceSurfacesToRight,
   MAX_TERMINALS_PER_WORKSPACE,
+  openWorkspaceBrowserSurface,
   openWorkspaceFileSurface,
   openWorkspaceSurface,
   openWorkspaceTerminalSurface,
@@ -54,7 +56,7 @@ const NARROW_QUERY = '(max-width: 980px)'
  * ⌘P/⌃⇧G. Open Surfaces show as a TAB STRIP; with zero open, the panel shows the launcher
  * CARDS (its empty state). Review re-homes the git Changes panel behavior-identical
  * (#84–#88, ADR-0008); Files is the searchable tree (#188); Terminal is the Workspace
- * shell (ADR-0014); Browser stays inert/reserved.
+ * shell (ADR-0014); Browser is the embedded dev-server preview (#216, ADR-0015).
  *
  * Presentation is DUAL: inline beside the conversation on wide windows — a full-height,
  * flush, `border-l`-separated column (t3code's editor-panel chrome) whose width is
@@ -245,10 +247,11 @@ function PanelBody({
     killTerminalsAmong(panel.surfaces)
     closeAllWorkspaceSurfaces(workspaceId)
   }
-  /** A launcher card / "+"-menu target: singletons via the store op, terminal via its own. */
+  /** A launcher card / "+"-menu target: singletons via the store op, terminal/browser via their own. */
   function openCardTarget(target: CardDef['target']): void {
     if (target === 'terminal') openWorkspaceTerminalSurface(workspaceId)
-    else if (target !== 'browser') openWorkspaceSurface(workspaceId, target)
+    else if (target === 'browser') openWorkspaceBrowserSurface(workspaceId)
+    else openWorkspaceSurface(workspaceId, target)
   }
   // At the per-Workspace terminal cap, the Terminal affordance disables (its store
   // op no-ops anyway — this keeps the button from reading as broken).
@@ -329,6 +332,12 @@ function PanelBody({
                 agentId={agentId}
                 activeThreadId={activeThreadId}
               />
+            )}
+            {active?.kind === 'browser' && (
+              // The embedded dev-server preview (#216, ADR-0015). Keyed by the surface id
+              // so a future multi-tab browser remounts per tab; the view is disposable —
+              // closing/switching discards the page (URL persistence is slice 2, #217).
+              <BrowserSurface key={active.id} workspaceDir={workspaceDir} />
             )}
             {active?.kind === 'file' && (
               // A read-only file preview tab (#189): fetches the confined `files:read` and renders
@@ -507,7 +516,7 @@ interface CardDef {
   label: string
   description: string
   icon: ReactNode
-  /** The keyboard-shortcut hint (aspirational chrome for the inert Browser card). */
+  /** The keyboard-shortcut hint (⌘T stays aspirational chrome until #217 wires it). */
   hint?: string
   live: boolean
 }
@@ -531,10 +540,10 @@ const CARDS: readonly CardDef[] = [
   {
     target: 'browser',
     label: 'Browser',
+    // No shortcut hint until #217 wires the ⌘T chord — advertised chrome must work.
     description: 'Preview a local dev server.',
     icon: <Globe aria-hidden />,
-    hint: '⌘T',
-    live: false,
+    live: true,
   },
   {
     target: 'files',
@@ -549,8 +558,8 @@ const CARDS: readonly CardDef[] = [
 /**
  * The launcher EMPTY STATE (panel open, zero Surfaces) — t3code's `RightPanelEmptyState`:
  * a centered "Open a surface" heading over a 2-column grid of cards (leading icon, label +
- * shortcut hint, a short description). Live cards open their Surface; the inert Terminal/
- * Browser cards are disabled + tagged "Soon" (the sidebar PlaceholderNav precedent).
+ * shortcut hint, a short description). Live cards open their Surface; an inert card is
+ * disabled + tagged "Soon" (the sidebar PlaceholderNav precedent) — all four are live now.
  * Opening one replaces the grid with the tab strip; closing the last tab returns here.
  */
 function LauncherGrid({
