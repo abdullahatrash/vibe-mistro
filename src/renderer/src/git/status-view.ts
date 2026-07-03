@@ -100,6 +100,17 @@ export function buildSyncView(status: GitStatus): SyncView {
   }
 }
 
+/**
+ * A stable fingerprint of the changed set for the all-files diff view (#235): the
+ * refetch key. It covers exactly what makes a re-read necessary — the paths, each
+ * file's tracked/untracked form (the two `git diff` shapes), and its churn (an edit
+ * mid-view bumps insertions/deletions via the status stream) — so an unrelated status
+ * tick (ahead/behind moving on a background fetch) does NOT refetch every diff.
+ */
+export function diffRequestKey(files: readonly GitFile[]): string {
+  return files.map((f) => `${f.path} ${f.untracked ? 'u' : 't'}:${f.insertions}:${f.deletions}`).join('\n')
+}
+
 /** Build the render-ready view from a repo `GitStatus` (assumes `isRepo:true`). */
 export function buildChangesView(status: GitStatus): ChangesView {
   const files: GitFileView[] = status.files

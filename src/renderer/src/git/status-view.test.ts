@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { buildChangesView, buildSyncView, fileGlyph, glyphClass, reconcileUnchecked } from './status-view'
+import {
+  buildChangesView,
+  buildSyncView,
+  diffRequestKey,
+  fileGlyph,
+  glyphClass,
+  reconcileUnchecked,
+} from './status-view'
 import type { GitFile, GitStatus } from '../../../shared/ipc'
 
 function file(partial: Partial<GitFile> & { path: string }): GitFile {
@@ -113,6 +120,31 @@ describe('buildSyncView', () => {
       pushSetsUpstream: false,
     })
     expect(buildSyncView(clean)).toEqual({ showPush: false, showPull: false, pushSetsUpstream: false })
+  })
+})
+
+describe('diffRequestKey', () => {
+  it('is stable for the same file set + churn', () => {
+    const files = [file({ path: 'a.txt', insertions: 1 }), file({ path: 'b.txt', deletions: 2 })]
+    expect(diffRequestKey(files)).toBe(diffRequestKey([...files]))
+  })
+
+  it('changes when a file’s churn changes (an edit mid-view must refetch)', () => {
+    const before = [file({ path: 'a.txt', insertions: 1 })]
+    const after = [file({ path: 'a.txt', insertions: 2 })]
+    expect(diffRequestKey(before)).not.toBe(diffRequestKey(after))
+  })
+
+  it('changes when a file enters or leaves the changed set', () => {
+    const one = [file({ path: 'a.txt' })]
+    const two = [file({ path: 'a.txt' }), file({ path: 'b.txt' })]
+    expect(diffRequestKey(one)).not.toBe(diffRequestKey(two))
+  })
+
+  it('changes when a path flips tracked ↔ untracked (the diff form changes)', () => {
+    const tracked = [file({ path: 'a.txt', untracked: false })]
+    const untracked = [file({ path: 'a.txt', untracked: true, status: '?' })]
+    expect(diffRequestKey(tracked)).not.toBe(diffRequestKey(untracked))
   })
 })
 

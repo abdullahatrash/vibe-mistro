@@ -6,8 +6,8 @@ import {
   type GitBranchOpArgs,
   type GitCommitArgs,
   type GitCommitResult,
-  type GitDiffArgs,
-  type GitDiffResult,
+  type GitFullDiffArgs,
+  type GitFullDiffResult,
   type GitOpResult,
   type GhCreatePrArgs,
   type GhCreateResult,
@@ -18,7 +18,7 @@ import {
   type GitStackedActionResult,
   type GitStatusSubscriptionArgs,
 } from '../../shared/ipc'
-import { readGitDiff } from './diff'
+import { readGitFullDiff } from './diff'
 import { gitCommit } from './commit'
 import { runStackedAction } from './stacked-action'
 import { gitBranches, gitCheckout, gitCreateBranch } from './branches'
@@ -68,10 +68,11 @@ export function registerGitIpc(deps: {
     deps.gitStatus.unsubscribe(args.workspaceDir)
   })
 
-  ipcMain.handle(IPC.gitDiff, (_event, args: GitDiffArgs): Promise<GitDiffResult> => {
-    // Read one changed path's working-tree diff for the viewer (#85). Swallows git
-    // failure into the empty result inside `readGitDiff`.
-    return readGitDiff(args.workspaceDir, args.path, args.untracked, args.ignoreWhitespace ?? false)
+  ipcMain.handle(IPC.gitFullDiff, (_event, args: GitFullDiffArgs): Promise<GitFullDiffResult> => {
+    // Read the FULL working-tree diff — one entry per changed path — for the all-files
+    // view (#235). Per-file failure swallows into that file's empty entry inside
+    // `readGitFullDiff` (#85 style); the invoke itself never rejects.
+    return readGitFullDiff(args.workspaceDir, args.files, args.ignoreWhitespace ?? false)
   })
 
   ipcMain.handle(IPC.gitCommit, async (_event, args: GitCommitArgs): Promise<GitCommitResult> => {

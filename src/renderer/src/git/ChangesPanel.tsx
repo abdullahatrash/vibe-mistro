@@ -9,20 +9,21 @@ import { PrSection } from './PrSection'
 import { SyncSection } from './SyncSection'
 import { FileRow } from './FileRow'
 import { DiffWorkerProvider } from './DiffWorkerProvider'
-import { DiffView } from './DiffView'
+import { AllFilesDiffView } from './AllFilesDiffView'
 
 /**
  * The right "Changes" panel for a connected Workspace (#84, ADR-0008). It subscribes to
  * the Workspace's STREAMED git status while it is the ACTIVE one (`isActive`), holds the
  * latest snapshot, and renders the branch header + changed-files list. Clicking a file
- * opens its working-tree diff (#85): the panel has two modes —
+ * opens the working-tree diff (#85, reshaped by #235): the panel has two modes —
  *  - LIST: the file list + branch header (the #84 view), filling the SurfacePanel shell.
- *  - DIFF: a WIDER (`flex-1`) view of the selected file's diff (`DiffView`), with a
- *    "← Changes" back button. A diff needs width, so the panel widens rather than
- *    cramming a side-by-side into 80px.
+ *  - DIFF: a WIDER (`flex-1`) ALL-FILES view (`AllFilesDiffView`) — every changed file
+ *    as a collapsible section in one scroll, scrolled to the clicked row (the list is
+ *    its table of contents) — with a "← Changes" back button. A diff needs width, so
+ *    the panel widens rather than cramming a side-by-side into 80px.
  * The status subscription runs in BOTH modes (the effect is render-mode-independent), so
- * the panel keeps streaming while a diff is open — and if the selected file drops out of
- * the changed set (reverted / committed), the panel falls back to the list.
+ * the panel keeps streaming while a diff is open — and if the changed set empties
+ * (reverted / committed), the panel falls back to the list.
  *
  * Subscription lifecycle (active-Workspace-only, ADR-0008): the effect runs only when
  * active, registering `onGitStatus` (filtered by `workspaceDir`) and calling
@@ -161,25 +162,20 @@ export function ChangesPanel({
     }
   }
 
-  // DIFF mode, gated on `isActive` so a backgrounded (mounted-hidden) Workspace left
-  // in DIFF doesn't keep the `@pierre/diffs` worker pool alive while off-screen — and
-  // only while the selected file is STILL in the changed set, so a streamed status
-  // update that drops it (revert / commit) falls the panel back to the list. `selected`
-  // is re-derived from the LIVE view each render, so its `untracked` + churn stay
-  // current — and feeding the churn to `DiffView` re-fetches the open diff on an edit.
-  const selected = isActive && selectedPath ? view.files.find((f) => f.path === selectedPath) : undefined
-  if (selected) {
+  // DIFF mode (#235: ALL files in one scroll, the clicked row is just the scroll
+  // target), gated on `isActive` so a backgrounded (mounted-hidden) Workspace left in
+  // DIFF doesn't keep the `@pierre/diffs` worker pool alive while off-screen — and only
+  // while the tree still HAS changes, so a streamed status update that empties the set
+  // (revert / commit) falls the panel back to the list. The LIVE sorted files feed the
+  // view each render, so sections track the list and churn drives its refetch.
+  if (isActive && selectedPath !== null && view.files.length > 0) {
     return (
       <aside className="flex min-h-0 flex-1 flex-col text-text">
         <DiffWorkerProvider>
-          <DiffView
+          <AllFilesDiffView
             workspaceDir={workspaceDir}
-            file={{
-              path: selected.path,
-              untracked: selected.untracked,
-              insertions: selected.insertions,
-              deletions: selected.deletions,
-            }}
+            files={view.files}
+            initialPath={selectedPath}
             onBack={() => setSelectedPath(null)}
           />
         </DiffWorkerProvider>

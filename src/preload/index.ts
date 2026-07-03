@@ -12,8 +12,8 @@ import {
   type GitCommitArgs,
   type GitCommitResult,
   type GitActionProgressEvent,
-  type GitDiffArgs,
-  type GitDiffResult,
+  type GitFullDiffArgs,
+  type GitFullDiffResult,
   type GitOpResult,
   type GitStackedActionArgs,
   type GitStackedActionResult,
@@ -118,7 +118,8 @@ const api = {
     ipcRenderer.invoke(IPC.gitSubscribeStatus, args),
   gitUnsubscribeStatus: (args: GitStatusSubscriptionArgs): Promise<void> =>
     ipcRenderer.invoke(IPC.gitUnsubscribeStatus, args),
-  gitDiff: (args: GitDiffArgs): Promise<GitDiffResult> => ipcRenderer.invoke(IPC.gitDiff, args),
+  gitFullDiff: (args: GitFullDiffArgs): Promise<GitFullDiffResult> =>
+    ipcRenderer.invoke(IPC.gitFullDiff, args),
   gitCommit: (args: GitCommitArgs): Promise<GitCommitResult> => ipcRenderer.invoke(IPC.gitCommit, args),
   gitBranches: (args: GitBranchesArgs): Promise<GitBranchesResult> =>
     ipcRenderer.invoke(IPC.gitBranches, args),

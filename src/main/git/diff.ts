@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { defaultGitRun, type GitRun } from './run'
-import type { GitDiffResult } from '../../shared/ipc'
+import type { GitDiffResult, GitFullDiffResult } from '../../shared/ipc'
 
 /**
  * Read a single changed path's WORKING-TREE unified diff (#85, ADR-0008). Like #84's
@@ -78,4 +78,29 @@ export async function readGitDiff(
   } catch {
     return finalizeDiff('')
   }
+}
+
+/**
+ * Read the FULL working-tree diff — every changed path as its own entry (#235, PRD
+ * #233). One `readGitDiff` per file (run concurrently), so each entry is individually
+ * capped + hashed: a huge generated file truncates ITSELF (surfaced per section in the
+ * all-files view) without hiding its siblings, and the renderer memoizes per file on
+ * `diffHash`. The caller (the Review Surface) supplies the file list from its CURRENT
+ * status snapshot — same source as the panel's rows, so entries and rows always line
+ * up. Order is preserved. A failed per-file read degrades to that file's empty entry
+ * (never throws), matching `readGitDiff`'s swallow-to-empty contract.
+ */
+export async function readGitFullDiff(
+  cwd: string,
+  files: { path: string; untracked: boolean }[],
+  ignoreWhitespace = false,
+  run: GitRun = defaultGitRun,
+): Promise<GitFullDiffResult> {
+  const entries = await Promise.all(
+    files.map(async (file) => {
+      const diff = await readGitDiff(cwd, file.path, file.untracked, ignoreWhitespace, run)
+      return { path: file.path, ...diff }
+    }),
+  )
+  return { files: entries }
 }

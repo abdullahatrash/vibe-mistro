@@ -23,8 +23,8 @@ export const gitChannels = {
   gitUnsubscribeStatus: 'git:unsubscribe-status',
   /** Main -> renderer: a streamed git-status update for a subscribed Workspace (#84) — see {@link GitStatusEvent}. */
   gitStatus: 'git:status',
-  /** Renderer -> main: read ONE changed path's working-tree unified diff (#85) — see {@link GitDiffArgs}. */
-  gitDiff: 'git:diff',
+  /** Renderer -> main: read the FULL working-tree diff — one entry per changed path (#235) — see {@link GitFullDiffArgs}. */
+  gitFullDiff: 'git:full-diff',
   /** Renderer -> main: COMMIT working-tree changes from the Changes panel (#86) — see {@link GitCommitArgs}. */
   gitCommit: 'git:commit',
   /** Renderer -> main: list the active Workspace's branches (#87) — see {@link GitBranchesArgs}. */
@@ -95,34 +95,48 @@ export interface GitStatusSubscriptionArgs {
 }
 
 /**
- * Args for `gitDiff` (#85, ADR-0008): read one changed path's working-tree diff. `path`
- * is the `GitFile.path` (relative to the Workspace root, as `git status` reported it).
- * `untracked` routes to the `git diff --no-index -- /dev/null <path>` form (a new file
- * has no index entry to diff against). `ignoreWhitespace` re-reads the diff with `-w`
- * for the panel's whitespace toggle — @pierre can't ignore whitespace on a pre-parsed
- * patch, so the toggle drives a fresh read (a new `diffHash`) here. The renderer parses
- * + renders the patch with `@pierre/diffs`; main only shells `git diff`. Working-tree
- * source only, read-only. Not agent activity, so it does NOT touch the warm-agent pool.
- */
-export interface GitDiffArgs {
-  workspaceDir: string
-  path: string
-  untracked: boolean
-  ignoreWhitespace?: boolean
-}
-
-/**
- * The `gitDiff` reply (#85): a changed path's RAW working-tree unified diff plus a
- * content `diffHash` (sha256 of `patch`) the renderer memoizes on, so an unchanged
- * file skips a re-parse / re-render. `truncated` is true when the patch was capped
- * (~120 KB) — the viewer flags it. The empty result (`patch:''`, `diffHash:''`,
- * `truncated:false`) covers BOTH a clean path (no diff) and a swallowed git failure;
- * the renderer renders nothing for it (degrade quietly, like #84's non-repo panel).
+ * One path's RAW working-tree unified diff (#85, now per-entry inside {@link
+ * GitFullDiffResult} — #235 retired the single-file `git:diff` channel when the
+ * all-files view replaced the one-file viewer). `diffHash` (sha256 of `patch`) keys
+ * the renderer's per-file memo, so an unchanged file skips a re-parse / re-render.
+ * `truncated` is true when the patch was capped (~120 KB) — the viewer flags it on
+ * that file's section. The empty result (`patch:''`, `diffHash:''`, `truncated:false`)
+ * covers BOTH a clean path (no diff) and a swallowed git failure; the renderer renders
+ * a quiet "no changes" for it (degrade quietly, like #84's non-repo panel).
  */
 export interface GitDiffResult {
   patch: string
   diffHash: string
   truncated: boolean
+}
+
+/**
+ * Args for `gitFullDiff` (#235, PRD #233): read the FULL working-tree diff — every
+ * changed path as its own entry — for the all-files diff view. `files` is the
+ * renderer's CURRENT status snapshot (`GitFile.path` + `untracked`), the same source
+ * as the panel's rows, so sections and rows always line up. `ignoreWhitespace`
+ * re-reads every entry with `-w` (@pierre can't ignore whitespace on a pre-parsed
+ * patch, so the toggle drives a fresh read). Read-only; not agent activity, so it
+ * does NOT touch the warm-agent pool.
+ */
+export interface GitFullDiffArgs {
+  workspaceDir: string
+  files: { path: string; untracked: boolean }[]
+  ignoreWhitespace?: boolean
+}
+
+/** One file's entry in the full diff (#235): the per-path payload plus its path. */
+export interface GitFileDiff extends GitDiffResult {
+  path: string
+}
+
+/**
+ * The `gitFullDiff` reply (#235). Entries preserve the caller's order; each is
+ * INDIVIDUALLY capped + hashed, so one oversized generated file truncates itself —
+ * flagged on ITS section — without hiding its siblings.
+ */
+export interface GitFullDiffResult {
+  files: GitFileDiff[]
 }
 
 /**
