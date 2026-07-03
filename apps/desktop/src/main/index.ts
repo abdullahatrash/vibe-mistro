@@ -57,7 +57,9 @@ import { getShellEnv } from './shell-env'
 import { getAccountWhoami, readKeychainApiKey, readVibeEnvFile } from './auth/whoami'
 import { searchThreads, tokenizeQuery } from './search/search-threads'
 import { proseEntries, type ProseEntry } from './search/transcript-prose'
-import { groupThreadsByWorkspace, MetadataStore } from './persistence/metadata-store'
+import { groupThreadsByWorkspace } from './persistence/metadata-store'
+import type { MetadataStoreApi } from './persistence/metadata-store-api'
+import { createMetadataStore } from './persistence/create-metadata-store'
 import {
   acpEventEntry,
   agentReboundEntry,
@@ -350,13 +352,15 @@ let terminalManager: TerminalManager | null = null
 /**
  * The stores + transcript bridge every conversation-flow handler needs, created at
  * app-ready (they need `userData`) and injected into `registerIpc` — the DI seam
- * `docs/conventions.md` prescribes. `store` is NON-null: `MetadataStore.load()`
- * degrades to empty state internally (never a throw), so the old `| null` type and
- * its per-handler degraded forks were unreachable. `transcript` nullability IS real
+ * `docs/conventions.md` prescribes. `store` is NON-null: the construction seam
+ * (`createMetadataStore`, ADR-0019) always yields a working store — SQLite when
+ * `state.sqlite` opens, the legacy JSON store otherwise — and `load()` degrades
+ * to empty state internally (never a throw), so the old `| null` type and its
+ * per-handler degraded forks were unreachable. `transcript` nullability IS real
  * (the dir `mkdir` can fail) — the bridge folds that into a silent-no-op tee.
  */
 interface MainDeps {
-  store: MetadataStore
+  store: MetadataStoreApi
   transcript: TranscriptStore | null
   bridge: TranscriptBridge
   /** Null when the attachments dir `mkdir` failed — image persistence no-ops (logged). */
@@ -1298,12 +1302,16 @@ function registerIpc(deps: MainDeps): void {
 }
 
 app.whenReady().then(async () => {
-  // Load the persisted index before the first window so the renderer's launch
+  // Build the metadata store before the first window so the renderer's launch
   // fetch sees prior Workspaces/Threads. `userData` is only valid once ready.
-  // A failed load degrades to empty state INSIDE `load()` (never a throw), so the
-  // store is unconditionally present — see `MainDeps`.
-  const store = new MetadataStore({ filePath: join(app.getPath('userData'), 'metadata.json') })
+  // The construction seam (ADR-0019) selects the engine — SQLite `state.sqlite`
+  // normally, the legacy JSON store on VIBE_MISTRO_FORCE_JSON=1 or a failed
+  // open/import — and performs the one-time `metadata.json` -> SQLite import
+  // (renaming the legacy file to `.bak` on success). Never throws; a failed
+  // load degrades to empty state INSIDE the store — see `MainDeps`.
+  const { store, engine } = await createMetadataStore({ userDataDir: app.getPath('userData') })
   await store.load()
+  console.log(`[main] metadata store engine: ${engine}`)
 
   // The per-Thread transcript dir (ADR-0005). `appendFile` won't create parent
   // dirs, so ensure it exists once here; a failure leaves `transcript` null and
