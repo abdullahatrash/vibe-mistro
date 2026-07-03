@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseSkillFrontmatter } from './parse-skill'
+import { parseSkillFrontmatter, skillBody } from './parse-skill'
 
 function skillMd(frontmatter: string, body = 'Do the thing.'): string {
   return `---\n${frontmatter}\n---\n\n${body}\n`
@@ -67,5 +67,24 @@ describe('parseSkillFrontmatter', () => {
     expect(parseSkillFrontmatter(skillMd('name: -lead\ndescription: d'))).toBeNull()
     expect(parseSkillFrontmatter(skillMd(`name: ${'a'.repeat(65)}\ndescription: d`))).toBeNull()
     expect(parseSkillFrontmatter(skillMd('name: ok-2\ndescription: d'))).not.toBeNull()
+  })
+})
+
+describe('skillBody', () => {
+  it('returns the trimmed markdown after the frontmatter', () => {
+    expect(skillBody('---\nname: x\ndescription: d\n---\n\n# Title\n\nDo things.\n')).toBe(
+      '# Title\n\nDo things.',
+    )
+  })
+
+  it('is defensive: content without valid fences comes back as-is (trimmed)', () => {
+    expect(skillBody('just markdown, no fences\n')).toBe('just markdown, no fences')
+    expect(skillBody('---\nnever closed')).toBe('---\nnever closed')
+  })
+
+  it('keeps --- horizontal rules INSIDE the body (only the first fence pair is frontmatter)', () => {
+    expect(skillBody('---\nname: x\ndescription: d\n---\nabove\n\n---\n\nbelow')).toBe(
+      'above\n\n---\n\nbelow',
+    )
   })
 })

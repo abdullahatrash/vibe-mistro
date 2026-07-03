@@ -54,6 +54,8 @@ import {
   type SearchQueryResult,
   type SkillsListArgs,
   type SkillsListResult,
+  type SkillsReadArgs,
+  type SkillsReadResult,
   type SkillsRevealArgs,
   type SendPromptArgs,
   type SendPromptResult,
@@ -134,6 +136,8 @@ const api = {
     ipcRenderer.invoke(IPC.skillsList, args),
   skillsReveal: (args: SkillsRevealArgs): Promise<void> =>
     ipcRenderer.invoke(IPC.skillsReveal, args),
+  skillsRead: (args: SkillsReadArgs): Promise<SkillsReadResult> =>
+    ipcRenderer.invoke(IPC.skillsRead, args),
   gitSubscribeStatus: (args: GitStatusSubscriptionArgs): Promise<void> =>
     ipcRenderer.invoke(IPC.gitSubscribeStatus, args),
   gitUnsubscribeStatus: (args: GitStatusSubscriptionArgs): Promise<void> =>

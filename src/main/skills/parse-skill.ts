@@ -68,6 +68,27 @@ export function parseSkillFrontmatter(content: string): SkillFrontmatter | null 
   }
 
   const name = fields.get('name') ?? ''
+  return validateFields(name, fields)
+}
+
+/**
+ * The Markdown BODY after the frontmatter — the skill's instructions, for the
+ * in-app preview. Defensive: content without valid fences returns as-is (the
+ * preview shows SOMETHING rather than nothing; the scanner already filtered
+ * unparseable skills out of the list).
+ */
+export function skillBody(content: string): string {
+  const lines = content.split(/\r?\n/)
+  if (lines[0]?.trim() !== '---') return content.trim()
+  const closing = lines.findIndex((line, i) => i > 0 && line.trim() === '---')
+  if (closing === -1) return content.trim()
+  return lines
+    .slice(closing + 1)
+    .join('\n')
+    .trim()
+}
+
+function validateFields(name: string, fields: Map<string, string>): SkillFrontmatter | null {
   const description = fields.get('description') ?? ''
   if (!NAME_PATTERN.test(name) || name.length > 64) return null
   if (!description) return null
