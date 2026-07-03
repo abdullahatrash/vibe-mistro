@@ -4,6 +4,7 @@ import {
   coercePickedElement,
   cropRectForElement,
   formatPickAnnotation,
+  formatScreenshotAnnotation,
 } from './browser-picker'
 
 describe('cropRectForElement', () => {
@@ -105,6 +106,20 @@ describe('formatPickAnnotation', () => {
     })
     expect(text).toContain('<div>')
     expect(text).not.toContain('selector')
+  })
+})
+
+describe('formatScreenshotAnnotation', () => {
+  it('names the page with title and url', () => {
+    expect(formatScreenshotAnnotation({ url: 'http://localhost:5173/pricing', title: 'Pricing' })).toBe(
+      'Screenshot of "Pricing" — http://localhost:5173/pricing',
+    )
+  })
+
+  it('falls back to url only when the title is empty', () => {
+    expect(formatScreenshotAnnotation({ url: 'http://localhost:5173/', title: '' })).toBe(
+      'Screenshot of http://localhost:5173/',
+    )
   })
 })
 

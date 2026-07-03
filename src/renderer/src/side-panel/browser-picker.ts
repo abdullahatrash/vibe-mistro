@@ -148,6 +148,16 @@ export function buildPickerScript(config: { accent: string }): string {
 }
 
 /**
+ * Format a full-page screenshot's composer annotation (#226): names the page by title +
+ * URL for the agent's context (a screenshot alone doesn't carry its address). Falls back
+ * to URL-only when the guest reports no title.
+ */
+export function formatScreenshotAnnotation(page: { url: string; title: string }): string {
+  const title = page.title.trim()
+  return title.length > 0 ? `Screenshot of "${title}" — ${page.url}` : `Screenshot of ${page.url}`
+}
+
+/**
  * Format a picked element as a compact composer annotation — a `<tag>` line, then optional
  * `selector:` and `text:` lines, then the page URL. Inserted as plain, editable composer
  * text (reusing the existing text channel) so the agent gets precise context alongside the

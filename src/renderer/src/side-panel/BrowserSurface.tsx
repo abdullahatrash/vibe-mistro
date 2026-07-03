@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type JSX } from 'react'
-import { ArrowLeft, ArrowRight, Code, ExternalLink, Globe, Loader2, MousePointerClick, RefreshCw, RotateCw, TriangleAlert } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Camera, Code, ExternalLink, Globe, Loader2, MousePointerClick, RefreshCw, RotateCw, TriangleAlert } from 'lucide-react'
 import type { DevServer } from '../../../shared/ipc'
 import { emitComposerInsertImage, emitComposerInsertText } from '../conversation/composer-insert'
 import { parseDataUrl } from '../conversation/image-attach'
@@ -8,6 +8,7 @@ import {
   coercePickedElement,
   cropRectForElement,
   formatPickAnnotation,
+  formatScreenshotAnnotation,
 } from './browser-picker'
 import { cn } from '../lib/utils'
 import {
@@ -115,6 +116,26 @@ export function BrowserSurface({
   }
   function openDevTools(): void {
     view?.openDevTools()
+  }
+
+  // Screenshot the whole visible page into the composer (#226): capture the guest
+  // compositor (no rect = full visible page) and stage it as an image + a title/URL
+  // annotation, reusing the picker's composer-insert path. No-op without a webview or
+  // a mounted composer (Thread).
+  async function screenshotPage(): Promise<void> {
+    if (!view || !activeThreadId) return
+    try {
+      const image = await view.capturePage()
+      const dataUrl = image.toDataURL()
+      const parsed = parseDataUrl(dataUrl)
+      if (parsed) {
+        emitComposerInsertImage(activeThreadId, { ...parsed, name: 'page-screenshot.png', previewUrl: dataUrl })
+        emitComposerInsertText(activeThreadId, formatScreenshotAnnotation({ url: view.getURL(), title }))
+      }
+    } catch (err) {
+      // Best-effort — a capture failure is a logged no-op, never a broken attachment.
+      console.error('[browser] page screenshot failed', err)
+    }
   }
 
   // Pick an element to chat (#224, ADR-0016): inject the picker into the guest via
@@ -258,6 +279,13 @@ export function BrowserSurface({
           active={picking}
         >
           <MousePointerClick aria-hidden />
+        </BrowserAction>
+        <BrowserAction
+          label="Screenshot page to chat"
+          onClick={() => void screenshotPage()}
+          disabled={activeThreadId === null}
+        >
+          <Camera aria-hidden />
         </BrowserAction>
         <BrowserAction label="Open in browser" onClick={openExternal}>
           <ExternalLink aria-hidden />
