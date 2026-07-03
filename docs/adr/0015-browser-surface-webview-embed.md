@@ -59,7 +59,11 @@ question that decides everything else is the EMBEDDING MECHANISM. Three candidat
    on the host window is compensated by this gate.
 
 4. **Navigation is RENDERER-DRIVEN; main stays thin.** The component drives the element
-   directly (`loadURL`/`goBack`/`reload`/DOM events). No per-navigation IPC, no main-side tab
+   directly (`loadURL`/`goToOffset`/`reload`/DOM events). NB: the `<webview>` tag's
+   `goBack`/`goForward`/`canGoBack`/`canGoForward` are broken in the shipped Electron (they
+   no-op / report `false` against a genuine multi-entry history), so back/forward availability
+   is tracked from navigation events via a pure index/length model (`browser-nav-history.ts`)
+   and actioned with `goToOffset(±1)`, which works — verified by driving the real app. No per-navigation IPC, no main-side tab
    registry — t3code's `webContents.fromId` control plane exists to serve agent automation
    (CDP click/type/screencast), which ADR-0002 rules out here: browser automation is an agent
    capability and belongs to Vibe, not the orchestrator. Everything the webview is asked to

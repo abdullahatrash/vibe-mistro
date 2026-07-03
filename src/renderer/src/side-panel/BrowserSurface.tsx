@@ -7,6 +7,15 @@ import {
   stripElectronUserAgent,
 } from '../../../shared/browser-guest'
 import { normalizeBrowserUrl } from './browser-url'
+import {
+  canGoBackNav,
+  canGoForwardNav,
+  goBackNav,
+  goForwardNav,
+  INITIAL_NAV,
+  pushNav,
+  type NavState,
+} from './browser-nav-history'
 
 /**
  * The Browser Surface (#216, ADR-0015): an embedded dev-server preview on the Electron
@@ -30,8 +39,13 @@ export function BrowserSurface({ workspaceDir }: { workspaceDir: string }): JSX.
   // `loadURL`. `null` = nothing loaded yet → the URL-entry empty state.
   const [initialUrl, setInitialUrl] = useState<string | null>(null)
   const [address, setAddress] = useState('')
-  const [canGoBack, setCanGoBack] = useState(false)
-  const [canGoForward, setCanGoForward] = useState(false)
+  // Back/forward availability is tracked from navigation EVENTS via the pure model —
+  // the webview element's own canGoBack()/canGoForward() are unreliable (they report
+  // false against a genuine multi-entry history). `pending` records that the NEXT
+  // did-navigate is the result of our own back/forward/reload, so the handler shifts
+  // (or ignores) the cursor instead of pushing a fresh entry.
+  const [nav, setNav] = useState<NavState>(INITIAL_NAV)
+  const pending = useRef<'back' | 'forward' | 'reload' | null>(null)
 
   function submitAddress(e: FormEvent<HTMLFormElement>): void {
     e.preventDefault()
@@ -49,18 +63,41 @@ export function BrowserSurface({ workspaceDir }: { workspaceDir: string }): JSX.
     })
   }
 
+  // NB: navigate by OFFSET, not goBack()/goForward() — the webview tag's goBack/
+  // goForward (and canGoBack) are broken in Electron's <webview> (they no-op against
+  // a genuine multi-entry history), but goToOffset works. Our own nav model is the
+  // source of truth for whether an offset is available.
+  function goBack(): void {
+    pending.current = 'back'
+    view?.goToOffset(-1)
+  }
+  function goForward(): void {
+    pending.current = 'forward'
+    view?.goToOffset(1)
+  }
+  function reload(): void {
+    pending.current = 'reload'
+    view?.reload()
+  }
+
   // The webview only exposes its state through DOM events — wire them once per
   // mounted element, unwiring on unmount/remount.
   useEffect(() => {
     if (!view) return
-    const sync = (): void => {
+    const onNavigate = (): void => {
       // Never clobber an address the user is mid-typing: the guest can navigate
       // (redirects, SPA pushState) while the bar has focus.
       if (document.activeElement !== addressInputRef.current) setAddress(view.getURL())
-      setCanGoBack(view.canGoBack())
-      setCanGoForward(view.canGoForward())
+      // Advance the cursor per what caused this navigation. A reload adds no entry.
+      const cause = pending.current
+      pending.current = null
+      if (cause === 'reload') return
+      setNav((s) =>
+        cause === 'back' ? goBackNav(s) : cause === 'forward' ? goForwardNav(s) : pushNav(s),
+      )
     }
     const logFailure = (event: Event): void => {
+      pending.current = null
       const { errorCode, errorDescription, validatedURL } = event as unknown as {
         errorCode?: number
         errorDescription?: string
@@ -70,15 +107,18 @@ export function BrowserSurface({ workspaceDir }: { workspaceDir: string }): JSX.
       if (errorCode === -3) return
       console.error('[browser] load failed', validatedURL, errorCode, errorDescription)
     }
-    view.addEventListener('did-navigate', sync)
-    view.addEventListener('did-navigate-in-page', sync)
+    view.addEventListener('did-navigate', onNavigate)
+    view.addEventListener('did-navigate-in-page', onNavigate)
     view.addEventListener('did-fail-load', logFailure)
     return () => {
-      view.removeEventListener('did-navigate', sync)
-      view.removeEventListener('did-navigate-in-page', sync)
+      view.removeEventListener('did-navigate', onNavigate)
+      view.removeEventListener('did-navigate-in-page', onNavigate)
       view.removeEventListener('did-fail-load', logFailure)
     }
   }, [view])
+
+  const canGoBack = canGoBackNav(nav)
+  const canGoForward = canGoForwardNav(nav)
 
   if (initialUrl === null) {
     return (
@@ -110,13 +150,13 @@ export function BrowserSurface({ workspaceDir }: { workspaceDir: string }): JSX.
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-panel">
       <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
-        <BrowserAction label="Back" onClick={() => view?.goBack()} disabled={!canGoBack}>
+        <BrowserAction label="Back" onClick={goBack} disabled={!canGoBack}>
           <ArrowLeft aria-hidden />
         </BrowserAction>
-        <BrowserAction label="Forward" onClick={() => view?.goForward()} disabled={!canGoForward}>
+        <BrowserAction label="Forward" onClick={goForward} disabled={!canGoForward}>
           <ArrowRight aria-hidden />
         </BrowserAction>
-        <BrowserAction label="Reload" onClick={() => view?.reload()}>
+        <BrowserAction label="Reload" onClick={reload}>
           <RotateCw aria-hidden />
         </BrowserAction>
         <form onSubmit={submitAddress} className="min-w-0 flex-1">
@@ -153,11 +193,9 @@ export function BrowserSurface({ workspaceDir }: { workspaceDir: string }): JSX.
 interface WebviewElement extends HTMLElement {
   loadURL(url: string): Promise<void>
   getURL(): string
-  goBack(): void
-  goForward(): void
+  /** Navigate by history offset — the working primitive (goBack/goForward are broken). */
+  goToOffset(offset: number): void
   reload(): void
-  canGoBack(): boolean
-  canGoForward(): boolean
 }
 
 /** A browser toolbar icon button — the TerminalAction idiom. */
