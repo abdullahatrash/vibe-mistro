@@ -1,38 +1,33 @@
 import type { JSX } from 'react'
 import { cn } from '../lib/utils'
 
-/** The mark's intrinsic aspect ratio (viewBox 191×135), same as {@link Logo}. */
-const LOGO_RATIO = 191 / 135
-
 /** How long one full lap of the snake takes. */
 const SNAKE_DURATION_S = 1.1
 
 /**
- * The Vibe Mistro "M" mark's 8 cells, ORDERED as a snake path that traces the
- * letter — top-left → down the left side → across the middle bar → the three legs →
- * up the right side → top-right — so the phased highlight reads as a light snaking
- * around the M rather than a flat shimmer. Each cell keeps its own brand fill
- * (yellow → orange → red), revealed as the bright "head" passes over it.
+ * The Vibe Mistro "V" stroke chopped into 8 segments, ORDERED as a snake path
+ * that draws the letter — down the left leg, up the right — so the phased
+ * highlight reads as a light tracing the V rather than a flat shimmer. Colors
+ * ride the flame ramp (yellow at the tips, red at the vertex), mirrored.
  */
-const SNAKE_PATH: ReadonlyArray<{ d: string; fill: string }> = [
-  { d: 'M54.3221 0H27.1531V27.0892H54.3221V0Z', fill: '#FFD800' }, // top-left
-  { d: 'M81.4823 27.0918H27.1531V54.181H81.4823V27.0918Z', fill: '#FFAF00' }, // upper-left
-  { d: 'M162.972 54.168H27.1531V81.2572H162.972V54.168Z', fill: '#FF8205' }, // middle bar
-  { d: 'M54 81H27V135H54V81Z', fill: '#FA500F' }, // left leg
-  { d: 'M108.661 81.2598H81.4917V108.349H108.661V81.2598Z', fill: '#FA500F' }, // center leg
-  { d: 'M163 81H136V135H163V81Z', fill: '#FA500F' }, // right leg
-  { d: 'M162.99 27.0918H108.661V54.181H162.99V27.0918Z', fill: '#FFAF00' }, // upper-right
-  { d: 'M162.984 0H135.815V27.0892H162.984V0Z', fill: '#FFD800' }, // top-right
+const SNAKE_PATH: ReadonlyArray<{ d: string; stroke: string }> = [
+  { d: 'M19 19 L22.25 25.75', stroke: '#f6c445' },
+  { d: 'M22.25 25.75 L25.5 32.5', stroke: '#f2a740' },
+  { d: 'M25.5 32.5 L28.75 39.25', stroke: '#ec8a3c' },
+  { d: 'M28.75 39.25 L32 46', stroke: '#e2452a' },
+  { d: 'M32 46 L35.25 39.25', stroke: '#e2452a' },
+  { d: 'M35.25 39.25 L38.5 32.5', stroke: '#ec8a3c' },
+  { d: 'M38.5 32.5 L41.75 25.75', stroke: '#f2a740' },
+  { d: 'M41.75 25.75 L45 19', stroke: '#f6c445' },
 ]
 
 /**
- * A branded loading indicator (the "funky" spinner): a light snakes around the
- * Vibe Mistro "M", a port of the vibe-acp CLI's `SnakeSpinner` in our brand palette.
- * Pure CSS — each cell runs the shared `vmSnake` keyframe (styles.css) phased by a
- * negative `animationDelay` along {@link SNAKE_PATH}, so a bright head + short trail
- * chase through the mark. `prefers-reduced-motion` freezes it to a static dim M.
- * `size` is the HEIGHT in px (width scales to the 191:135 ratio); drop-in for the
- * old lucide spinner at the sidebar's streaming indicators.
+ * A branded loading indicator (the "funky" spinner): a light snakes along the
+ * Vibe Mistro "V" monogram stroke. Pure CSS — each segment runs the shared
+ * `vmSnake` keyframe (styles.css) phased by a negative `animationDelay` along
+ * {@link SNAKE_PATH}, so a bright head + short trail chase through the letter.
+ * `prefers-reduced-motion` freezes it to a static dim V. Square; `size` is both
+ * dimensions in px; drop-in at the sidebar's streaming indicators.
  */
 export function LogoSnakeSpinner({
   size = 14,
@@ -49,17 +44,19 @@ export function LogoSnakeSpinner({
       role="img"
       aria-label={label}
       className={cn('shrink-0', className)}
-      width={Math.round(size * LOGO_RATIO)}
+      width={size}
       height={size}
-      viewBox="0 0 191 135"
+      viewBox="13 13 38 38"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
     >
-      {SNAKE_PATH.map((cell, i) => (
+      {SNAKE_PATH.map((seg, i) => (
         <path
-          key={cell.d}
-          d={cell.d}
-          fill={cell.fill}
+          key={seg.d}
+          d={seg.d}
+          stroke={seg.stroke}
+          strokeWidth="8.5"
+          strokeLinecap="round"
           className="vm-snake-cell"
           style={{ animationDelay: `${-(i / SNAKE_PATH.length) * SNAKE_DURATION_S}s` }}
         />

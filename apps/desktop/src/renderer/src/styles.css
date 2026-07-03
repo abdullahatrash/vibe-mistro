@@ -253,7 +253,7 @@ body {
 /* Branded "snake" loading indicator (LogoSnakeSpinner): each of the M's cells runs
    this keyframe, phased by a per-cell `animation-delay` along the snake path, so a
    bright head (0%) with a short fading trail (25%) chases through the mark while the
-   rest sits dim. Respects reduced-motion by freezing to a static, legible M. */
+   rest sits dim. Respects reduced-motion by freezing to a static, legible V. */
 @keyframes vmSnake {
   0% {
     opacity: 1;
@@ -279,7 +279,7 @@ body {
 }
 
 /* Working-indicator SHIMMER (#115) — port of the vibe CLI's LoadingWidget, which
-   sweeps the Mistral "M" palette (yellow → orange → red) across the status text.
+   sweeps the flame palette (yellow → orange → red) across the status text.
    Here the same palette rides a background-clip:text gradient that sweeps L→R, so
    "Working for 12s" shimmers through the brand ramp. Reduced-motion freezes it to a
    static, legible orange. Palette = CLI MistralColors (constants.py). */
