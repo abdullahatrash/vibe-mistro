@@ -217,6 +217,9 @@ function PanelBody({
   }
 
   const active = panel.surfaces.find((s) => s.id === panel.activeSurfaceId) ?? null
+  // The singleton browser tab (if open) — rendered persistently (see below) rather
+  // than only when active, so its live <webview> survives tab switches.
+  const browserSurface = panel.surfaces.find((s) => s.kind === 'browser') ?? null
 
   // A close op is a VIEW op for every Surface except terminal, whose tab IS the
   // session's lifetime (ADR-0014): unmount keeps the shell (reattach later), but
@@ -333,12 +336,6 @@ function PanelBody({
                 activeThreadId={activeThreadId}
               />
             )}
-            {active?.kind === 'browser' && (
-              // The embedded dev-server preview (#216, ADR-0015). Keyed by the surface id
-              // so a future multi-tab browser remounts per tab; the view is disposable —
-              // closing/switching discards the page (URL persistence is slice 2, #217).
-              <BrowserSurface key={active.id} workspaceDir={workspaceDir} />
-            )}
             {active?.kind === 'file' && (
               // A read-only file preview tab (#189): fetches the confined `files:read` and renders
               // the highlighted content (or a binary/too-large/error notice), keyed by the path so a
@@ -349,6 +346,18 @@ function PanelBody({
                 relativePath={active.relativePath}
                 activeThreadId={activeThreadId}
               />
+            )}
+            {/* The embedded dev-server preview (#216, ADR-0015). Unlike the other
+                surfaces it stays MOUNTED whenever its tab is open — only HIDDEN when
+                another tab is active — because the live page lives in the renderer's
+                <webview> (no main-side session to reattach, unlike Terminal), so
+                unmounting on a tab switch would drop it back to the URL-entry state.
+                Closing the tab removes it from `surfaces`, unmounting it (discarding
+                the page). Keyed by id for a future multi-tab browser. */}
+            {browserSurface && (
+              <div className={cn('flex min-h-0 flex-1 flex-col', active?.kind !== 'browser' && 'hidden')}>
+                <BrowserSurface key={browserSurface.id} workspaceDir={workspaceDir} />
+              </div>
             )}
           </div>
         </>
