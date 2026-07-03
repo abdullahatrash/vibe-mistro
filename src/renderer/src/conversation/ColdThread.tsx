@@ -5,6 +5,7 @@ import { UsageBar } from './items/UsageBar'
 import { initialConversationState, type ConversationState } from './reducer'
 import { replayTranscript, transcriptHasImages } from './replay'
 import { replayCache } from './replay-cache'
+import { getWorkspaceCommands } from './workspace-commands'
 
 /**
  * A reopened Thread rendered READ-ONLY from its persisted JSONL (ADR-0005, TB3
@@ -104,7 +105,15 @@ export function ColdThread({
         ) : (
           view.items.map((item) => (
             // Read-only reopened history: no live turn, so reasoning renders collapsed.
-            <Item key={item.id} item={item} streaming={false} onPermission={noPermission} />
+            // The retroactive skill chip (PR #213) matches against the Workspace-level
+            // commands cache (#241) — no agent runs here, so there is no session list.
+            <Item
+              key={item.id}
+              item={item}
+              streaming={false}
+              onPermission={noPermission}
+              availableCommands={getWorkspaceCommands(window.localStorage, thread.workspaceId)}
+            />
           ))
         )}
       </div>

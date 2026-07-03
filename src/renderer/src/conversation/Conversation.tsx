@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState, type JSX } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore, type JSX } from 'react'
 import type {
   AuthMethod,
   ThreadAgentControls,
@@ -25,6 +25,11 @@ import { UsageBar } from './items/UsageBar'
 import { WorkingRow } from './items/WorkingRow'
 import { Composer } from './Composer'
 import { isSending, useFollowUpQueue } from './follow-up-queue'
+import {
+  foldCommandsEvent,
+  getWorkspaceCommands,
+  subscribeWorkspaceCommands,
+} from './workspace-commands'
 
 /** Process-local counter for unique echoed-prompt ids. */
 let promptSeq = 0
@@ -206,11 +211,16 @@ export function Conversation({
   useEffect(() => {
     return window.api.onAcpEvent((event) => {
       if (event.agentId !== thread.agentId) return
+      // Workspace-level commands cache (#241): fold an `available_commands_update`
+      // BEFORE Thread routing — the list is per-agent, not per-session, and it is not
+      // conversation content, so the reject-while-unbound rule below doesn't apply.
+      // This is what lets an UNBOUND draft's `/` autocomplete see the skills.
+      foldCommandsEvent(window.localStorage, thread.workspaceId, event.payload)
       if (!eventBelongsToThread(event.payload, boundRef.current)) return
       liveSeen.current = true
       dispatch({ type: 'acp-event', payload: event.payload })
     })
-  }, [thread.agentId])
+  }, [thread.agentId, thread.workspaceId])
 
   // The actual send of ONE message as a fresh `session/prompt` (#105). Owns the
   // whole turn lifecycle — echo dispatch, IPC, result handling, and (in `finally`)
@@ -361,6 +371,16 @@ export function Conversation({
   // reasoning auto-open to the live turn only (#115 review S1).
   const lastUserIndex = state.items.map((i) => i.kind).lastIndexOf('user')
 
+  // The `/` skill list with the Workspace-level fallback (#241): a bound Thread uses its
+  // own session's list; an unbound draft (or a just-warmed Thread whose update hasn't
+  // streamed yet) falls back to the Workspace cache — live this session or seeded from
+  // localStorage — so the FIRST prompt can already pick a skill.
+  const workspaceCommands = useSyncExternalStore(subscribeWorkspaceCommands, () =>
+    getWorkspaceCommands(window.localStorage, thread.workspaceId),
+  )
+  const availableCommands =
+    state.availableCommands.length > 0 ? state.availableCommands : workspaceCommands
+
   return (
     // Chip clicks (#116) open files through main; provided here (agentId closed over)
     // for the FileChips streamdown renders far below in the assistant markdown.
@@ -387,7 +407,7 @@ export function Conversation({
               // history's "Thinking" blocks (they belong to prior, settled turns).
               streaming={state.isProcessing && idx > lastUserIndex}
               onPermission={respondPermission}
-              availableCommands={state.availableCommands}
+              availableCommands={availableCommands}
             />
           ))}
           {/* Working indicator (#115): while a turn is in flight, a self-ticking
@@ -411,7 +431,7 @@ export function Conversation({
           boundSessionId={boundSessionId}
           isProcessing={state.isProcessing}
           isEmpty={state.items.length === 0}
-          availableCommands={state.availableCommands}
+          availableCommands={availableCommands}
           followUps={followUps}
           submitPrompt={submitPrompt}
           modes={modes}
