@@ -12,6 +12,7 @@ import {
   EMPTY_PANEL_STATE,
   getWorkspacePanel,
   MAX_TERMINALS_PER_WORKSPACE,
+  openBrowserSurface,
   openFileSurface,
   openSurface,
   openTerminalSurface,
@@ -140,6 +141,26 @@ describe('openTerminalSurface (ADR-0014, slice 3 multi-terminal)', () => {
     for (let i = 0; i < MAX_TERMINALS_PER_WORKSPACE; i++) state = openTerminalSurface(state)
     expect(terminalSurfaceCount(state)).toBe(MAX_TERMINALS_PER_WORKSPACE)
     expect(openTerminalSurface(state)).toBe(state) // same ref — capped
+  })
+})
+
+describe('openBrowserSurface (#216, singleton dev-server preview)', () => {
+  const B: Surface = { id: 'browser:main', kind: 'browser', resourceId: 'main' }
+
+  it('opens the singleton browser tab, activating it and opening the panel', () => {
+    expect(openBrowserSurface(empty())).toEqual({
+      isOpen: true,
+      activeSurfaceId: 'browser:main',
+      surfaces: [B],
+    })
+  })
+
+  it('re-activates rather than duplicates when already open (singleton semantics)', () => {
+    const withBrowser = openBrowserSurface(empty())
+    const behindOther = openSurface(withBrowser, 'files')
+    const again = openBrowserSurface(behindOther)
+    expect(again.surfaces.filter((s) => s.kind === 'browser')).toHaveLength(1)
+    expect(again.activeSurfaceId).toBe('browser:main')
   })
 })
 

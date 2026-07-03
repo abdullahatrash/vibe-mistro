@@ -65,6 +65,8 @@ import { registerFilesIpc } from './files/register-ipc'
 import { createTerminalManager, registerTerminalIpc } from './terminal/register-ipc'
 import type { TerminalManager } from './terminal/terminal-manager'
 import { FilesListCache, shouldInvalidateFilesCacheOnGitStatus } from './files/cache'
+import { clampWebviewAttachment } from './browser/webview-clamp'
+import { safeExternalUrl } from './files/safe-external-url'
 
 // Test seam (e2e smoke): point the whole persisted profile (metadata.json +
 // transcripts) at a throwaway dir so the suite launches against a KNOWN state
@@ -584,6 +586,9 @@ function createWindow(): void {
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false,
+      // The Browser Surface's embed (#216, ADR-0015). Enabling the tag widens the
+      // window's attack surface, so EVERY attachment is gated by the clamp below.
+      webviewTag: true,
     },
   })
 
@@ -592,6 +597,25 @@ function createWindow(): void {
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
+  })
+
+  // Defense-in-depth for the Browser Surface guest (webview-clamp.ts): only
+  // Browser-partition guests may attach, with their security prefs force-overridden
+  // no matter what the renderer declared on the tag.
+  win.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+    if (!clampWebviewAttachment(params, webPreferences)) event.preventDefault()
+  })
+
+  // The guest never spawns windows: popups/window.open are denied, with http/https
+  // targets handed to the system browser (guest pages are untrusted content — the
+  // terminal-output-link posture, `safeExternalUrl`). In-page navigation is
+  // unaffected; the renderer's URL policy governs what the webview itself loads.
+  win.webContents.on('did-attach-webview', (_event, guest) => {
+    guest.setWindowOpenHandler(({ url }) => {
+      const safe = safeExternalUrl(url)
+      if (safe) void shell.openExternal(safe)
+      return { action: 'deny' }
+    })
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {

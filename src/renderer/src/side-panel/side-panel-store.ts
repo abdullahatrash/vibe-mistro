@@ -161,6 +161,22 @@ export function terminalSurfaceCount(state: WorkspacePanelState): number {
 }
 
 /**
+ * The Browser Surface's fixed resource id (#216): a per-Workspace SINGLETON this slice,
+ * so the descriptor is constant — the reserved `browser:${resourceId}` id shape stays
+ * ready for a future multi-tab browser without a coercion break.
+ */
+const BROWSER_SURFACE: Surface = { id: 'browser:main', kind: 'browser', resourceId: 'main' }
+
+/**
+ * Open (or re-activate) the Workspace's singleton Browser Surface (#216, ADR-0015),
+ * opening the panel — the singleton semantics of `openSurface`, under the browser's
+ * own resource-id'd descriptor shape.
+ */
+export function openBrowserSurface(state: WorkspacePanelState): WorkspacePanelState {
+  return upsertSurface(state, BROWSER_SURFACE)
+}
+
+/**
  * The ⌘P / ⌃⇧G semantics (t3code `toggle`): if the panel is open AND this kind is the
  * ACTIVE tab, hide the panel (keep the tabs + active id). Otherwise open/activate the
  * singleton — which also OPENS a closed panel. So one chord opens, a second (while it's
@@ -424,6 +440,7 @@ function bindWorkspaceOp<A extends unknown[]>(
 export const openWorkspaceSurface = bindWorkspaceOp(openSurface)
 export const openWorkspaceFileSurface = bindWorkspaceOp(openFileSurface)
 export const openWorkspaceTerminalSurface = bindWorkspaceOp(openTerminalSurface)
+export const openWorkspaceBrowserSurface = bindWorkspaceOp(openBrowserSurface)
 export const toggleWorkspaceSurface = bindWorkspaceOp(toggleSurface)
 export const activateWorkspaceSurface = bindWorkspaceOp(activateSurface)
 export const closeWorkspaceSurface = bindWorkspaceOp(closeSurface)
