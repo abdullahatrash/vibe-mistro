@@ -53,8 +53,44 @@ export interface ReviewCommentContext {
   excerpt: string
 }
 
+/**
+ * A LONG clipboard paste staged as a chip instead of splicing into the draft (mirrors
+ * t3code's inline-token treatment of big text blobs): the composer stays compact — the
+ * chip shows a bracketed placeholder — and the full text rides a trailing
+ * `<pasted_text>` block only at send. `id` is composer-minted; several pastes accumulate.
+ */
+export interface PastedTextContext {
+  kind: 'pasted'
+  id: string
+  text: string
+}
+
 /** A context chip staged in the composer awaiting send. */
-export type PendingContext = SkillContext | FileContext | ElementContext | ReviewCommentContext
+export type PendingContext =
+  | SkillContext
+  | FileContext
+  | ElementContext
+  | ReviewCommentContext
+  | PastedTextContext
+
+/** A paste is compressed into a chip past EITHER bound — enough characters to balloon
+ *  the textarea, or enough lines to push the controls off-screen. */
+export const LONG_PASTE_CHARS = 1000
+export const LONG_PASTE_LINES = 10
+
+/** Whether a clipboard text paste should stage as a chip instead of entering the draft. */
+export function isLongPaste(text: string): boolean {
+  return text.length > LONG_PASTE_CHARS || text.split('\n').length > LONG_PASTE_LINES
+}
+
+/** The bracketed placeholder a pasted-text chip displays, in the composer and on the
+ *  echoed user turn — sized in lines (or characters for a single long line). */
+export function pastedLabel(context: PastedTextContext): string {
+  const lines = context.text.split('\n').length
+  return lines > 1
+    ? `[pasted text · ${lines} lines]`
+    : `[pasted text · ${context.text.length} chars]`
+}
 
 /** The stable identity of a chip — the React key, the remove handle, and the dedupe key. */
 export function contextKey(context: PendingContext): string {
@@ -67,6 +103,8 @@ export function contextKey(context: PendingContext): string {
       return `element:${context.id}`
     case 'review':
       return `review:${context.id}`
+    case 'pasted':
+      return `pasted:${context.id}`
   }
 }
 
@@ -108,6 +146,11 @@ const ELEMENT_CONTEXT_CLOSE = '</element_context>'
 /** The marker element fencing review comments in the wire text (#239). */
 const REVIEW_COMMENTS_OPEN = '<review_comments>'
 const REVIEW_COMMENTS_CLOSE = '</review_comments>'
+
+/** The marker element fencing one long paste's VERBATIM text in the wire — one block
+ *  per chip (pastes are opaque blobs; there is no entry shape to pack several into one). */
+const PASTED_TEXT_OPEN = '<pasted_text>'
+const PASTED_TEXT_CLOSE = '</pasted_text>'
 
 /** One review comment's lines inside the block (#239): a head line naming the file +
  *  line range, a single-line `note:` (whitespace-normalized, like element text), then
@@ -226,6 +269,7 @@ export interface ExtractedPromptContexts {
   files: FileContext[]
   elements: ElementContext[]
   reviews: ReviewCommentContext[]
+  pasted: PastedTextContext[]
 }
 
 /**
@@ -240,7 +284,30 @@ export function extractPromptContexts(text: string): ExtractedPromptContexts {
   let working = text
   let elements: ElementContext[] = []
   let reviews: ReviewCommentContext[] = []
-  // Reviews serialize LAST (#239), so they strip FIRST.
+  const pasted: PastedTextContext[] = []
+  // Pasted-text blocks serialize LAST of all, so they strip FIRST — one block per
+  // chip, back-to-front (unshift keeps staged order). The inner slice drops exactly
+  // the one newline we added on each side of the verbatim text, so the paste
+  // round-trips byte-for-byte (including its own trailing newline, if any).
+  for (;;) {
+    const pasteTrimmed = working.trimEnd()
+    if (!pasteTrimmed.endsWith(PASTED_TEXT_CLOSE)) break
+    const open = pasteTrimmed.lastIndexOf(PASTED_TEXT_OPEN)
+    if (open === -1) break
+    const inner = pasteTrimmed.slice(
+      open + PASTED_TEXT_OPEN.length,
+      pasteTrimmed.length - PASTED_TEXT_CLOSE.length,
+    )
+    pasted.unshift({
+      kind: 'pasted',
+      id: `paste-extract:${open}`,
+      text: inner.replace(/^\n/, '').replace(/\n$/, ''),
+    })
+    working = pasteTrimmed.slice(0, open).replace(/\n+$/, '')
+  }
+  // Re-key extracted pastes in document order (the loop keys by offset while stripping).
+  pasted.forEach((chip, i) => (chip.id = `paste-extract:${i}`))
+  // Reviews serialize LAST of the entry-shaped blocks (#239), so they strip next.
   const reviewTrimmed = working.trimEnd()
   if (reviewTrimmed.endsWith(REVIEW_COMMENTS_CLOSE)) {
     const open = reviewTrimmed.lastIndexOf(REVIEW_COMMENTS_OPEN)
@@ -276,7 +343,7 @@ export function extractPromptContexts(text: string): ExtractedPromptContexts {
     }
   }
   const { cleanText, files } = extractAttachedFiles(working)
-  return { cleanText, files, elements, reviews }
+  return { cleanText, files, elements, reviews, pasted }
 }
 
 /**
@@ -284,8 +351,9 @@ export function extractPromptContexts(text: string): ExtractedPromptContexts {
  * leading `/name ` invocation (bare `/name` when there is no prose); file chips become
  * a TRAILING `<attached_files>` block of `@path` mentions the agent expands itself
  * (ADR-0002 — plain text, no client-side expansion); element chips become a final
- * `<element_context>` block of descriptive prose. The prose itself is trimmed exactly
- * like the send path trims the draft.
+ * `<element_context>` block of descriptive prose; long pastes become trailing
+ * `<pasted_text>` blocks, one per chip. The prose itself is trimmed exactly like the
+ * send path trims the draft.
  */
 export function serializeForSend(text: string, contexts: readonly PendingContext[]): string {
   const prose = text.trim()
@@ -307,6 +375,12 @@ export function serializeForSend(text: string, contexts: readonly PendingContext
     parts.push(
       [REVIEW_COMMENTS_OPEN, ...reviews.flatMap(formatReviewEntry), REVIEW_COMMENTS_CLOSE].join('\n'),
     )
+  }
+  // Long pastes go LAST, one block each, text VERBATIM (an opaque blob — normalizing
+  // or entry-shaping it would corrupt code/log pastes). Extraction strips these first.
+  for (const paste of contexts) {
+    if (paste.kind !== 'pasted') continue
+    parts.push(`${PASTED_TEXT_OPEN}\n${paste.text}\n${PASTED_TEXT_CLOSE}`)
   }
   return parts.filter((p) => p.length > 0).join('\n\n')
 }
