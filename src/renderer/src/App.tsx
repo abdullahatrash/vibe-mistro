@@ -34,6 +34,7 @@ import { ArrowLeft, ArrowRight, Maximize2, PanelLeft, PanelRight, Terminal } fro
 import { IconButton } from './ui/icon-button'
 import { OpenInEditorButton } from './editors/OpenInEditorButton'
 import { SearchPalette } from './search/SearchPalette'
+import { SkillsView } from './skills/SkillsView'
 import { Shell, type WorkspaceFlags } from './shell/Shell'
 import { Logo } from './shell/logo'
 import { firstRunState } from './shell/first-run'
@@ -596,12 +597,16 @@ export function App(): JSX.Element {
   // so each NON-connected view re-adds the old p-6 breathing room via a wrapper here;
   // the connected view spends it inside its chat column (ConnectedWorkspace) instead.
   const inSettings = nav.view === 'settings'
+  // The Skills browser (#259): a sibling routed outlet view, same keep-mounted
+  // contract as Settings — connected Workspaces hide (not unmount) beneath it.
+  const inSkills = nav.view === 'skills'
+  const overlayView = inSettings || inSkills
   // Persistent missing-CLI banner (visibility is the pure `installBannerMessage`):
   // spans the shell under the window chrome so a selected Workspace / open Thread
   // still surfaces the missing toolchain; suppressed where the fuller guidance is
   // already on screen (the needs-install first-run outlet, Settings' Environment).
   const emptyOutletVisible =
-    !inSettings && selected.status === 'idle' && !findSelectedThread(recents, nav)
+    !overlayView && selected.status === 'idle' && !findSelectedThread(recents, nav)
   const installBanner = installBannerMessage({
     detect,
     inSettings,
@@ -615,8 +620,8 @@ export function App(): JSX.Element {
         return (
           // h-full: complete the height chain from <main> down to `.conv` (100%)
           // so the transcript scrolls internally and the Composer stays pinned.
-          <div key={wid} className="h-full" hidden={inSettings || wid !== selectedWs}>
-            {renderConnected(conn.thread, !inSettings && wid === selectedWs, wsFlags[wid]?.streaming ?? false)}
+          <div key={wid} className="h-full" hidden={overlayView || wid !== selectedWs}>
+            {renderConnected(conn.thread, !overlayView && wid === selectedWs, wsFlags[wid]?.streaming ?? false)}
           </div>
         )
       })}
@@ -652,6 +657,17 @@ export function App(): JSX.Element {
             navDispatch({ type: 'close-settings' })
           }}
         />
+        </div>
+      ) : inSkills ? (
+        <div className="p-6">
+          <SkillsView
+            // The selected Workspace's dir feeds the PROJECT skill dirs; null =
+            // global skills only (nothing selected). Cold metadata is enough —
+            // no agent/connection is involved in listing skills (#259).
+            workspaceDir={recents.find((w) => w.id === selectedWs)?.dir ?? null}
+            workspaceName={recents.find((w) => w.id === selectedWs)?.displayName ?? null}
+            onClose={() => navDispatch({ type: 'close-skills' })}
+          />
         </div>
       ) : selected.status === 'connected' ? null : ( // connected: rendered (visible) in the keep-mounted map above
         // h-full so a cold Thread's `.conv` (height: 100%) keeps its internal scroll.
@@ -788,6 +804,7 @@ export function App(): JSX.Element {
         }}
         onOpenSettings={() => navDispatch({ type: 'open-settings' })}
         onOpenSearch={() => setSearchOpen(true)}
+        onOpenSkills={() => navDispatch({ type: 'open-skills' })}
       />
 
       <SearchPalette

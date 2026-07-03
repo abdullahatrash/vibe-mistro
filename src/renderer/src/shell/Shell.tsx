@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX, type PointerEvent, type ReactNode } from 'react'
-import { ChevronDown, Search, Settings, SquarePen } from 'lucide-react'
+import { ChevronDown, Search, Settings, Sparkles, SquarePen } from 'lucide-react'
 import type { ListMetadataResult } from '../../../shared/ipc'
 import type { NavState } from './nav-reducer'
 import type { UnifiedThreadRow } from './unified-threads'
@@ -49,6 +49,7 @@ export function Shell({
   actions,
   onOpenSettings,
   onOpenSearch,
+  onOpenSkills,
 }: {
   /** Whether the left sidebar is collapsed (#127) — animate its width to 0 (still mounted). */
   collapsed: boolean
@@ -76,6 +77,8 @@ export function Shell({
   onOpenSettings: () => void
   /** Open the Search palette (#174) — from the primary nav's Search row (or ⌘K). */
   onOpenSearch: () => void
+  /** Open the Skills browser (#259) — from the primary nav's Skills row. */
+  onOpenSkills: () => void
 }): JSX.Element {
   // The sidebar's EXPANDED width (#drag-to-resize): renderer-only UI state, seeded from
   // localStorage (clamped) and persisted on drag-release. `dragging` disables the
@@ -150,7 +153,12 @@ export function Shell({
             resized width (not shrinking) so content slides under the clip on collapse. */}
         <div className="flex h-full flex-none flex-col gap-3 p-3" style={{ width }}>
           <div className="flex flex-none flex-col gap-3">
-            <PrimaryNav busy={opening} onNewThread={onNewThread} onOpenSearch={onOpenSearch} />
+            <PrimaryNav
+              busy={opening}
+              onNewThread={onNewThread}
+              onOpenSearch={onOpenSearch}
+              onOpenSkills={onOpenSkills}
+            />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             <WorkspaceNav
@@ -206,18 +214,21 @@ export function Shell({
  * `--accent-fill`). It's ALWAYS actionable now — `onNewThread` (App's `startNewChat`)
  * targets the selected/most-recent project (connect-if-needed) or opens the picker when
  * there are none — so it's only disabled while a connect is in flight (`busy`). Below it,
- * Search opens the Search palette (#174; also ⌘K). The old Scheduled / Plugins "Soon"
- * placeholders are HIDDEN for v1 (user call, 2026-07-03): their epics (#175 / #176)
- * stay parked, and unbuilt rows shouldn't greet first-version users.
+ * Search opens the Search palette (#174; also ⌘K); Skills opens the Skills browser
+ * (#259, the slot Plugins vacated). The old Scheduled / Plugins "Soon" placeholders
+ * are HIDDEN for v1 (user call, 2026-07-03): their epics (#175 / #176) stay parked
+ * as backlog, and unbuilt rows shouldn't greet first-version users.
  */
 function PrimaryNav({
   busy,
   onNewThread,
   onOpenSearch,
+  onOpenSkills,
 }: {
   busy: boolean
   onNewThread: () => void
   onOpenSearch: () => void
+  onOpenSkills: () => void
 }): JSX.Element {
   return (
     <nav className="flex flex-col gap-0.5">
@@ -234,6 +245,10 @@ function PrimaryNav({
         <Search className="size-[18px]" aria-hidden />
         <span className="flex-1">Search</span>
         <span className="text-[11px] font-medium text-faint">⌘K</span>
+      </NavItem>
+      <NavItem onClick={onOpenSkills}>
+        <Sparkles className="size-[18px]" aria-hidden />
+        <span className="flex-1">Skills</span>
       </NavItem>
     </nav>
   )

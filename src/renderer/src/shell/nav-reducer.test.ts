@@ -86,6 +86,27 @@ describe('navReducer', () => {
       expect(next).not.toBe(start) // not a no-op here: it must exit Settings
     })
   })
+
+  describe('Skills view (#259)', () => {
+    it('open-skills / close-skills mirror the Settings contract, preserving the selection', () => {
+      const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'conversation' }
+      const open = navReducer(start, { type: 'open-skills' })
+      expect(open).toEqual({ selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'skills' })
+      expect(navReducer(open, { type: 'open-skills' })).toBe(open) // referential no-op
+      expect(navReducer(open, { type: 'close-skills' })).toEqual(start)
+    })
+
+    it('selecting a Thread while in Skills leaves Skills (resets view)', () => {
+      const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: null, view: 'skills' }
+      const next = navReducer(start, { type: 'select-thread', workspaceId: 'w1', threadId: 't2' })
+      expect(next).toEqual({ selectedWorkspaceId: 'w1', selectedThreadId: 't2', view: 'conversation' })
+    })
+
+    it('open-settings from Skills swaps views directly', () => {
+      const start: NavState = { selectedWorkspaceId: null, selectedThreadId: null, view: 'skills' }
+      expect(navReducer(start, { type: 'open-settings' }).view).toBe('settings')
+    })
+  })
 })
 
 describe('findSelectedThread (cold-outlet derivation)', () => {

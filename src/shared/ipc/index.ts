@@ -19,6 +19,7 @@ import { editorsChannels } from './editors'
 import { terminalChannels } from './terminal'
 import { browserChannels } from './browser'
 import { searchChannels } from './search'
+import { skillsChannels } from './skills'
 
 /**
  * The one typed channel map. ONE exported object — the channel names are the wire
@@ -36,6 +37,7 @@ export const IPC = {
   ...terminalChannels,
   ...browserChannels,
   ...searchChannels,
+  ...skillsChannels,
 } as const
 
 export * from './core'
@@ -48,3 +50,4 @@ export * from './editors'
 export * from './terminal'
 export * from './browser'
 export * from './search'
+export * from './skills'

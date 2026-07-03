@@ -15,12 +15,12 @@ export interface NavState {
   selectedThreadId: string | null
   /**
    * WHICH top-level outlet view is showing (#130). `'settings'` swaps the outlet for
-   * the on-demand Settings page (env/CLI status + future settings), leaving the
-   * Workspace/Thread selection intact so closing it returns to the same conversation.
-   * Any `select-workspace` / `select-thread` (picking a project or thread from the
-   * sidebar) resets it to `'conversation'` — navigating leaves Settings.
+   * the on-demand Settings page (env/CLI status + future settings); `'skills'` for
+   * the Skills browser (#259) — both leave the Workspace/Thread selection intact so
+   * closing returns to the same conversation. Any `select-workspace` / `select-thread`
+   * (picking a project or thread from the sidebar) resets it to `'conversation'`.
    */
-  view: 'conversation' | 'settings'
+  view: 'conversation' | 'settings' | 'skills'
 }
 
 export type NavAction =
@@ -28,6 +28,8 @@ export type NavAction =
   | { type: 'select-thread'; workspaceId: string; threadId: string }
   | { type: 'open-settings' }
   | { type: 'close-settings' }
+  | { type: 'open-skills' }
+  | { type: 'close-skills' }
   | { type: 'clear' }
 
 export const initialNavState: NavState = {
@@ -56,7 +58,11 @@ export function navReducer(state: NavState, action: NavAction): NavState {
       // Swap the outlet for the Settings page, PRESERVING the current selection.
       // Referential no-op when already in Settings (uniform with select-workspace).
       return state.view === 'settings' ? state : { ...state, view: 'settings' }
+    case 'open-skills':
+      // Swap the outlet for the Skills browser (#259) — same contract as Settings.
+      return state.view === 'skills' ? state : { ...state, view: 'skills' }
     case 'close-settings':
+    case 'close-skills':
       // Return to the conversation view, PRESERVING the current selection.
       return state.view === 'conversation' ? state : { ...state, view: 'conversation' }
     case 'clear':
