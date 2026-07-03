@@ -148,6 +148,18 @@ export function buildPickerScript(config: { accent: string }): string {
 }
 
 /**
+ * Format a full-page screenshot's composer annotation (#226): names the page by title +
+ * URL for the agent's context (a screenshot alone doesn't carry its address). Falls back
+ * to URL-only when the guest reports no title. (The element pick's annotation was
+ * superseded by the pending-context ELEMENT chip, #231/ADR-0017 — this one stays: a page
+ * screenshot is a plain image attachment, not a structured pick.)
+ */
+export function formatScreenshotAnnotation(page: { url: string; title: string }): string {
+  const title = page.title.trim()
+  return title.length > 0 ? `Screenshot of "${title}" — ${page.url}` : `Screenshot of ${page.url}`
+}
+
+/**
  * The crop rect for the picked element's screenshot: pad the element's bounding rect,
  * clamp it to the viewport, and round to integer pixels. Returns null for a zero-area
  * element (nothing to capture). Coordinates stay in CSS pixels — Electron's

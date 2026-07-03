@@ -3,9 +3,11 @@ import {
   appendText,
   emitComposerInsert,
   emitComposerInsertElement,
+  emitComposerInsertImage,
   emitComposerInsertText,
   subscribeComposerInsert,
   subscribeComposerInsertElement,
+  subscribeComposerInsertImage,
   subscribeComposerInsertText,
   type ComposerInsertElement,
   type ComposerInsertImage,
@@ -104,6 +106,38 @@ describe('composer-insert TEXT channel (raw)', () => {
     const off = subscribeComposerInsertText('thread-a', listener)
     off()
     emitComposerInsertText('thread-a', 'x')
+    expect(listener).not.toHaveBeenCalled()
+  })
+})
+
+describe('composer-insert IMAGE channel (#226 standalone page screenshot)', () => {
+  const img: ComposerInsertImage = {
+    data: 'AAAA',
+    mimeType: 'image/png',
+    name: 'page-screenshot.png',
+    previewUrl: 'data:image/png;base64,AAAA',
+  }
+
+  it('delivers an image payload to the Thread\'s subscriber, isolated from the element channel', () => {
+    const image = vi.fn()
+    const element = vi.fn()
+    const offImage = subscribeComposerInsertImage('thread-a', image)
+    const offElement = subscribeComposerInsertElement('thread-a', element)
+
+    emitComposerInsertImage('thread-a', img)
+    expect(image).toHaveBeenCalledWith(img)
+    expect(element).not.toHaveBeenCalled() // separate channel
+
+    offImage()
+    offElement()
+  })
+
+  it('is a no-op with no subscriber, and stops after unsubscribe', () => {
+    expect(() => emitComposerInsertImage('nobody', img)).not.toThrow()
+    const listener = vi.fn()
+    const off = subscribeComposerInsertImage('thread-a', listener)
+    off()
+    emitComposerInsertImage('thread-a', img)
     expect(listener).not.toHaveBeenCalled()
   })
 })

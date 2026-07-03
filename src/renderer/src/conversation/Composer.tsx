@@ -26,6 +26,7 @@ import {
   appendText,
   subscribeComposerInsert,
   subscribeComposerInsertElement,
+  subscribeComposerInsertImage,
   subscribeComposerInsertText,
 } from './composer-insert'
 import { ACCEPTED_IMAGE_TYPES, isAcceptedImageType, parseDataUrl } from './image-attach'
@@ -220,6 +221,16 @@ export function Composer({
       inputRef.current?.focus()
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId])
+
+  // Stage a STANDALONE image from the Browser Surface (#226 page screenshot): a plain
+  // attachment with no structured pick behind it — arrives pre-split through the
+  // module-level channel keyed by threadId, so we just add an id.
+  useEffect(() => {
+    return subscribeComposerInsertImage(threadId, (image) => {
+      setPendingImages((prev) => [...prev, { id: `img:${imageSeq++}`, ...image }])
+      inputRef.current?.focus()
+    })
   }, [threadId])
 
   // Stage a Browser Surface element pick (#224/#231): the ONE payload — element metadata

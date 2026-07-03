@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { buildPickerScript, coercePickedElement, cropRectForElement } from './browser-picker'
+import {
+  buildPickerScript,
+  coercePickedElement,
+  cropRectForElement,
+  formatScreenshotAnnotation,
+} from './browser-picker'
 
 describe('cropRectForElement', () => {
   const viewport = { width: 1000, height: 800 }
@@ -72,6 +77,20 @@ describe('coercePickedElement (untrusted guest JSON)', () => {
     const long = 'x'.repeat(500)
     const p = coercePickedElement({ ...valid, text: long })
     expect(p!.text.length).toBeLessThanOrEqual(200)
+  })
+})
+
+describe('formatScreenshotAnnotation', () => {
+  it('names the page with title and url', () => {
+    expect(formatScreenshotAnnotation({ url: 'http://localhost:5173/pricing', title: 'Pricing' })).toBe(
+      'Screenshot of "Pricing" — http://localhost:5173/pricing',
+    )
+  })
+
+  it('falls back to url only when the title is empty', () => {
+    expect(formatScreenshotAnnotation({ url: 'http://localhost:5173/', title: '' })).toBe(
+      'Screenshot of http://localhost:5173/',
+    )
   })
 })
 

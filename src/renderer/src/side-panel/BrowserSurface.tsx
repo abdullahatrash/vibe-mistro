@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type JSX } from 'react'
-import { ArrowLeft, ArrowRight, Code, ExternalLink, Globe, Loader2, MousePointerClick, RefreshCw, RotateCw, TriangleAlert } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Camera, Code, ExternalLink, Globe, Loader2, MousePointerClick, RefreshCw, RotateCw, TriangleAlert } from 'lucide-react'
 import type { DevServer } from '../../../shared/ipc'
-import { emitComposerInsertElement, type ComposerInsertImage } from '../conversation/composer-insert'
+import {
+  emitComposerInsertElement,
+  emitComposerInsertImage,
+  emitComposerInsertText,
+  type ComposerInsertImage,
+} from '../conversation/composer-insert'
 import { parseDataUrl } from '../conversation/image-attach'
-import { buildPickerScript, coercePickedElement, cropRectForElement } from './browser-picker'
+import {
+  buildPickerScript,
+  coercePickedElement,
+  cropRectForElement,
+  formatScreenshotAnnotation,
+} from './browser-picker'
 import { cn } from '../lib/utils'
 import {
   buildWebviewPreferencesAttribute,
@@ -110,6 +120,26 @@ export function BrowserSurface({
   }
   function openDevTools(): void {
     view?.openDevTools()
+  }
+
+  // Screenshot the whole visible page into the composer (#226): capture the guest
+  // compositor (no rect = full visible page) and stage it as an image + a title/URL
+  // annotation. A page screenshot is a plain image attachment — NOT a structured pick —
+  // so it rides the standalone image channel, not the #231 element-chip payload.
+  async function screenshotPage(): Promise<void> {
+    if (!view || !activeThreadId) return
+    try {
+      const image = await view.capturePage()
+      const dataUrl = image.toDataURL()
+      const parsed = parseDataUrl(dataUrl)
+      if (parsed) {
+        emitComposerInsertImage(activeThreadId, { ...parsed, name: 'page-screenshot.png', previewUrl: dataUrl })
+        emitComposerInsertText(activeThreadId, formatScreenshotAnnotation({ url: view.getURL(), title }))
+      }
+    } catch (err) {
+      // Best-effort — a capture failure is a logged no-op, never a broken attachment.
+      console.error('[browser] page screenshot failed', err)
+    }
   }
 
   // Pick an element to chat (#224/#231, ADR-0016): inject the picker into the guest via
@@ -259,6 +289,13 @@ export function BrowserSurface({
           active={picking}
         >
           <MousePointerClick aria-hidden />
+        </BrowserAction>
+        <BrowserAction
+          label="Screenshot page to chat"
+          onClick={() => void screenshotPage()}
+          disabled={activeThreadId === null}
+        >
+          <Camera aria-hidden />
         </BrowserAction>
         <BrowserAction label="Open in browser" onClick={openExternal}>
           <ExternalLink aria-hidden />

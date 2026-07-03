@@ -40,9 +40,40 @@ export interface ComposerInsertElement {
 
 type ElementListener = (payload: ComposerInsertElement) => void
 
+type ImageListener = (image: ComposerInsertImage) => void
+
 const listenersByThread = new Map<string, Set<InsertListener>>()
 const textListenersByThread = new Map<string, Set<InsertListener>>()
+const imageListenersByThread = new Map<string, Set<ImageListener>>()
 const elementListenersByThread = new Map<string, Set<ElementListener>>()
+
+/**
+ * Subscribe a Thread's composer to STANDALONE image insert requests (#226 page
+ * screenshot): a plain image attachment with no structured pick behind it — element
+ * picks ride the element channel instead (#231), which pairs chip and screenshot.
+ * Returns an unsubscribe.
+ */
+export function subscribeComposerInsertImage(threadId: string, listener: ImageListener): () => void {
+  let set = imageListenersByThread.get(threadId)
+  if (!set) {
+    set = new Set()
+    imageListenersByThread.set(threadId, set)
+  }
+  set.add(listener)
+  return () => {
+    const current = imageListenersByThread.get(threadId)
+    if (!current) return
+    current.delete(listener)
+    if (current.size === 0) imageListenersByThread.delete(threadId)
+  }
+}
+
+/** Request the given Thread's composer stage `image`; a no-op if none is mounted. */
+export function emitComposerInsertImage(threadId: string, image: ComposerInsertImage): void {
+  const set = imageListenersByThread.get(threadId)
+  if (!set) return
+  for (const listener of set) listener(image)
+}
 
 /** Subscribe a Thread's composer to element-pick payloads (#231); returns an unsubscribe. */
 export function subscribeComposerInsertElement(
