@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
-import { Check, Copy, RotateCcw, Sparkles, ThumbsDown, ThumbsUp } from 'lucide-react'
+import { Check, Copy, File, MousePointerClick, RotateCcw, Sparkles, ThumbsDown, ThumbsUp } from 'lucide-react'
 import { IconButton } from '../../ui/icon-button'
 import { Response } from '../Response'
 import { matchInvokedCommand } from '../command-autocomplete'
+import { extractPromptContexts } from '../pending-contexts'
 import type { AcpCommand, AssistantItem, UserItem } from '../reducer'
 
 export function UserRow({
@@ -13,24 +14,57 @@ export function UserRow({
   /** The session's slash commands/skills — a leading `/name` match renders a chip. */
   availableCommands?: readonly AcpCommand[]
 }): JSX.Element {
+  // Context extraction (#230/#231): a prompt sent with pending chips carries trailing
+  // `<attached_files>` / `<element_context>` marker blocks; strip them back into chips at
+  // RENDER time so the bubble shows the clean prose — live and on JSONL replay, which
+  // ride the same text. User-typed inline `@path` mentions pass through untouched.
+  const { cleanText, files, elements } = extractPromptContexts(item.text)
   // Skill/command chip: vibe-acp invokes a skill when the prompt opens with a
   // known `/name`, but gives NO wire-level acknowledgment — so we surface the
   // match ourselves. Matched at RENDER time against the CURRENT list (not stamped
   // at send): a draft's first prompt is sent before `available_commands_update`
   // streams, so the chip appears retroactively once the list arrives.
-  const command = matchInvokedCommand(item.text, availableCommands ?? [])
+  const command = matchInvokedCommand(cleanText, availableCommands ?? [])
   // User turn (#114): a right-aligned rounded bubble, capped so long prose wraps
   // instead of spanning the pane. Echoed attachments (#100) re-home into the bubble.
   return (
     <div className="flex flex-col items-end gap-1.5">
-      {command && (
-        <span
-          data-command-chip
-          title={command.description}
-          className="inline-flex items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] px-1.5 py-0.5 font-mono text-xs leading-none text-accent-text"
-        >
-          <Sparkles className="size-3 shrink-0" aria-hidden />/{command.name}
-        </span>
+      {(command || files.length > 0 || elements.length > 0) && (
+        <div className="flex max-w-[80%] flex-wrap justify-end gap-1.5">
+          {command && (
+            <span
+              data-command-chip
+              title={command.description}
+              className="inline-flex items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] px-1.5 py-0.5 font-mono text-xs leading-none text-accent-text"
+            >
+              <Sparkles className="size-3 shrink-0" aria-hidden />/{command.name}
+            </span>
+          )}
+          {files.map((file) => (
+            <span
+              key={file.path}
+              data-file-chip
+              title={file.path}
+              className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] px-1.5 py-0.5 font-mono text-xs leading-none text-accent-text"
+            >
+              <File className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">{file.path}</span>
+            </span>
+          ))}
+          {elements.map((element) => (
+            <span
+              key={element.id}
+              data-element-chip
+              title={[`<${element.tagName}>`, element.selector ?? '', element.text, element.pageUrl]
+                .filter((line) => line.length > 0)
+                .join('\n')}
+              className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] px-1.5 py-0.5 font-mono text-xs leading-none text-accent-text"
+            >
+              <MousePointerClick className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">{element.selector ?? `<${element.tagName}>`}</span>
+            </span>
+          ))}
+        </div>
       )}
       <div className="max-w-[80%] rounded-2xl border border-border bg-surface px-3.5 py-2.5 text-[15px] leading-relaxed break-words whitespace-pre-wrap text-text-body">
         {item.images && item.images.length > 0 && (
@@ -45,7 +79,7 @@ export function UserRow({
             ))}
           </div>
         )}
-        {item.text}
+        {cleanText}
       </div>
     </div>
   )

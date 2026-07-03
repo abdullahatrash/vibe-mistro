@@ -1,30 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  appendMention,
   appendText,
   emitComposerInsert,
+  emitComposerInsertElement,
   emitComposerInsertImage,
   emitComposerInsertText,
   subscribeComposerInsert,
+  subscribeComposerInsertElement,
   subscribeComposerInsertImage,
   subscribeComposerInsertText,
+  type ComposerInsertElement,
   type ComposerInsertImage,
 } from './composer-insert'
-
-describe('appendMention', () => {
-  it('inserts into an empty draft with a trailing space', () => {
-    expect(appendMention('', 'src/app.ts')).toBe('@src/app.ts ')
-  })
-
-  it('adds a separating space when the draft does not end in whitespace', () => {
-    expect(appendMention('see', 'src/app.ts')).toBe('see @src/app.ts ')
-  })
-
-  it('does not double the space when the draft already ends in whitespace', () => {
-    expect(appendMention('see ', 'src/app.ts')).toBe('see @src/app.ts ')
-    expect(appendMention('see\n', 'src/app.ts')).toBe('see\n@src/app.ts ')
-  })
-})
 
 describe('composer-insert channel', () => {
   it('delivers an emit to the subscriber for that Thread only', () => {
@@ -48,6 +35,37 @@ describe('composer-insert channel', () => {
     const off = subscribeComposerInsert('thread-a', listener)
     off()
     emitComposerInsert('thread-a', 'x.ts')
+    expect(listener).not.toHaveBeenCalled()
+  })
+})
+
+describe('composer-insert ELEMENT channel (#231 pick-to-chat)', () => {
+  it('delivers the pick payload — element metadata + optional screenshot — to the Thread\'s subscriber', () => {
+    const listener = vi.fn()
+    const off = subscribeComposerInsertElement('thread-a', listener)
+    const payload: ComposerInsertElement = {
+      element: { tagName: 'button', selector: '#go', text: 'Go', pageUrl: 'http://localhost:3000/' },
+      image: null,
+    }
+    emitComposerInsertElement('thread-a', payload)
+    expect(listener).toHaveBeenCalledWith(payload)
+    off()
+  })
+
+  it('is a no-op without a subscriber and stops after unsubscribe', () => {
+    const listener = vi.fn()
+    expect(() =>
+      emitComposerInsertElement('nobody', {
+        element: { tagName: 'div', selector: null, text: '', pageUrl: 'x' },
+        image: null,
+      }),
+    ).not.toThrow()
+    const off = subscribeComposerInsertElement('thread-a', listener)
+    off()
+    emitComposerInsertElement('thread-a', {
+      element: { tagName: 'div', selector: null, text: '', pageUrl: 'x' },
+      image: null,
+    })
     expect(listener).not.toHaveBeenCalled()
   })
 })
@@ -92,38 +110,26 @@ describe('composer-insert TEXT channel (raw)', () => {
   })
 })
 
-describe('composer-insert IMAGE channel (#224 element picker)', () => {
+describe('composer-insert IMAGE channel (#226 standalone page screenshot)', () => {
   const img: ComposerInsertImage = {
     data: 'AAAA',
     mimeType: 'image/png',
-    name: 'picked-element.png',
+    name: 'page-screenshot.png',
     previewUrl: 'data:image/png;base64,AAAA',
   }
 
-  it('delivers an image payload to the Thread\'s subscriber, isolated from text/mention', () => {
+  it('delivers an image payload to the Thread\'s subscriber, isolated from the element channel', () => {
     const image = vi.fn()
-    const text = vi.fn()
+    const element = vi.fn()
     const offImage = subscribeComposerInsertImage('thread-a', image)
-    const offText = subscribeComposerInsertText('thread-a', text)
+    const offElement = subscribeComposerInsertElement('thread-a', element)
 
     emitComposerInsertImage('thread-a', img)
     expect(image).toHaveBeenCalledWith(img)
-    expect(text).not.toHaveBeenCalled() // separate channel
+    expect(element).not.toHaveBeenCalled() // separate channel
 
     offImage()
-    offText()
-  })
-
-  it('delivers only to the target Thread', () => {
-    const a = vi.fn()
-    const b = vi.fn()
-    const offA = subscribeComposerInsertImage('thread-a', a)
-    const offB = subscribeComposerInsertImage('thread-b', b)
-    emitComposerInsertImage('thread-a', img)
-    expect(a).toHaveBeenCalledWith(img)
-    expect(b).not.toHaveBeenCalled()
-    offA()
-    offB()
+    offElement()
   })
 
   it('is a no-op with no subscriber, and stops after unsubscribe', () => {
@@ -133,5 +139,47 @@ describe('composer-insert IMAGE channel (#224 element picker)', () => {
     off()
     emitComposerInsertImage('thread-a', img)
     expect(listener).not.toHaveBeenCalled()
+  })
+})
+
+describe('composer-insert ELEMENT channel — screenshot payload riding along', () => {
+  const img: ComposerInsertImage = {
+    data: 'AAAA',
+    mimeType: 'image/png',
+    name: 'element-button.png',
+    previewUrl: 'data:image/png;base64,AAAA',
+  }
+
+  it('delivers the screenshot inside the pick payload, isolated from the text channel', () => {
+    const element = vi.fn()
+    const text = vi.fn()
+    const offElement = subscribeComposerInsertElement('thread-a', element)
+    const offText = subscribeComposerInsertText('thread-a', text)
+
+    const payload: ComposerInsertElement = {
+      element: { tagName: 'button', selector: '#go', text: 'Go', pageUrl: 'http://localhost:3000/' },
+      image: img,
+    }
+    emitComposerInsertElement('thread-a', payload)
+    expect(element).toHaveBeenCalledWith(payload)
+    expect(text).not.toHaveBeenCalled() // separate channel
+
+    offElement()
+    offText()
+  })
+
+  it('delivers only to the target Thread', () => {
+    const a = vi.fn()
+    const b = vi.fn()
+    const offA = subscribeComposerInsertElement('thread-a', a)
+    const offB = subscribeComposerInsertElement('thread-b', b)
+    emitComposerInsertElement('thread-a', {
+      element: { tagName: 'div', selector: null, text: '', pageUrl: 'x' },
+      image: img,
+    })
+    expect(a).toHaveBeenCalled()
+    expect(b).not.toHaveBeenCalled()
+    offA()
+    offB()
   })
 })

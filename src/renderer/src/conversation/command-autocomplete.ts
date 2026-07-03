@@ -20,7 +20,7 @@ import type { AcpCommand } from './reducer'
  * The result of probing the composer value + caret for an active `/` trigger.
  * `active` gates the popover; `query` is the text after the `/` up to the caret
  * (lower-cased matching happens in `filterCommands`); `start` is the index of the
- * `/` so `applyCommand` knows where the token begins.
+ * `/` so `removeCommandToken` knows where the token begins.
  */
 export interface CommandTrigger {
   active: boolean
@@ -82,20 +82,13 @@ export interface CommandInsertion {
 }
 
 /**
- * Replace the `/query` token (from `start` up to `caret`) with `/<name> ` — a
- * trailing space so the user types the command's argument straight after — and
- * report the caret position just past that space. Text after the caret is kept, so
- * accepting mid-line splices the command in without eating what follows.
+ * Remove the `/query` token (from `start` up to `caret`) outright — the chip-accept
+ * transform (#229): the accepted skill becomes a pending-context chip BESIDE the text,
+ * so nothing is spliced in. Text after the caret is kept; the caret rests where the
+ * token began.
  */
-export function applyCommand(
-  value: string,
-  start: number,
-  caret: number,
-  name: string,
-): CommandInsertion {
-  const insert = `/${name} `
-  const nextValue = value.slice(0, start) + insert + value.slice(caret)
-  return { value: nextValue, caret: start + insert.length }
+export function removeCommandToken(value: string, start: number, caret: number): CommandInsertion {
+  return { value: value.slice(0, start) + value.slice(caret), caret: start }
 }
 
 /**

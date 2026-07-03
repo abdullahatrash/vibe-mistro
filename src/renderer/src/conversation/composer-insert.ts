@@ -1,11 +1,11 @@
 /**
- * A tiny module-level channel for the Files preview's "Insert @path into composer" action (#189,
+ * A tiny module-level channel for the Files preview's "Insert into composer" action (#189,
  * ADR-0013 decision 2). The preview lives in the side panel — a SIBLING of the conversation, not
  * a parent — so it can't reach the composer through props/context. Instead it EMITS an insert for
  * a Thread id here; the mounted `Conversation` for that Thread SUBSCRIBES (keyed by its own
- * `threadId`) and appends the plain-text `@path` to its draft (which stays in lockstep with the
- * #60 composer-draft store). Renderer-only, no IPC: the wire format is untouched — the agent
- * expands the plain-text `@path` itself server-side (ADR-0002; we add no client-side expansion).
+ * `threadId`) and stages the path as a pending-context FILE chip (#230), re-serialized to a
+ * plain-text `@path` mention at send. Renderer-only, no IPC: the wire format is untouched — the
+ * agent expands the plain-text `@path` itself server-side (ADR-0002; no client-side expansion).
  *
  * If no composer is mounted for the target Thread (e.g. the active Thread is a cold replay), the
  * emit is a harmless no-op — there is no subscriber to receive it. Reveal-in-Finder does not go
@@ -27,23 +27,78 @@ export interface ComposerInsertImage {
   previewUrl: string
 }
 
+/**
+ * A Browser Surface element pick to stage in a Thread's composer (#231): the picker's DOM
+ * metadata plus the optional cropped screenshot, delivered as ONE payload so the composer
+ * can pair the element chip to its staged image atomically (removing the chip removes the
+ * screenshot). The composer mints the chip/image ids.
+ */
+export interface ComposerInsertElement {
+  element: { tagName: string; selector: string | null; text: string; pageUrl: string }
+  image: ComposerInsertImage | null
+}
+
+type ElementListener = (payload: ComposerInsertElement) => void
+
 type ImageListener = (image: ComposerInsertImage) => void
 
 const listenersByThread = new Map<string, Set<InsertListener>>()
 const textListenersByThread = new Map<string, Set<InsertListener>>()
 const imageListenersByThread = new Map<string, Set<ImageListener>>()
+const elementListenersByThread = new Map<string, Set<ElementListener>>()
 
 /**
- * Append a plain-text `@path` reference to `draft`, keeping it space-separated: a trailing space
- * is added after the mention (so the next token starts clean), and a separating space is inserted
- * before it unless the draft is empty or already ends in whitespace. Pure — the composer computes
- * the next value with this, then writes state + persisted draft together.
+ * Subscribe a Thread's composer to STANDALONE image insert requests (#226 page
+ * screenshot): a plain image attachment with no structured pick behind it — element
+ * picks ride the element channel instead (#231), which pairs chip and screenshot.
+ * Returns an unsubscribe.
  */
-export function appendMention(draft: string, relativePath: string): string {
-  const mention = `@${relativePath}`
-  if (draft.length === 0) return `${mention} `
-  const separator = /\s$/.test(draft) ? '' : ' '
-  return `${draft}${separator}${mention} `
+export function subscribeComposerInsertImage(threadId: string, listener: ImageListener): () => void {
+  let set = imageListenersByThread.get(threadId)
+  if (!set) {
+    set = new Set()
+    imageListenersByThread.set(threadId, set)
+  }
+  set.add(listener)
+  return () => {
+    const current = imageListenersByThread.get(threadId)
+    if (!current) return
+    current.delete(listener)
+    if (current.size === 0) imageListenersByThread.delete(threadId)
+  }
+}
+
+/** Request the given Thread's composer stage `image`; a no-op if none is mounted. */
+export function emitComposerInsertImage(threadId: string, image: ComposerInsertImage): void {
+  const set = imageListenersByThread.get(threadId)
+  if (!set) return
+  for (const listener of set) listener(image)
+}
+
+/** Subscribe a Thread's composer to element-pick payloads (#231); returns an unsubscribe. */
+export function subscribeComposerInsertElement(
+  threadId: string,
+  listener: ElementListener,
+): () => void {
+  let set = elementListenersByThread.get(threadId)
+  if (!set) {
+    set = new Set()
+    elementListenersByThread.set(threadId, set)
+  }
+  set.add(listener)
+  return () => {
+    const current = elementListenersByThread.get(threadId)
+    if (!current) return
+    current.delete(listener)
+    if (current.size === 0) elementListenersByThread.delete(threadId)
+  }
+}
+
+/** Deliver a Browser Surface pick to the Thread's composer; a no-op if none is mounted. */
+export function emitComposerInsertElement(threadId: string, payload: ComposerInsertElement): void {
+  const set = elementListenersByThread.get(threadId)
+  if (!set) return
+  for (const listener of set) listener(payload)
 }
 
 /** Subscribe a Thread's composer to insert requests; returns an unsubscribe. */
@@ -71,8 +126,8 @@ export function emitComposerInsert(threadId: string, relativePath: string): void
 
 /**
  * Append RAW text to `draft` (the Terminal Surface's "Add to chat", ADR-0014 slice 4):
- * unlike {@link appendMention} there is no `@` prefix and no forced trailing space — the
- * selection is inserted verbatim. A newline separates it from prior draft content
+ * no `@` prefix, no chip, no forced trailing space — the selection is inserted verbatim
+ * (deliberately NOT a pending-context chip, #230). A newline separates it from prior draft content
  * (terminal selections are often multi-line), unless the draft is empty or already ends
  * in whitespace. Pure — the composer writes state + persisted draft together with the result.
  */
@@ -105,30 +160,3 @@ export function emitComposerInsertText(threadId: string, text: string): void {
   for (const listener of set) listener(text)
 }
 
-/**
- * Subscribe a Thread's composer to IMAGE insert requests (#224): the Browser Surface's
- * element picker stages a screenshot as a pending image through here — a side-panel
- * sibling reaching the composer, keyed by threadId, exactly like the text/@ channels.
- * Returns an unsubscribe.
- */
-export function subscribeComposerInsertImage(threadId: string, listener: ImageListener): () => void {
-  let set = imageListenersByThread.get(threadId)
-  if (!set) {
-    set = new Set()
-    imageListenersByThread.set(threadId, set)
-  }
-  set.add(listener)
-  return () => {
-    const current = imageListenersByThread.get(threadId)
-    if (!current) return
-    current.delete(listener)
-    if (current.size === 0) imageListenersByThread.delete(threadId)
-  }
-}
-
-/** Request the given Thread's composer stage `image`; a no-op if none is mounted. */
-export function emitComposerInsertImage(threadId: string, image: ComposerInsertImage): void {
-  const set = imageListenersByThread.get(threadId)
-  if (!set) return
-  for (const listener of set) listener(image)
-}

@@ -9,6 +9,7 @@ import {
 import { cn } from '../lib/utils'
 import { moveSelection } from './command-autocomplete'
 import { resolveAutocomplete, type ActiveTrigger, type Detection } from './autocomplete-machine'
+import type { PendingContext } from './pending-contexts'
 
 /**
  * One completion mechanism for the composer (quality-review slice 4a): the `/` command
@@ -36,8 +37,15 @@ export interface CompletionSource<Row = unknown> {
   rows(query: string): readonly Row[]
   /** A stable React key for a row. */
   rowKey(row: Row): string
-  /** Splice the accepted row over its `@`/`/` token; return the new value + caret. */
-  apply(value: string, start: number, caret: number, row: Row): { value: string; caret: number }
+  /** Splice the accepted row over its `@`/`/` token; return the new value + caret. A source
+   *  whose accept stages a pending-context CHIP (#229) instead of inline text removes the
+   *  token and returns the chip as `context` — the hook hands it to `onContext`. */
+  apply(
+    value: string,
+    start: number,
+    caret: number,
+    row: Row,
+  ): { value: string; caret: number; context?: PendingContext }
   /** Whether accepting this row CLOSES the popover. False re-derives the trigger to drill in
    *  (a directory reopens on its new fragment). */
   closeOnAccept(row: Row): boolean
@@ -80,6 +88,8 @@ export function useComposerAutocomplete(
   value: string,
   setValue: (next: string) => void,
   inputRef: RefObject<HTMLTextAreaElement | null>,
+  /** Receives the pending-context chip when an accepted row stages one (#229). */
+  onContext?: (context: PendingContext) => void,
 ): ComposerAutocomplete {
   const [trigger, setTrigger] = useState<ActiveTrigger | null>(null)
   const [index, setIndex] = useState(0)
@@ -132,6 +142,7 @@ export function useComposerAutocomplete(
     const caret = node ? node.selectionStart : value.length
     const next = source.apply(value, trigger.start, caret, row)
     setValue(next.value)
+    if (next.context) onContext?.(next.context)
     setIndex(0)
     if (source.closeOnAccept(row)) {
       dismissedRef.current[trigger.sourceIndex] = null

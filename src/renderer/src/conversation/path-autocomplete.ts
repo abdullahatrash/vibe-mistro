@@ -128,3 +128,13 @@ export function applyPath(
   const nextValue = value.slice(0, start) + insert + value.slice(caret)
   return { value: nextValue, caret: start + insert.length }
 }
+
+/**
+ * Remove the `@query` token (from `start` up to `caret`) outright — the chip-accept
+ * transform (#230): an accepted FILE becomes a pending-context chip beside the text
+ * (a directory still drills down in-text via {@link applyPath}). Text after the caret
+ * is kept; the caret rests where the token began.
+ */
+export function removePathToken(value: string, start: number, caret: number): PathInsertion {
+  return { value: value.slice(0, start) + value.slice(caret), caret: start }
+}

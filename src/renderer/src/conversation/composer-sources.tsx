@@ -1,8 +1,8 @@
 import { File, Folder } from 'lucide-react'
 import type { FileEntry } from '../../../shared/ipc'
 import type { AcpCommand } from './reducer'
-import { applyCommand, filterCommands, getCommandQuery } from './command-autocomplete'
-import { applyPath, filterPaths, getPathQuery } from './path-autocomplete'
+import { filterCommands, getCommandQuery, removeCommandToken } from './command-autocomplete'
+import { applyPath, filterPaths, getPathQuery, removePathToken } from './path-autocomplete'
 import type { CompletionSource } from './use-composer-autocomplete'
 
 /**
@@ -14,8 +14,10 @@ import type { CompletionSource } from './use-composer-autocomplete'
  */
 
 /**
- * The `/` slash-command source (#95): start-anchored, always closes on accept (a command
- * gets a trailing space, never re-derives). Rows show `/name` + an optional description.
+ * The `/` slash-command source (#95): start-anchored, always closes on accept. Accepting
+ * stages the skill as a pending-context CHIP (#229) — the trigger token is removed from
+ * the text and the chip rides back through `apply`'s `context`; the invocation is
+ * re-prepended to the wire text at send. Rows show `/name` + an optional description.
  */
 export function createCommandSource(commands: readonly AcpCommand[]): CompletionSource<AcpCommand> {
   return {
@@ -30,7 +32,10 @@ export function createCommandSource(commands: readonly AcpCommand[]): Completion
       return filterCommands(commands as AcpCommand[], query)
     },
     rowKey: (command) => command.name,
-    apply: (value, start, caret, command) => applyCommand(value, start, caret, command.name),
+    apply: (value, start, caret, command) => ({
+      ...removeCommandToken(value, start, caret),
+      context: { kind: 'skill', name: command.name, description: command.description },
+    }),
     closeOnAccept: () => true,
     renderRow: (command) => (
       <>
@@ -46,9 +51,11 @@ export function createCommandSource(commands: readonly AcpCommand[]): Completion
 }
 
 /**
- * The `@` file-path source (#190): mid-sentence, closes on a FILE (trailing space) but
- * REOPENS on a DIRECTORY (trailing slash) so completion drills into it. `onOpen` kicks the
- * lazy `files:list` fetch on first trigger. Rows show a dir/file icon + the relative path.
+ * The `@` file-path source (#190): mid-sentence. Accepting a FILE stages it as a
+ * pending-context CHIP (#230) — token removed, chip rides back through `apply`'s
+ * `context`, the `@path` mention re-serialized at send. Accepting a DIRECTORY keeps
+ * today's in-text drill-down (trailing slash re-derives the trigger into it). `onOpen`
+ * kicks the lazy `files:list` fetch on first trigger. Rows show a dir/file icon + path.
  */
 export function createPathSource({
   entries,
@@ -69,7 +76,10 @@ export function createPathSource({
       return filterPaths(entries, query)
     },
     rowKey: (entry) => entry.path,
-    apply: (value, start, caret, entry) => applyPath(value, start, caret, entry),
+    apply: (value, start, caret, entry) =>
+      entry.kind === 'directory'
+        ? applyPath(value, start, caret, entry)
+        : { ...removePathToken(value, start, caret), context: { kind: 'file', path: entry.path } },
     closeOnAccept: (entry) => entry.kind !== 'directory',
     onOpen: onFirstOpen,
     renderRow: (entry) => (

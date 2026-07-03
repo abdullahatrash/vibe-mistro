@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import {
-  applyCommand,
   filterCommands,
   getCommandQuery,
   matchInvokedCommand,
   moveSelection,
+  removeCommandToken,
 } from './command-autocomplete'
 import type { AcpCommand } from './reducer'
 
@@ -102,29 +102,6 @@ describe('filterCommands — prefix then substring, case-insensitive', () => {
   })
 })
 
-describe('applyCommand — insertion transform', () => {
-  it('replaces the `/query` token with `/<name> ` and places the caret after', () => {
-    expect(applyCommand('/re', 0, 3, 'rewind')).toEqual({ value: '/rewind ', caret: 8 })
-  })
-
-  it('expands a bare slash', () => {
-    expect(applyCommand('/', 0, 1, 'init')).toEqual({ value: '/init ', caret: 6 })
-  })
-
-  it('keeps text after the caret intact', () => {
-    // Accepting at the start line of a two-line draft keeps the second line.
-    const out = applyCommand('/re\nkeep', 0, 3, 'review')
-    expect(out.value).toBe('/review \nkeep')
-    expect(out.caret).toBe(8)
-  })
-
-  it('applies to a token that starts mid-value (a later line)', () => {
-    const out = applyCommand('hi\n/re', 3, 6, 'rewind')
-    expect(out.value).toBe('hi\n/rewind ')
-    expect(out.caret).toBe(11)
-  })
-})
-
 describe('moveSelection — wrapping', () => {
   it('advances within range', () => {
     expect(moveSelection(0, 3, 1)).toBe(1)
@@ -187,5 +164,19 @@ describe('matchInvokedCommand — sent-message skill/command detection', () => {
 
   it('splits the name on any whitespace, including a newline', () => {
     expect(matchInvokedCommand('/init\ndo it', COMMANDS)?.name).toBe('init')
+  })
+})
+
+describe('removeCommandToken — chip-accept transform (#229)', () => {
+  it('removes the `/query` token and rests the caret where it began', () => {
+    expect(removeCommandToken('/tea', 0, 4)).toEqual({ value: '', caret: 0 })
+  })
+
+  it('keeps text after the caret intact', () => {
+    expect(removeCommandToken('/re\nkeep', 0, 3)).toEqual({ value: '\nkeep', caret: 0 })
+  })
+
+  it('removes a token that starts mid-value (a later line)', () => {
+    expect(removeCommandToken('hi\n/re', 3, 6)).toEqual({ value: 'hi\n', caret: 3 })
   })
 })

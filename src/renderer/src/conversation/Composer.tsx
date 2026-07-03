@@ -8,7 +8,7 @@ import {
   type JSX,
   type KeyboardEvent,
 } from 'react'
-import { ArrowUp, Mic, Plus, Square, X } from 'lucide-react'
+import { ArrowUp, File, Mic, MousePointerClick, Plus, Sparkles, Square, X } from 'lucide-react'
 import type {
   FileEntry,
   ThreadConfigAxis,
@@ -23,19 +23,58 @@ import { Textarea } from '../ui/textarea'
 import type { AcpCommand } from './reducer'
 import { getDraft, setDraft as persistDraft, clearDraft } from './composer-draft-store'
 import {
-  appendMention,
   appendText,
   subscribeComposerInsert,
+  subscribeComposerInsertElement,
   subscribeComposerInsertImage,
   subscribeComposerInsertText,
 } from './composer-insert'
 import { ACCEPTED_IMAGE_TYPES, isAcceptedImageType, parseDataUrl } from './image-attach'
+import {
+  addContext,
+  contextKey,
+  removeContext,
+  serializeForSend,
+  type PendingContext,
+} from './pending-contexts'
 import { nextQueueId, type FollowUpQueue } from './follow-up-queue'
 import { useComposerAutocomplete, CompletionPopover } from './use-composer-autocomplete'
 import { createCommandSource, createPathSource } from './composer-sources'
 
-/** Process-local counter for unique pending-image ids (not Math.random/Date). */
+/** Process-local counters for unique pending-image / element-chip ids (not Math.random/Date). */
 let imageSeq = 0
+let elementSeq = 0
+
+/** A pending-context chip's visible label, per kind. */
+function chipLabel(context: PendingContext): string {
+  switch (context.kind) {
+    case 'skill':
+      return `/${context.name}`
+    case 'file':
+      return context.path
+    case 'element':
+      return context.selector ?? `<${context.tagName}>`
+  }
+}
+
+/** A pending-context chip's hover detail (`title`), per kind. */
+function chipTitle(context: PendingContext): string | undefined {
+  switch (context.kind) {
+    case 'skill':
+      return context.description
+    case 'file':
+      return context.path
+    case 'element':
+      return [
+        `<${context.tagName}>`,
+        context.selector ?? '',
+        context.text.trim(),
+        context.pageUrl,
+      ]
+        .filter((line) => line.length > 0)
+        .join('\n')
+  }
+}
 
 /** The picker's `accept` list — the accepted image mime types, comma-joined. */
 const IMAGE_ACCEPT = ACCEPTED_IMAGE_TYPES.join(',')
@@ -109,6 +148,10 @@ export function Composer({
   // this view remounts on a Thread switch (keyed by threadId), so the strip starts
   // empty per Thread. Kept on a failed send so the user can retry / switch model.
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
+  // Pending-context chips (#229): structured attachments staged BESIDE the draft
+  // text — a `/` accept stages a skill chip here instead of splicing text in. Same
+  // lifecycle as staged images: ephemeral, cleared on send/enqueue, kept on failure.
+  const [pendingContexts, setPendingContexts] = useState<PendingContext[]>([])
   const inputRef = useRef<HTMLTextAreaElement>(null)
   // The hidden file picker behind the 📎 button (#100).
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -153,20 +196,20 @@ export function Composer({
     [pathEntries],
   )
   const sources = useMemo(() => [commandSource, pathSource], [commandSource, pathSource])
-  const autocomplete = useComposerAutocomplete(sources, draft, writeDraft, inputRef)
+  const autocomplete = useComposerAutocomplete(sources, draft, writeDraft, inputRef, (context) =>
+    setPendingContexts((prev) => addContext(prev, context)),
+  )
 
-  // Insert `@path` from the Files preview's action (#189): the side panel is a sibling of
-  // this view, so it reaches the composer through the module-level `composer-insert` channel
-  // keyed by threadId. We append to the CURRENT persisted draft (kept in lockstep with
-  // `draft` state on every keystroke below), then write state + persisted draft together —
-  // the same write-through the textarea's onChange uses. Plain text only: the agent expands
-  // `@path` itself (ADR-0002).
+  // Insert from the Files preview's action (#189): the side panel is a sibling of this
+  // view, so it reaches the composer through the module-level `composer-insert` channel
+  // keyed by threadId. The path stages as a pending-context FILE chip (#230) — same as an
+  // `@` autocomplete accept — and is re-serialized to a plain-text `@path` mention at send
+  // (the agent expands it itself, ADR-0002).
   useEffect(() => {
     return subscribeComposerInsert(threadId, (relativePath) => {
-      writeDraft(appendMention(getDraft(window.localStorage, threadId), relativePath))
+      setPendingContexts((prev) => addContext(prev, { kind: 'file', path: relativePath }))
       inputRef.current?.focus()
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId])
 
   // Insert RAW text from the Terminal Surface's "Add to chat" (ADR-0014 slice 4): the
@@ -180,12 +223,30 @@ export function Composer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId])
 
-  // Stage an image from the Browser Surface's element picker (#224): the pre-split
-  // screenshot arrives through the module-level channel keyed by threadId (same sibling→
-  // composer path as text/@), so we just add an id — no FileReader, it's already a data URL.
+  // Stage a STANDALONE image from the Browser Surface (#226 page screenshot): a plain
+  // attachment with no structured pick behind it — arrives pre-split through the
+  // module-level channel keyed by threadId, so we just add an id.
   useEffect(() => {
     return subscribeComposerInsertImage(threadId, (image) => {
       setPendingImages((prev) => [...prev, { id: `img:${imageSeq++}`, ...image }])
+      inputRef.current?.focus()
+    })
+  }, [threadId])
+
+  // Stage a Browser Surface element pick (#224/#231): the ONE payload — element metadata
+  // + optional pre-split screenshot — arrives through the module-level channel keyed by
+  // threadId. The screenshot stages as a pending image; the element stages as a chip
+  // carrying that image's id, so removing the chip removes its screenshot with it.
+  useEffect(() => {
+    return subscribeComposerInsertElement(threadId, ({ element, image }) => {
+      let imageId: string | null = null
+      if (image) {
+        imageId = `img:${imageSeq++}`
+        setPendingImages((prev) => [...prev, { id: imageId as string, ...image }])
+      }
+      setPendingContexts((prev) =>
+        addContext(prev, { kind: 'element', id: `el:${elementSeq++}`, ...element, imageId }),
+      )
       inputRef.current?.focus()
     })
   }, [threadId])
@@ -239,7 +300,9 @@ export function Composer({
   // end); when idle we send immediately, preserving #100's clear-on-success /
   // keep-on-failure UX (a failed send keeps the text + staged images for retry).
   async function send(): Promise<void> {
-    const text = draft.trim()
+    // Flatten the staged context chips into the wire text (#229): the skill chip
+    // becomes the leading `/name` invocation the agent parses server-side.
+    const text = serializeForSend(draft, pendingContexts)
     const hasContent = text.length > 0 || pendingImages.length > 0
     if (!hasContent) return
     const images = pendingImages.map(({ data, mimeType, previewUrl }) => ({
@@ -256,6 +319,7 @@ export function Composer({
       setDraft('')
       clearDraft(window.localStorage, threadId)
       setPendingImages([])
+      setPendingContexts([])
       return
     }
     // Idle: send now, clearing the composer OPTIMISTICALLY — `submitPrompt` resolves
@@ -265,17 +329,23 @@ export function Composer({
     // the payload for retry (#100's keep-on-failure, e.g. switching to a vision model
     // after -31008) — unless the user started composing something new meanwhile.
     const staged = pendingImages
+    const stagedContexts = pendingContexts
+    const proseBefore = draft
     setPendingImages([])
+    setPendingContexts([])
     setDraft('')
     clearDraft(window.localStorage, threadId)
     const ok = await submitPrompt(text, images)
     if (!ok) {
+      // Restore the PRE-serialize prose + chips (not the flattened wire text), so a
+      // retry re-serializes cleanly instead of double-prepending the invocation.
       setDraft((current) => {
         if (current.length > 0) return current
-        persistDraft(window.localStorage, threadId, text)
-        return text
+        persistDraft(window.localStorage, threadId, proseBefore)
+        return proseBefore
       })
       setPendingImages((current) => (current.length > 0 ? current : staged))
+      setPendingContexts((current) => (current.length > 0 ? current : stagedContexts))
     }
   }
 
@@ -325,6 +395,46 @@ export function Composer({
                     <X className="size-3.5" aria-hidden />
                   </IconButton>
                 </div>
+              ))}
+            </div>
+          )}
+
+          {pendingContexts.length > 0 && (
+            // Pending-context chip row (#229/#230/#231): the structured attachments staged
+            // beside the draft — mirrors the sent-turn chips with a ✕ remove per chip.
+            // Removing an ELEMENT chip also removes its paired screenshot (one payload in,
+            // one gesture out); removing the thumbnail alone keeps the chip (screenshot is
+            // optional context, the pick isn't).
+            <div className="mb-3 flex flex-wrap gap-2">
+              {pendingContexts.map((context) => (
+                <span
+                  key={contextKey(context)}
+                  data-pending-context-chip
+                  title={chipTitle(context)}
+                  className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] py-0.5 pr-1 pl-1.5 font-mono text-xs leading-none text-accent-text"
+                >
+                  {context.kind === 'skill' ? (
+                    <Sparkles className="size-3 shrink-0" aria-hidden />
+                  ) : context.kind === 'file' ? (
+                    <File className="size-3 shrink-0" aria-hidden />
+                  ) : (
+                    <MousePointerClick className="size-3 shrink-0" aria-hidden />
+                  )}
+                  <span className="truncate">{chipLabel(context)}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${chipLabel(context)}`}
+                    onClick={() => {
+                      setPendingContexts((prev) => removeContext(prev, contextKey(context)))
+                      if (context.kind === 'element' && context.imageId) {
+                        removeImage(context.imageId)
+                      }
+                    }}
+                    className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-sm text-accent-text outline-none hover:bg-[var(--accent-tint-border)]"
+                  >
+                    <X className="size-3" aria-hidden />
+                  </button>
+                </span>
               ))}
             </div>
           )}
