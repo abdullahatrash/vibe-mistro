@@ -1,6 +1,6 @@
 import type { JSX } from 'react'
 import type { VibeDetectResult } from '../../../shared/ipc'
-import { INSTALL_DOCS_URL, INSTALL_HINT } from '../../../shared/install-guidance'
+import { INSTALL_COMMAND, INSTALL_DOCS_URL, INSTALL_HINT } from '../../../shared/install-guidance'
 import { Button } from '../ui/button'
 import { CodeText } from '../ui/code-text'
 import { Environment } from '../settings/Environment'
@@ -52,13 +52,40 @@ export function EmptyState({
     )
   }
   if (state === 'no-workspaces') {
+    // Same hero shape as the idle state below (logo + big headline, centered in
+    // the outlet) so first run doesn't look like an afterthought; the CLI
+    // install steps ride along in a quiet card for users who land here fresh.
     return (
-      <div className="flex max-w-[460px] flex-col items-start gap-3">
-        <div className="text-[15px] font-semibold text-text-strong">No workspaces yet</div>
-        <p className="hint">Open a project to spawn its agent and start a thread.</p>
-        <Button onClick={onOpenProject} disabled={opening}>
+      <div className="mx-auto flex h-full max-w-[830px] flex-col items-center justify-center gap-6 text-center">
+        <Logo size={52} />
+        <h1 className="text-[37px] font-semibold tracking-[-0.6px] text-text-strong">
+          Open a <span className="text-accent-emphasis">project</span> to begin
+        </h1>
+        <p className="hint">
+          Each project runs its own Mistral Vibe agent — open one to start your first thread.
+        </p>
+        <Button size="lg" onClick={onOpenProject} disabled={opening}>
           {opening ? 'Connecting…' : 'Open project'}
         </Button>
+        <div className="mt-2 w-full max-w-[440px] rounded-lg border border-border bg-surface px-4 py-3.5 text-left">
+          <div className="text-[13px] font-semibold text-text-strong">New to Mistral Vibe?</div>
+          <ol className="mt-2 flex flex-col gap-1.5 text-[13px] text-text-secondary">
+            <li>
+              1. Install the CLI: <CodeText text={`\`${INSTALL_COMMAND}\``} />
+            </li>
+            <li>
+              2. Run <CodeText text="`vibe`" /> once to sign in
+            </li>
+          </ol>
+          <a
+            className="mt-2 inline-block text-[12px] text-accent-text underline-offset-2 hover:underline"
+            href={INSTALL_DOCS_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Install guide
+          </a>
+        </div>
       </div>
     )
   }
