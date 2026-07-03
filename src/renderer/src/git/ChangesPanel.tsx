@@ -66,9 +66,12 @@ export function ChangesPanel({
   isActive,
   busy,
   onCollapse,
+  activeThreadId,
 }: {
   workspaceDir: string
   isActive: boolean
+  /** The active Thread — the review-comment chips' destination (#239); null = inert. */
+  activeThreadId: string | null
   /**
    * Whether this Workspace has a streaming turn (#86 concurrency guard). The agent can
    * run `git commit` itself as a tool-call mid-turn, so the v1 guard simply DISABLES the
@@ -335,6 +338,7 @@ export function ChangesPanel({
             files={view.files}
             initialPath={selectedPath}
             onBack={() => setSelectedPath(null)}
+            activeThreadId={activeThreadId}
           />
         </DiffWorkerProvider>
       </aside>
@@ -417,6 +421,7 @@ export function ChangesPanel({
             baseRef={diffScope.baseRef}
             onBaseRefChange={(baseRef) => updateDiffScope({ baseRef })}
             refreshKey={prRefreshKey}
+            activeThreadId={activeThreadId}
           />
         </DiffWorkerProvider>
       ) : view.files.length === 0 ? (

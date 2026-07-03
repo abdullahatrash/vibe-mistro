@@ -8,7 +8,7 @@ import {
   type JSX,
   type KeyboardEvent,
 } from 'react'
-import { ArrowUp, File, Mic, MousePointerClick, Plus, Sparkles, Square, X } from 'lucide-react'
+import { ArrowUp, File, Mic, MessageSquareText, MousePointerClick, Plus, Sparkles, Square, X } from 'lucide-react'
 import type {
   FileEntry,
   ThreadConfigAxis,
@@ -27,6 +27,7 @@ import {
   subscribeComposerInsert,
   subscribeComposerInsertElement,
   subscribeComposerInsertImage,
+  subscribeComposerInsertReviewComment,
   subscribeComposerInsertText,
 } from './composer-insert'
 import { ACCEPTED_IMAGE_TYPES, isAcceptedImageType, parseDataUrl } from './image-attach'
@@ -41,9 +42,18 @@ import { nextQueueId, type FollowUpQueue } from './follow-up-queue'
 import { useComposerAutocomplete, CompletionPopover } from './use-composer-autocomplete'
 import { createCommandSource, createPathSource } from './composer-sources'
 
-/** Process-local counters for unique pending-image / element-chip ids (not Math.random/Date). */
+/** Process-local counters for unique pending-image / element / review-chip ids (not Math.random/Date). */
 let imageSeq = 0
 let elementSeq = 0
+let reviewSeq = 0
+
+/** A review chip's compact line-range suffix, e.g. `:10-12` / `:7` — empty when unlocated. */
+function reviewRange(context: { startLine: number | null; endLine: number | null }): string {
+  if (context.startLine === null || context.endLine === null) return ''
+  return context.startLine === context.endLine
+    ? `:${context.startLine}`
+    : `:${context.startLine}-${context.endLine}`
+}
 
 /** A pending-context chip's visible label, per kind. */
 function chipLabel(context: PendingContext): string {
@@ -54,6 +64,8 @@ function chipLabel(context: PendingContext): string {
       return context.path
     case 'element':
       return context.selector ?? `<${context.tagName}>`
+    case 'review':
+      return `${context.filePath}${reviewRange(context)}`
   }
 }
 
@@ -73,6 +85,8 @@ function chipTitle(context: PendingContext): string | undefined {
       ]
         .filter((line) => line.length > 0)
         .join('\n')
+    case 'review':
+      return [`${context.filePath}${reviewRange(context)}`, context.note, '', context.excerpt].join('\n')
   }
 }
 
@@ -251,6 +265,17 @@ export function Composer({
     })
   }, [threadId])
 
+  // Stage a Review Surface diff comment (#239): file + located line range + note +
+  // verbatim diff excerpt arrive through the module-level channel keyed by threadId;
+  // each comment is its own removable chip, several accumulate into one prompt and
+  // flatten into a trailing <review_comments> block at send.
+  useEffect(() => {
+    return subscribeComposerInsertReviewComment(threadId, (comment) => {
+      setPendingContexts((prev) => addContext(prev, { kind: 'review', id: `rc:${reviewSeq++}`, ...comment }))
+      inputRef.current?.focus()
+    })
+  }, [threadId])
+
   // Read a pasted/picked image blob to a data URL (DOM: FileReader lives here, not
   // in the pure module), split it into bare base64 + mime via `parseDataUrl`, and
   // stage it. Non-accepted types are skipped up front so we don't read junk.
@@ -417,6 +442,8 @@ export function Composer({
                     <Sparkles className="size-3 shrink-0" aria-hidden />
                   ) : context.kind === 'file' ? (
                     <File className="size-3 shrink-0" aria-hidden />
+                  ) : context.kind === 'review' ? (
+                    <MessageSquareText className="size-3 shrink-0" aria-hidden />
                   ) : (
                     <MousePointerClick className="size-3 shrink-0" aria-hidden />
                   )}
