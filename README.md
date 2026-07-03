@@ -1,5 +1,7 @@
 # Vibe Mistro
 
+**[vibemistro.com](https://www.vibemistro.com)** · **[Download for macOS (Apple Silicon)](https://github.com/abdullahatrash/vibe-mistro/releases/latest/download/Vibe-Mistro-arm64.dmg)** · [Releases](https://github.com/abdullahatrash/vibe-mistro/releases)
+
 Vibe Mistro is a desktop app for running and orchestrating [Mistral Vibe](https://docs.mistral.ai/vibe/code/cli/install-setup) coding agents across your local projects. It drives Vibe's Agent Client Protocol (ACP) server, `vibe-acp`, and gives you a full GUI on top of it: parallel workspaces, persistent conversation threads, streamed tool calls and diffs, approval controls, and a set of side surfaces (git, terminal, files, skills) so you rarely have to leave the app.
 
 ## Features
@@ -26,9 +28,19 @@ Authentication is delegated entirely to Vibe: sign-in opens Mistral's browser fl
 > - Install the [Mistral Vibe CLI](https://docs.mistral.ai/vibe/code/cli/install-setup) so that `vibe` and `vibe-acp` are on your `PATH`
 > - Sign in — either from the CLI, or later from inside the app (it opens the browser sign-in flow for you)
 
+### Download (recommended)
+
+Grab the signed, notarized DMG for macOS on Apple Silicon:
+
+- from the website: **[vibemistro.com](https://www.vibemistro.com)**
+- or directly: **[Vibe-Mistro-arm64.dmg](https://github.com/abdullahatrash/vibe-mistro/releases/latest/download/Vibe-Mistro-arm64.dmg)** (always the latest release)
+
+The app keeps itself up to date: it downloads new releases in the background and applies them
+when you restart or quit.
+
 ### Run from source
 
-There are no packaged releases yet — run it from source with [Bun](https://bun.sh):
+Or run it from source with [Bun](https://bun.sh):
 
 ```bash
 git clone https://github.com/abdullahatrash/vibe-mistro.git
