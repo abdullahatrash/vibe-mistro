@@ -48,9 +48,15 @@ question that decides everything else is the EMBEDDING MECHANISM. Three candidat
    `nodeIntegrationInSubFrames=false`, NO preload. (t3code runs `contextIsolation=false` for
    their element-picker preload; we ship no guest preload, so isolation stays ON.)
    (c) Main's `will-attach-webview` clamp (`src/main/browser/webview-clamp.ts`, pure +
-   unit-tested): an attachment without a `persist:vibe-browser-` partition is REJECTED, and the
-   security prefs are force-overridden (preload stripped) regardless of what the renderer
-   declared — enabling `webviewTag: true` on the host window is compensated by this gate.
+   unit-tested): an attachment is REJECTED unless its partition matches the derived grammar
+   EXACTLY (`persist:vibe-browser-` + 8 hex — never a prefix test; `persist:` names map onto
+   storage directories, so an attacker-chosen suffix could alias another session) AND its
+   initial `src` is http(s)/about:blank (the URL policy re-enforced where a compromised
+   renderer can't reach). The FULL set of security prefs Electron consults is then
+   force-overridden — sandbox/contextIsolation/nodeIntegration(±SubFrames/Worker)/webSecurity/
+   allowRunningInsecureContent/experimentalFeatures/webviewTag, enableBlinkFeatures and any
+   preload stripped — regardless of what the renderer declared. Enabling `webviewTag: true`
+   on the host window is compensated by this gate.
 
 4. **Navigation is RENDERER-DRIVEN; main stays thin.** The component drives the element
    directly (`loadURL`/`goBack`/`reload`/DOM events). No per-navigation IPC, no main-side tab
@@ -61,9 +67,13 @@ question that decides everything else is the EMBEDDING MECHANISM. Three candidat
    `http://`, but only `http:`/`https:` results are blessed — `file:`/`javascript:`/custom
    schemes refuse rather than launder.
 
-5. **Guests never spawn windows.** On `did-attach-webview`, main installs a window-open handler
-   on the guest: deny everything, route http/https targets to the system browser via the
-   existing `safeExternalUrl` guard (the terminal-link posture — guest pages are untrusted).
+5. **Guests never spawn windows — and never leave http/https.** On `did-attach-webview`, main
+   installs a window-open handler on the guest (deny everything, route http/https targets to
+   the system browser via the existing `safeExternalUrl` guard — the terminal-link posture)
+   AND a `will-navigate` guard blocking page-initiated navigation to any non-http(s) scheme
+   (an external-protocol link in untrusted page content must not launch an OS handler). The
+   renderer's URL policy gates what the URL bar submits; these gates cover where the page
+   tries to go on its own.
 
 6. **Singleton per Workspace** (`browser:main`) this slice; the reserved `browser:${resourceId}`
    descriptor shape keeps multi-tab additive. The Electron/app UA tokens are stripped from the

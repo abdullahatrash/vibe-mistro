@@ -279,10 +279,9 @@ export function updateWorkspace(
 // --- Coercion + (de)serialization (defensive against corrupt / legacy blobs) ---
 
 /**
- * Coerce an untrusted descriptor into a valid `Surface`, or `null` to drop it. Only the
- * IMPLEMENTED singleton kinds are accepted this slice; a `file`/`terminal`/`browser`
- * blob (or anything unknown) is dropped rather than trusted — #189 extends this when the
- * `file` shape lands.
+ * Coerce an untrusted descriptor into a valid `Surface`, or `null` to drop it. Every
+ * implemented kind validates its full shape (id/resource conventions) — anything
+ * unknown or malformed is dropped rather than trusted.
  */
 export function coerceSurface(raw: unknown): Surface | null {
   if (typeof raw !== 'object' || raw === null) return null
@@ -308,6 +307,17 @@ export function coerceSurface(raw: unknown): Surface | null {
     const id = (raw as { id?: unknown }).id
     if (typeof resourceId === 'string' && /^term-\d+$/.test(resourceId) && id === `terminal:${resourceId}`) {
       return { id: `terminal:${resourceId}`, kind: 'terminal', resourceId }
+    }
+    return null
+  }
+  if (kind === 'browser') {
+    // A persisted browser tab restores its slot (the page itself is discarded on
+    // unmount — #217 adds URL persistence). Only the singleton shape exists this
+    // slice; drop anything else.
+    const resourceId = (raw as { resourceId?: unknown }).resourceId
+    const id = (raw as { id?: unknown }).id
+    if (resourceId === 'main' && id === 'browser:main') {
+      return { id: 'browser:main', kind: 'browser', resourceId: 'main' }
     }
     return null
   }

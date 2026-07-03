@@ -540,9 +540,9 @@ const CARDS: readonly CardDef[] = [
   {
     target: 'browser',
     label: 'Browser',
+    // No shortcut hint until #217 wires the ⌘T chord — advertised chrome must work.
     description: 'Preview a local dev server.',
     icon: <Globe aria-hidden />,
-    hint: '⌘T',
     live: true,
   },
   {

@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent, type JSX } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type JSX } from 'react'
 import { ArrowLeft, ArrowRight, RotateCw } from 'lucide-react'
 import { cn } from '../lib/utils'
 import {
@@ -21,7 +21,11 @@ import { normalizeBrowserUrl } from './browser-url'
  * `normalizeBrowserUrl` first — http/https only, schemes like `file:` refused.
  */
 export function BrowserSurface({ workspaceDir }: { workspaceDir: string }): JSX.Element {
-  const webviewRef = useRef<WebviewElement | null>(null)
+  // The mounted webview as STATE (not a ref): the `setView` setter is identity-stable,
+  // so React invokes the callback ref only on real mount/unmount — an inline-closure
+  // ref would re-fire per render and leak one listener pair each time.
+  const [view, setView] = useState<WebviewElement | null>(null)
+  const addressInputRef = useRef<HTMLInputElement | null>(null)
   // The first blessed URL becomes the webview's `src`; later submissions go through
   // `loadURL`. `null` = nothing loaded yet → the URL-entry empty state.
   const [initialUrl, setInitialUrl] = useState<string | null>(null)
@@ -38,25 +42,43 @@ export function BrowserSurface({ workspaceDir }: { workspaceDir: string }): JSX.
       setInitialUrl(url)
       return
     }
-    void webviewRef.current?.loadURL(url).catch(() => {
-      // A load interrupted by a newer navigation rejects — the did-navigate
-      // listener is the source of truth, nothing to do here.
+    void view?.loadURL(url).catch((err: unknown) => {
+      // A load superseded by a newer navigation rejects benignly, but so do real
+      // failures — log rather than swallow (#217 turns this into an unreachable state).
+      console.error('[browser] loadURL failed', url, err)
     })
   }
 
-  // The webview only exposes its state through DOM events — wire them via a callback
-  // ref (the element mounts late, only once a first URL exists).
-  function attachWebview(el: WebviewElement | null): void {
-    webviewRef.current = el
-    if (!el) return
+  // The webview only exposes its state through DOM events — wire them once per
+  // mounted element, unwiring on unmount/remount.
+  useEffect(() => {
+    if (!view) return
     const sync = (): void => {
-      setAddress(el.getURL())
-      setCanGoBack(el.canGoBack())
-      setCanGoForward(el.canGoForward())
+      // Never clobber an address the user is mid-typing: the guest can navigate
+      // (redirects, SPA pushState) while the bar has focus.
+      if (document.activeElement !== addressInputRef.current) setAddress(view.getURL())
+      setCanGoBack(view.canGoBack())
+      setCanGoForward(view.canGoForward())
     }
-    el.addEventListener('did-navigate', sync)
-    el.addEventListener('did-navigate-in-page', sync)
-  }
+    const logFailure = (event: Event): void => {
+      const { errorCode, errorDescription, validatedURL } = event as unknown as {
+        errorCode?: number
+        errorDescription?: string
+        validatedURL?: string
+      }
+      // -3 is Chromium's ERR_ABORTED — a superseded/cancelled load, not a failure.
+      if (errorCode === -3) return
+      console.error('[browser] load failed', validatedURL, errorCode, errorDescription)
+    }
+    view.addEventListener('did-navigate', sync)
+    view.addEventListener('did-navigate-in-page', sync)
+    view.addEventListener('did-fail-load', logFailure)
+    return () => {
+      view.removeEventListener('did-navigate', sync)
+      view.removeEventListener('did-navigate-in-page', sync)
+      view.removeEventListener('did-fail-load', logFailure)
+    }
+  }, [view])
 
   if (initialUrl === null) {
     return (
@@ -88,21 +110,18 @@ export function BrowserSurface({ workspaceDir }: { workspaceDir: string }): JSX.
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-panel">
       <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
-        <BrowserAction label="Back" onClick={() => webviewRef.current?.goBack()} disabled={!canGoBack}>
+        <BrowserAction label="Back" onClick={() => view?.goBack()} disabled={!canGoBack}>
           <ArrowLeft aria-hidden />
         </BrowserAction>
-        <BrowserAction
-          label="Forward"
-          onClick={() => webviewRef.current?.goForward()}
-          disabled={!canGoForward}
-        >
+        <BrowserAction label="Forward" onClick={() => view?.goForward()} disabled={!canGoForward}>
           <ArrowRight aria-hidden />
         </BrowserAction>
-        <BrowserAction label="Reload" onClick={() => webviewRef.current?.reload()}>
+        <BrowserAction label="Reload" onClick={() => view?.reload()}>
           <RotateCw aria-hidden />
         </BrowserAction>
         <form onSubmit={submitAddress} className="min-w-0 flex-1">
           <input
+            ref={addressInputRef}
             value={address}
             onChange={(e) => setAddress(e.target.value)}
             aria-label="Address"
@@ -119,7 +138,7 @@ export function BrowserSurface({ workspaceDir }: { workspaceDir: string }): JSX.
       {/* The guest page. `partition`/`webpreferences`/`useragent` must be set before
           attach and never change — main's clamp re-verifies them (webview-clamp.ts). */}
       <webview
-        ref={attachWebview}
+        ref={setView as (el: HTMLElement | null) => void}
         src={initialUrl}
         partition={deriveBrowserPartition(workspaceDir)}
         webpreferences={buildWebviewPreferencesAttribute()}

@@ -30,6 +30,16 @@ export function deriveBrowserPartition(workspaceDir: string): string {
 }
 
 /**
+ * Whether a partition is EXACTLY one this module derives — prefix + 8 hex chars, the
+ * full grammar, not a `startsWith`. Electron maps `persist:` names onto storage
+ * directories, so the clamp must never admit an attacker-chosen suffix (a
+ * traversal-shaped name could alias another session's storage).
+ */
+export function isBrowserPartition(partition: string): boolean {
+  return new RegExp(`^${BROWSER_PARTITION_PREFIX}[0-9a-f]{8}$`).test(partition)
+}
+
+/**
  * The `<webview webpreferences>` attribute value. Electron splits on `,` WITHOUT
  * trimming and treats non-boolean-literal values as truthy strings (the t3code
  * gotcha), so this is built as one exact, space-free string of `key=true|false`

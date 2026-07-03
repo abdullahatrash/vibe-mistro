@@ -3,6 +3,7 @@ import {
   BROWSER_PARTITION_PREFIX,
   buildWebviewPreferencesAttribute,
   deriveBrowserPartition,
+  isBrowserPartition,
   stripElectronUserAgent,
 } from './browser-guest'
 
@@ -21,6 +22,23 @@ describe('deriveBrowserPartition', () => {
     expect(deriveBrowserPartition('/Users/me/projects/app')).not.toBe(
       deriveBrowserPartition('/Users/me/projects/other'),
     )
+  })
+})
+
+describe('isBrowserPartition', () => {
+  it('accepts exactly what deriveBrowserPartition emits', () => {
+    expect(isBrowserPartition(deriveBrowserPartition('/Users/me/app'))).toBe(true)
+  })
+
+  it('rejects prefix-only matches with attacker-chosen suffixes (exact grammar, not startsWith)', () => {
+    // Electron maps `persist:` names onto storage directories — a traversal-shaped
+    // suffix must never pass just because the prefix does.
+    expect(isBrowserPartition(`${BROWSER_PARTITION_PREFIX}../../Partitions/other`)).toBe(false)
+    expect(isBrowserPartition(`${BROWSER_PARTITION_PREFIX}deadbeef/evil`)).toBe(false)
+    expect(isBrowserPartition(`${BROWSER_PARTITION_PREFIX}DEADBEEF`)).toBe(false)
+    expect(isBrowserPartition(`${BROWSER_PARTITION_PREFIX}deadbee`)).toBe(false)
+    expect(isBrowserPartition('persist:something-else')).toBe(false)
+    expect(isBrowserPartition('')).toBe(false)
   })
 })
 

@@ -27,4 +27,9 @@ describe('normalizeBrowserUrl', () => {
   it('trims surrounding whitespace before parsing', () => {
     expect(normalizeBrowserUrl('  localhost:3000  ')).toBe('http://localhost:3000/')
   })
+
+  it('treats host:port followed by a query or fragment as a URL, not a scheme', () => {
+    expect(normalizeBrowserUrl('localhost:5173?debug=1')).toBe('http://localhost:5173/?debug=1')
+    expect(normalizeBrowserUrl('localhost:3000#section')).toBe('http://localhost:3000/#section')
+  })
 })

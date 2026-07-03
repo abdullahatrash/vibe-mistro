@@ -608,9 +608,15 @@ function createWindow(): void {
 
   // The guest never spawns windows: popups/window.open are denied, with http/https
   // targets handed to the system browser (guest pages are untrusted content — the
-  // terminal-output-link posture, `safeExternalUrl`). In-page navigation is
-  // unaffected; the renderer's URL policy governs what the webview itself loads.
+  // terminal-output-link posture, `safeExternalUrl`). And the guest never LEAVES
+  // http/https either: page-initiated navigation to any other scheme (an
+  // external-protocol link like vscode://, a crafted redirect) is blocked main-side —
+  // the renderer's URL policy only gates what the URL bar submits, not where the
+  // page then tries to go.
   win.webContents.on('did-attach-webview', (_event, guest) => {
+    guest.on('will-navigate', (event, url) => {
+      if (!safeExternalUrl(url)) event.preventDefault()
+    })
     guest.setWindowOpenHandler(({ url }) => {
       const safe = safeExternalUrl(url)
       if (safe) void shell.openExternal(safe)

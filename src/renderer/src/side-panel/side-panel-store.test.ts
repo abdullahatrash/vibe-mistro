@@ -431,8 +431,18 @@ describe('coerceSurface', () => {
     expect(coerceSurface({ id: 'terminal:term-1', kind: 'terminal', resourceId: 'term-9' })).toBeNull() // id≠resource
   })
 
+  it('accepts the singleton browser tab and drops malformed browser blobs (#216)', () => {
+    expect(coerceSurface({ id: 'browser:main', kind: 'browser', resourceId: 'main' })).toEqual({
+      id: 'browser:main',
+      kind: 'browser',
+      resourceId: 'main',
+    })
+    expect(coerceSurface({ kind: 'browser' })).toBeNull() // no id/resource
+    expect(coerceSurface({ id: 'browser:evil', kind: 'browser', resourceId: 'evil' })).toBeNull() // not the singleton
+    expect(coerceSurface({ id: 'browser:main', kind: 'browser', resourceId: 'other' })).toBeNull() // id≠resource
+  })
+
   it('drops not-yet-implemented / unknown / malformed descriptors', () => {
-    expect(coerceSurface({ kind: 'browser' })).toBeNull()
     expect(coerceSurface({ kind: 'nope' })).toBeNull()
     expect(coerceSurface(null)).toBeNull()
     expect(coerceSurface('review')).toBeNull()
