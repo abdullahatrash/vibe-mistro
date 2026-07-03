@@ -19,6 +19,7 @@ import {
   openSurface,
   openTerminalSurface,
   terminalSurfaceCount,
+  toggleTerminalSurface,
   openWorkspaceFileSurface,
   openWorkspaceSurface,
   readPanelMap,
@@ -143,6 +144,47 @@ describe('openTerminalSurface (ADR-0014, slice 3 multi-terminal)', () => {
     for (let i = 0; i < MAX_TERMINALS_PER_WORKSPACE; i++) state = openTerminalSurface(state)
     expect(terminalSurfaceCount(state)).toBe(MAX_TERMINALS_PER_WORKSPACE)
     expect(openTerminalSurface(state)).toBe(state) // same ref — capped
+  })
+})
+
+describe('toggleTerminalSurface (header button / ⌘J semantics)', () => {
+  const T1: Surface = { id: 'terminal:term-1', kind: 'terminal', resourceId: 'term-1' }
+
+  it('spawns term-1 from a closed empty state (nothing to re-activate)', () => {
+    expect(toggleTerminalSurface(empty())).toEqual({
+      isOpen: true,
+      activeSurfaceId: 'terminal:term-1',
+      surfaces: [T1],
+    })
+  })
+
+  it('hides the panel when a terminal is the active tab', () => {
+    const open = toggleTerminalSurface(empty())
+    expect(toggleTerminalSurface(open)).toEqual({ ...open, isOpen: false })
+  })
+
+  it('re-shows the SAME terminal after a hide (never spawns a second)', () => {
+    const hidden = toggleTerminalSurface(toggleTerminalSurface(empty()))
+    expect(toggleTerminalSurface(hidden)).toEqual({
+      isOpen: true,
+      activeSurfaceId: 'terminal:term-1',
+      surfaces: [T1],
+    })
+  })
+
+  it('re-activates an existing terminal from another active tab (no new spawn)', () => {
+    const withReview = openSurface(toggleTerminalSurface(empty()), 'review') // review active
+    const toggled = toggleTerminalSurface(withReview)
+    expect(toggled.isOpen).toBe(true)
+    expect(toggled.activeSurfaceId).toBe('terminal:term-1')
+    expect(toggled.surfaces).toEqual([T1, REVIEW])
+  })
+
+  it('spawns a terminal when the panel is open on another tab with none open', () => {
+    const filesOnly = openSurface(empty(), 'files')
+    const toggled = toggleTerminalSurface(filesOnly)
+    expect(toggled.activeSurfaceId).toBe('terminal:term-1')
+    expect(toggled.surfaces.map((s) => s.kind)).toEqual(['files', 'terminal'])
   })
 })
 

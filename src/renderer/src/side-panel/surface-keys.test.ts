@@ -49,6 +49,19 @@ describe('surfaceForChord — ⌘T → Browser (#217)', () => {
   })
 })
 
+describe('surfaceForChord — ⌘J → Terminal', () => {
+  it('matches meta+j (either case)', () => {
+    expect(surfaceForChord(chord({ key: 'j', metaKey: true }))).toBe('terminal')
+    expect(surfaceForChord(chord({ key: 'J', metaKey: true }))).toBe('terminal')
+  })
+
+  it('does not match ⌃J, ⌘⇧J, or bare j', () => {
+    expect(surfaceForChord(chord({ key: 'j', ctrlKey: true }))).toBeNull()
+    expect(surfaceForChord(chord({ key: 'j', metaKey: true, shiftKey: true }))).toBeNull()
+    expect(surfaceForChord(chord({ key: 'j' }))).toBeNull()
+  })
+})
+
 describe('surfaceForChord — unbound chords', () => {
   it('ignores plain typing and unrelated keys', () => {
     expect(surfaceForChord(chord({ key: 'a' }))).toBeNull()

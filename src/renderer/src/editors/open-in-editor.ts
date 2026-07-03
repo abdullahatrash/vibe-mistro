@@ -34,8 +34,8 @@ export function openFailureMessage(reason: OpenFailureReason, editorLabel: strin
       return `${editorLabel} CLI not found on PATH`
     case 'spawn-failed':
       return `Couldn't launch ${editorLabel}`
-    case 'unknown-agent':
-      return 'Workspace agent is not connected'
+    case 'unknown-workspace':
+      return 'Project not found'
     case 'unknown-editor':
       return 'Unknown editor'
   }
