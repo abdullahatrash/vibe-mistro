@@ -16,6 +16,7 @@ import { gitChannels } from './git'
 import { ghChannels } from './gh'
 import { filesChannels } from './files'
 import { terminalChannels } from './terminal'
+import { browserChannels } from './browser'
 
 /**
  * The one typed channel map. ONE exported object — the channel names are the wire
@@ -30,6 +31,7 @@ export const IPC = {
   ...ghChannels,
   ...filesChannels,
   ...terminalChannels,
+  ...browserChannels,
 } as const
 
 export * from './core'
@@ -39,3 +41,4 @@ export * from './git'
 export * from './gh'
 export * from './files'
 export * from './terminal'
+export * from './browser'

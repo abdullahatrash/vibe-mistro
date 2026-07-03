@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import {
   IPC,
+  type DiscoverDevServersResult,
   type AcpEvent,
   type AgentEvictedEvent,
   type CancelTurnArgs,
@@ -130,6 +131,8 @@ const api = {
   filesList: (args: FilesListArgs): Promise<FilesListResult> => ipcRenderer.invoke(IPC.filesList, args),
   filesRead: (args: FilesReadArgs): Promise<FilesReadResult> => ipcRenderer.invoke(IPC.filesRead, args),
   openExternal: (args: OpenExternalArgs): Promise<void> => ipcRenderer.invoke(IPC.openExternal, args),
+  discoverDevServers: (): Promise<DiscoverDevServersResult> =>
+    ipcRenderer.invoke(IPC.discoverDevServers),
   terminalOpen: (args: TerminalOpenArgs): Promise<TerminalOpenResult> =>
     ipcRenderer.invoke(IPC.terminalOpen, args),
   terminalWrite: (args: TerminalWriteArgs): Promise<void> =>

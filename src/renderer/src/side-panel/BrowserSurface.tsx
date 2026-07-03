@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type FormEvent, type JSX } from 'react'
-import { ArrowLeft, ArrowRight, Code, ExternalLink, Loader2, RotateCw, TriangleAlert } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type JSX } from 'react'
+import { ArrowLeft, ArrowRight, Code, ExternalLink, Globe, Loader2, RefreshCw, RotateCw, TriangleAlert } from 'lucide-react'
+import type { DevServer } from '../../../shared/ipc'
 import { cn } from '../lib/utils'
 import {
   buildWebviewPreferencesAttribute,
@@ -155,32 +156,15 @@ export function BrowserSurface({
   const canGoBack = canGoBackNav(nav)
   const canGoForward = canGoForwardNav(nav)
 
-  if (initialUrl === null) {
-    return (
-      <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto bg-panel p-6">
-        <form onSubmit={submitAddress} className="w-full max-w-sm text-center">
-          <h3 className="text-sm font-medium text-text-strong">Preview a dev server</h3>
-          <p className="mt-1 text-xs leading-relaxed text-muted">
-            Enter the URL of a local dev server — or any http(s) page.
-          </p>
-          <input
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            aria-label="Address"
-            placeholder="localhost:5173"
-            autoFocus
-            spellCheck={false}
-            autoCapitalize="off"
-            autoCorrect="off"
-            className={cn(
-              'mt-4 w-full rounded-md border border-border bg-surface px-3 py-1.5 text-[13px] text-text',
-              'placeholder:text-faint focus:outline-none focus-visible:border-accent/60',
-            )}
-          />
-        </form>
-      </div>
-    )
+  // Open a blessed URL: from the empty state (first load) it seeds the webview src;
+  // once loaded, later opens go through loadURL.
+  function openUrl(url: string): void {
+    setAddress(url)
+    if (initialUrl === null) setInitialUrl(url)
+    else load_(url)
   }
+
+  if (initialUrl === null) return <BrowserEmptyState onOpenUrl={openUrl} />
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-panel">
@@ -240,6 +224,99 @@ export function BrowserSurface({
           className="size-full bg-white"
         />
         {load.status === 'failed' && <UnreachableOverlay url={load.url} onRetry={retry} />}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The empty state (no page loaded): a URL input plus one-click suggestions for local dev
+ * servers actually listening on the machine (#218). Discovery runs on mount and on an
+ * explicit Refresh — no polling. A chosen suggestion or a typed URL flows out through
+ * `onOpenUrl`, gated by the shared URL policy.
+ */
+function BrowserEmptyState({ onOpenUrl }: { onOpenUrl: (url: string) => void }): JSX.Element {
+  const [input, setInput] = useState('')
+  const [servers, setServers] = useState<DevServer[]>([])
+  const [scanning, setScanning] = useState(true)
+
+  const discover = useCallback(() => {
+    setScanning(true)
+    void window.api
+      .discoverDevServers()
+      .then((r) => setServers(r.servers))
+      .catch(() => setServers([]))
+      .finally(() => setScanning(false))
+  }, [])
+
+  useEffect(() => discover(), [discover])
+
+  function submit(e: FormEvent<HTMLFormElement>): void {
+    e.preventDefault()
+    const url = normalizeBrowserUrl(input)
+    if (url) onOpenUrl(url)
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto bg-panel p-6">
+      <div className="w-full max-w-sm text-center">
+        <h3 className="text-sm font-medium text-text-strong">Preview a dev server</h3>
+        <p className="mt-1 text-xs leading-relaxed text-muted">
+          Enter the URL of a local dev server — or any http(s) page.
+        </p>
+        <form onSubmit={submit}>
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            aria-label="Address"
+            placeholder="localhost:5173"
+            autoFocus
+            spellCheck={false}
+            autoCapitalize="off"
+            autoCorrect="off"
+            className={cn(
+              'mt-4 w-full rounded-md border border-border bg-surface px-3 py-1.5 text-[13px] text-text',
+              'placeholder:text-faint focus:outline-none focus-visible:border-accent/60',
+            )}
+          />
+        </form>
+        <div className="mt-5">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-faint">
+              Running locally
+            </span>
+            <button
+              type="button"
+              onClick={discover}
+              aria-label="Refresh dev servers"
+              title="Refresh"
+              className="flex size-5 items-center justify-center rounded text-muted outline-none transition-colors hover:bg-accent/10 hover:text-text-strong focus-visible:bg-accent/10 [&_svg]:size-3"
+            >
+              <RefreshCw aria-hidden className={scanning ? 'animate-spin' : undefined} />
+            </button>
+          </div>
+          {servers.length > 0 ? (
+            <ul className="flex flex-col gap-1">
+              {servers.map((server) => (
+                <li key={server.port}>
+                  <button
+                    type="button"
+                    onClick={() => onOpenUrl(server.url)}
+                    className="flex w-full items-center gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5 text-left text-xs outline-none transition-colors hover:bg-accent/10 focus-visible:border-accent/60 [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:text-muted"
+                  >
+                    <Globe aria-hidden />
+                    <span className="min-w-0 flex-1 truncate text-text">localhost:{server.port}</span>
+                    <span className="shrink-0 text-faint">{server.processName}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-faint">
+              {scanning ? 'Scanning…' : 'No dev servers detected.'}
+            </p>
+          )}
+        </div>
       </div>
     </div>
   )
