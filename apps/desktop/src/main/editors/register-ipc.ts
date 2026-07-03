@@ -5,7 +5,7 @@ import {
   type EditorsOpenArgs,
   type EditorsOpenResult,
 } from '../../shared/ipc'
-import type { MetadataStore } from '../persistence/metadata-store'
+import type { MetadataStoreApi } from '../persistence/metadata-store-api'
 import { getShellEnv } from '../shell-env'
 import { detectAvailableEditors } from './detect'
 import { launchEditor } from './launch'
@@ -19,7 +19,7 @@ import { launchEditor } from './launch'
  * path), so the affordance works for any selected Workspace — warm agent or not,
  * and it never keeps a warm agent alive past its idle window.
  */
-export function registerEditorsIpc(deps: { store: MetadataStore }): void {
+export function registerEditorsIpc(deps: { store: MetadataStoreApi }): void {
   // Session-lifetime detection cache: the installed-editor set doesn't change
   // mid-run, so the first probe's promise is shared by every later call (also
   // coalescing concurrent invokes). A probe FAILURE is not cached — the slot
