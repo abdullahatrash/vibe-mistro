@@ -324,8 +324,10 @@ export function parseTranscript(raw: string): TranscriptEntry[] {
   return entries
 }
 
-/** Shape-guard a parsed line to a known entry tag — drops foreign/garbled JSON. */
-function isTranscriptEntry(value: unknown): value is TranscriptEntry {
+/** Shape-guard a parsed line to a known entry tag — drops foreign/garbled JSON.
+ * Exported for the SQLite store (ADR-0019), which guards each row's payload the
+ * same way a JSONL line is guarded here. */
+export function isTranscriptEntry(value: unknown): value is TranscriptEntry {
   if (!value || typeof value !== 'object') return false
   const t = (value as { t?: unknown }).t
   return (

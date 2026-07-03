@@ -66,11 +66,12 @@ import {
   resolvePermissionEntry,
   sessionIdFromPayload,
   titleFromSessionInfoUpdate,
-  TranscriptStore,
   turnCompleteEntry,
   turnErrorEntry,
   userPromptEntry,
 } from './persistence/transcript'
+import type { TranscriptStoreApi } from './persistence/transcript-store-api'
+import { createTranscriptStore } from './persistence/create-transcript-store'
 import { TranscriptBridge } from './persistence/transcript-bridge'
 import { AttachmentStore } from './persistence/attachment-store'
 import { WorkspaceAgent, WorkspaceAgentError } from './workspace-agent'
@@ -361,7 +362,7 @@ let terminalManager: TerminalManager | null = null
  */
 interface MainDeps {
   store: MetadataStoreApi
-  transcript: TranscriptStore | null
+  transcript: TranscriptStoreApi | null
   bridge: TranscriptBridge
   /** Null when the attachments dir `mkdir` failed — image persistence no-ops (logged). */
   attachments: AttachmentStore | null
@@ -1309,22 +1310,18 @@ app.whenReady().then(async () => {
   // open/import — and performs the one-time `metadata.json` -> SQLite import
   // (renaming the legacy file to `.bak` on success). Never throws; a failed
   // load degrades to empty state INSIDE the store — see `MainDeps`.
-  const { store, engine } = await createMetadataStore({ userDataDir: app.getPath('userData') })
+  const { store, stateDb, engine } = await createMetadataStore({ userDataDir: app.getPath('userData') })
   await store.load()
   console.log(`[main] metadata store engine: ${engine}`)
 
-  // The per-Thread transcript dir (ADR-0005). `appendFile` won't create parent
-  // dirs, so ensure it exists once here; a failure leaves `transcript` null and
-  // teeing becomes a silent no-op inside the bridge (best-effort — the
-  // conversation is fine).
+  // The per-Thread transcript store (ADR-0005/0019). Its engine FOLLOWS the
+  // metadata store's (same `state.sqlite`, never split-brain) via the stateDb
+  // handle; the SQLite path runs the one-time JSONL import (dir renamed to
+  // `transcripts.bak` when fully handled), the legacy path keeps the mkdir —
+  // a failure leaves `transcript` null and teeing becomes a silent no-op
+  // inside the bridge (best-effort — the conversation is fine).
   const transcriptsDir = join(app.getPath('userData'), 'transcripts')
-  let transcript: TranscriptStore | null
-  try {
-    await mkdir(transcriptsDir, { recursive: true })
-    transcript = new TranscriptStore({ dir: transcriptsDir })
-  } catch {
-    transcript = null
-  }
+  const { transcript } = await createTranscriptStore({ stateDb, transcriptsDir })
 
   // The per-Thread prompt-image attachments dir (sibling of the transcripts —
   // the store mkdirs each Thread's subdir itself, but probe the root once here
