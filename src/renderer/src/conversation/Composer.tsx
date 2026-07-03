@@ -8,7 +8,7 @@ import {
   type JSX,
   type KeyboardEvent,
 } from 'react'
-import { ArrowUp, Mic, Plus, Square, X } from 'lucide-react'
+import { ArrowUp, Mic, Plus, Sparkles, Square, X } from 'lucide-react'
 import type {
   FileEntry,
   ThreadConfigAxis,
@@ -30,6 +30,13 @@ import {
   subscribeComposerInsertText,
 } from './composer-insert'
 import { ACCEPTED_IMAGE_TYPES, isAcceptedImageType, parseDataUrl } from './image-attach'
+import {
+  addContext,
+  contextKey,
+  removeContext,
+  serializeForSend,
+  type PendingContext,
+} from './pending-contexts'
 import { nextQueueId, type FollowUpQueue } from './follow-up-queue'
 import { useComposerAutocomplete, CompletionPopover } from './use-composer-autocomplete'
 import { createCommandSource, createPathSource } from './composer-sources'
@@ -109,6 +116,10 @@ export function Composer({
   // this view remounts on a Thread switch (keyed by threadId), so the strip starts
   // empty per Thread. Kept on a failed send so the user can retry / switch model.
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
+  // Pending-context chips (#229): structured attachments staged BESIDE the draft
+  // text — a `/` accept stages a skill chip here instead of splicing text in. Same
+  // lifecycle as staged images: ephemeral, cleared on send/enqueue, kept on failure.
+  const [pendingContexts, setPendingContexts] = useState<PendingContext[]>([])
   const inputRef = useRef<HTMLTextAreaElement>(null)
   // The hidden file picker behind the 📎 button (#100).
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -153,7 +164,9 @@ export function Composer({
     [pathEntries],
   )
   const sources = useMemo(() => [commandSource, pathSource], [commandSource, pathSource])
-  const autocomplete = useComposerAutocomplete(sources, draft, writeDraft, inputRef)
+  const autocomplete = useComposerAutocomplete(sources, draft, writeDraft, inputRef, (context) =>
+    setPendingContexts((prev) => addContext(prev, context)),
+  )
 
   // Insert `@path` from the Files preview's action (#189): the side panel is a sibling of
   // this view, so it reaches the composer through the module-level `composer-insert` channel
@@ -239,7 +252,9 @@ export function Composer({
   // end); when idle we send immediately, preserving #100's clear-on-success /
   // keep-on-failure UX (a failed send keeps the text + staged images for retry).
   async function send(): Promise<void> {
-    const text = draft.trim()
+    // Flatten the staged context chips into the wire text (#229): the skill chip
+    // becomes the leading `/name` invocation the agent parses server-side.
+    const text = serializeForSend(draft, pendingContexts)
     const hasContent = text.length > 0 || pendingImages.length > 0
     if (!hasContent) return
     const images = pendingImages.map(({ data, mimeType, previewUrl }) => ({
@@ -256,6 +271,7 @@ export function Composer({
       setDraft('')
       clearDraft(window.localStorage, threadId)
       setPendingImages([])
+      setPendingContexts([])
       return
     }
     // Idle: send now, clearing the composer OPTIMISTICALLY — `submitPrompt` resolves
@@ -265,17 +281,23 @@ export function Composer({
     // the payload for retry (#100's keep-on-failure, e.g. switching to a vision model
     // after -31008) — unless the user started composing something new meanwhile.
     const staged = pendingImages
+    const stagedContexts = pendingContexts
+    const proseBefore = draft
     setPendingImages([])
+    setPendingContexts([])
     setDraft('')
     clearDraft(window.localStorage, threadId)
     const ok = await submitPrompt(text, images)
     if (!ok) {
+      // Restore the PRE-serialize prose + chips (not the flattened wire text), so a
+      // retry re-serializes cleanly instead of double-prepending the invocation.
       setDraft((current) => {
         if (current.length > 0) return current
-        persistDraft(window.localStorage, threadId, text)
-        return text
+        persistDraft(window.localStorage, threadId, proseBefore)
+        return proseBefore
       })
       setPendingImages((current) => (current.length > 0 ? current : staged))
+      setPendingContexts((current) => (current.length > 0 ? current : stagedContexts))
     }
   }
 
@@ -325,6 +347,33 @@ export function Composer({
                     <X className="size-3.5" aria-hidden />
                   </IconButton>
                 </div>
+              ))}
+            </div>
+          )}
+
+          {pendingContexts.length > 0 && (
+            // Pending-context chip row (#229): the structured attachments staged beside
+            // the draft — mirrors the sent-turn invocation chip (PR #213) with a ✕ remove.
+            <div className="mb-3 flex flex-wrap gap-2">
+              {pendingContexts.map((context) => (
+                <span
+                  key={contextKey(context)}
+                  data-pending-context-chip
+                  title={context.description}
+                  className="inline-flex items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] py-0.5 pr-1 pl-1.5 font-mono text-xs leading-none text-accent-text"
+                >
+                  <Sparkles className="size-3 shrink-0" aria-hidden />/{context.name}
+                  <button
+                    type="button"
+                    aria-label={`Remove /${context.name}`}
+                    onClick={() =>
+                      setPendingContexts((prev) => removeContext(prev, contextKey(context)))
+                    }
+                    className="inline-flex size-3.5 items-center justify-center rounded-sm text-accent-text outline-none hover:bg-[var(--accent-tint-border)]"
+                  >
+                    <X className="size-3" aria-hidden />
+                  </button>
+                </span>
               ))}
             </div>
           )}
