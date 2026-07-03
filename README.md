@@ -1,61 +1,72 @@
 # Vibe Mistro
 
-A desktop app for orchestrating multiple [Mistral Vibe](https://docs.mistral.ai/vibe/code/cli/install-setup) coding agents across local workspaces — inspired by [CodexMonitor](https://github.com/Dimillian/CodexMonitor), but built on **Electron + TypeScript + Bun** and driven by Vibe's **Agent Client Protocol (ACP)** server (`vibe-acp`) instead of Codex.
+Vibe Mistro is a desktop app for running and orchestrating [Mistral Vibe](https://docs.mistral.ai/vibe/code/cli/install-setup) coding agents across your local projects. It drives Vibe's Agent Client Protocol (ACP) server, `vibe-acp`, and gives you a full GUI on top of it: parallel workspaces, persistent conversation threads, streamed tool calls and diffs, approval controls, and a set of side surfaces (git, terminal, files, skills) so you rarely have to leave the app.
 
-> Status: early scaffold. Thin vertical slice (environment detection + ACP transport) in place; features are being ported from CodexMonitor one at a time.
+## Features
 
-## Architecture
+- **Workspaces & threads** — open any local project, run one warm agent per workspace, and keep many named conversation threads per project. Threads persist across restarts and resume where you left off.
+- **Live conversation view** — streamed reasoning, tool calls, edit diffs, and rich markdown rendering, with search (⌘K) across thread titles and transcripts and jump-to-message.
+- **Agent controls** — per-thread approval mode (default / plan / accept-edits / auto-approve / chat), model picker, and reasoning effort, all sticky per thread.
+- **Permission requests** — when the agent wants to do something sensitive mid-turn, you approve or deny it inline.
+- **Composer** — `/` slash-command autocomplete, image attachments, long-paste chips, and a follow-up queue with interrupt (Stop) support.
+- **Git panel** — working-tree status, diffs, staging, commits, branch management, revert, and GitHub pull-request surfacing.
+- **Terminal dock** — a multi-tab shell running in your workspace (⌘J).
+- **Files & skills browsers** — browse workspace files with previews, and inspect the agent skills available to Vibe (with in-app SKILL.md preview).
+- **Open in IDE** — jump from the app straight into your editor.
+- **Settings** — environment detection plus an update check for the Vibe CLI.
 
+Authentication is delegated entirely to Vibe: sign-in opens Mistral's browser flow, and no credentials are ever stored by the app.
+
+## Installation
+
+> [!WARNING]
+> Vibe Mistro requires the Mistral Vibe CLI.
+> Install and authenticate it before use:
+>
+> - Install the [Mistral Vibe CLI](https://docs.mistral.ai/vibe/code/cli/install-setup) so that `vibe` and `vibe-acp` are on your `PATH`
+> - Sign in — either from the CLI, or later from inside the app (it opens the browser sign-in flow for you)
+
+### Run from source
+
+There are no packaged releases yet — run it from source with [Bun](https://bun.sh):
+
+```bash
+git clone https://github.com/abdullahatrash/vibe-mistro.git
+cd vibe-mistro
+bun install
+bun run dev
 ```
-┌─────────────────────────────┐
-│ Renderer (React + TS)       │   UI: sidebar, threads, conversation, diffs
-│  src/renderer               │
-└──────────────┬──────────────┘
-               │ contextBridge IPC (src/preload)
-┌──────────────┴──────────────┐
-│ Main process (Electron)     │   Orchestrator (CodexMonitor's Rust/Tauri role)
-│  src/main                   │
-│   ├─ vibe-detect.ts         │   locate `vibe` / `vibe-acp` on PATH
-│   └─ acp/client.ts          │   JSON-RPC 2.0 over stdio ↔ vibe-acp
-└──────────────┬──────────────┘
-               │ spawn + stdin/stdout
-        ┌──────┴──────┐
-        │  vibe-acp   │  one process per workspace
-        └─────────────┘
-```
 
-`vibe-acp` is Vibe's ACP server: it speaks **JSON-RPC 2.0 over stdin/stdout**, the same
-transport editors like Zed use. That is the equivalent of Codex's `app-server` protocol
-and is what makes a GUI orchestrator possible.
+## Some notes
 
-## Requirements
+This is a beta. Expect rough edges.
 
-- [Bun](https://bun.sh) (package manager + tooling)
-- Node.js (Electron bundles its own; nvm-managed Node is used for native install steps)
-- [Mistral Vibe CLI](https://docs.mistral.ai/vibe/code/cli/install-setup) — `vibe` and `vibe-acp` on `PATH`
+There is no public docs site yet — see the markdown files in [docs](./docs).
 
-## Develop
+## Documentation
+
+- [Docs index](./docs/README.md)
+- [Architecture decisions (ADRs)](./docs/adr)
+- [Domain glossary](./CONTEXT.md)
+- [Conventions](./docs/conventions.md)
+
+## Contributing
 
 ```bash
 bun install
-bun run dev        # launch Electron + Vite dev server
-bun run typecheck  # type-check main + renderer
-bun run build      # production build
+bun run dev         # launch Electron + Vite dev server
+bun run typecheck   # type-check main + renderer
+bun run lint        # eslint
+bun run test        # vitest
+bun run build       # production build
 ```
 
-## Roadmap (porting CodexMonitor feature-by-feature)
+Before opening a PR, make sure all four gates pass:
 
-- [x] Project scaffold (Electron + Vite + React + TS, Bun-managed)
-- [x] Environment detection (`vibe` / `vibe-acp`)
-- [x] ACP stdio transport (JSON-RPC framing + correlation)
-- [ ] ACP handshake: `initialize` → `session/new` → `session/prompt`
-- [ ] Conversation view: stream reasoning / tool calls / diffs
-- [ ] Tool-call approval prompts (plan / accept-edits / auto-approve)
-- [ ] Workspaces sidebar + persistence
-- [ ] Multiple concurrent agents / threads, resume sessions
-- [ ] Git + GitHub (`gh`) panel
-- [ ] File tree, prompt library, settings
+```bash
+bun run lint && bun run typecheck && bun run build && bun run test
+```
 
 ## License
 
-MIT
+[MIT](./LICENSE)
