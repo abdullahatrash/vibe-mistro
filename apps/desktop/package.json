@@ -48,7 +48,7 @@
     "@xterm/xterm": "^6.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "electron": "^33.2.1",
+    "electron": "^42.5.2",
     "electron-builder": "26.8.1",
     "electron-vite": "^2.3.0",
     "eslint": "10.6.0",
