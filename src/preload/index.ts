@@ -45,6 +45,7 @@ import {
   type OpenThreadArgs,
   type SendPromptArgs,
   type SendPromptResult,
+  type AccountWhoamiResult,
   type CheckAuthStatusArgs,
   type CheckAuthStatusResult,
   type SetThreadConfigArgs,
@@ -95,6 +96,7 @@ const api = {
   signOut: (args: SignOutArgs): Promise<SignOutResult> => ipcRenderer.invoke(IPC.signOut, args),
   checkAuthStatus: (args: CheckAuthStatusArgs): Promise<CheckAuthStatusResult> =>
     ipcRenderer.invoke(IPC.checkAuthStatus, args),
+  accountWhoami: (): Promise<AccountWhoamiResult> => ipcRenderer.invoke(IPC.accountWhoami),
   stopAgent: (agentId: string): Promise<void> => ipcRenderer.invoke(IPC.stopAgent, agentId),
   setActiveAgent: (agentId: string | null): Promise<void> =>
     ipcRenderer.invoke(IPC.setActiveAgent, agentId),

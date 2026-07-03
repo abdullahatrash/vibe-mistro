@@ -12,6 +12,8 @@ export const authChannels = {
   signOut: 'auth:sign-out',
   /** Re-query an agent's `_auth/status` without re-running sign-in (#79). */
   checkAuthStatus: 'auth:check-status',
+  /** Fetch the signed-in account's plan from Mistral's console whoami endpoint. */
+  accountWhoami: 'auth:account-whoami',
 } as const
 
 /**
@@ -90,3 +92,25 @@ export interface CheckAuthStatusArgs {
 export type CheckAuthStatusResult =
   | { ok: true; authState: AuthState; signOutAvailable: boolean }
   | { ok: false; error: string }
+
+/**
+ * The plan tier Vibe's console `whoami` endpoint reports for the stored API key
+ * (ADR-0003 amendment). This is the CEILING of account identity Vibe exposes —
+ * there is no email/name/user-id anywhere in its surfaces, only the plan.
+ * `planType` mirrors Vibe's `WhoAmIPlanType`; `planName` is the raw server
+ * string (e.g. `FREE`, `INDIVIDUAL`) — the renderer derives display labels.
+ */
+export interface AccountPlan {
+  planType: 'API' | 'CHAT' | 'MISTRAL_CODE' | 'UNKNOWN' | 'UNAUTHORIZED'
+  planName: string
+}
+
+/**
+ * Result of an account-plan fetch. All failures are non-fatal display gaps, but
+ * the renderer distinguishes them: `no-key` = nothing stored (signed out
+ * everywhere), `unauthorized` = a stored key the server rejected, `error` =
+ * network/parse trouble (key state unknown).
+ */
+export type AccountWhoamiResult =
+  | { ok: true; plan: AccountPlan }
+  | { ok: false; reason: 'no-key' | 'unauthorized' | 'error'; error: string }

@@ -2,6 +2,8 @@ import { useReducer, type JSX } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import type { AuthMethod, VibeDetectResult } from '../../../shared/ipc'
 import { authReducer, selectAuthView, signedInAuthViewState } from '../auth/auth-view'
+import { planLabel } from '../auth/plan-label'
+import { useAccountPlan } from '../auth/use-account-plan'
 import { Button } from '../ui/button'
 import { IconButton } from '../ui/icon-button'
 import { Environment } from './Environment'
@@ -84,6 +86,9 @@ function AccountSettings({
     signedInAuthViewState(account?.authMethods ?? [], account?.signOutAvailable ?? false),
   )
   const view = selectAuthView(state)
+  // The plan tier from console whoami (ADR-0003 amendment) — the ceiling of what
+  // Vibe exposes about the account (no email/name exists). Best-effort: null hides it.
+  const plan = planLabel(useAccountPlan())
 
   async function signOut(): Promise<void> {
     if (!account) return
@@ -116,6 +121,7 @@ function AccountSettings({
         {view.kind === 'signed-in' && view.identity && (
           <span className="text-muted">{view.identity}</span>
         )}
+        {!signingOut && plan && <span className="text-muted">{plan}</span>}
         <span className="flex-1" />
         {view.kind === 'signed-in' && view.signOutAvailable && (
           <Button variant="outline" size="sm" onClick={() => void signOut()}>

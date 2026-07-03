@@ -20,6 +20,9 @@ export default tseslint.config(
       'coverage/**',
       '**/*.gen.*',
       '*.tsbuildinfo',
+      // Agent worktrees are full repo copies — linting them double-reports and
+      // confuses the typed parser with multiple candidate tsconfig roots.
+      '.claude/worktrees/**',
     ],
   },
 

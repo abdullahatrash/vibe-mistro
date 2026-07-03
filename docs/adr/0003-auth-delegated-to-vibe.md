@@ -33,3 +33,24 @@ This is the auth-specific application of ADR-0002's thin-orchestrator stance: ag
   shapes in `docs/acp-capture.md` §8 and re-verify on Vibe upgrades.
 - BYOK (a `MISTRAL_API_KEY` env var or `~/.vibe/.env`) authenticates without our sign-in flow; we treat
   any `authenticated: true` from `auth/status` as signed in regardless of `authState`.
+
+## Amendment (2026-07-03): read-only credential access for plan display
+
+The sidebar account chip and Settings Account section show the account's **plan tier** (e.g. "Pro").
+Vibe cannot supply it over ACP — its sign-in ends with a bare `MISTRAL_API_KEY` and `_auth/status`
+reports only `{authenticated, authState, signOutAvailable}`; the plan lives behind Mistral's console
+`GET /api/vibe/whoami`, which Vibe's own TUI calls directly with the key as a Bearer token. There is
+no email/name/user-id anywhere in Vibe's surfaces — plan is the ceiling of account identity.
+
+So main (`src/main/auth/whoami.ts`, the `auth:account-whoami` IPC) **reads** the key exactly where
+Vibe keeps it — resolved shell env → `$VIBE_HOME/.env` → OS keychain (`ai.mistral.vibe`), the same
+active-credential precedence as Vibe's `assess_auth_state` — and makes that one whoami request.
+
+Boundaries that keep the original decision intact:
+
+- **Read-only, transient.** The key is never persisted, logged, or sent over IPC/to the renderer;
+  only the parsed `{planType, planName}` crosses the bridge. Vibe still owns storage and rotation.
+- **Display-only.** Failures (no key, rejected key, network) are typed results the UI silently
+  degrades on — never an auth gate. Sign-in/out remain exclusively Vibe's ACP methods.
+- The whoami endpoint is unversioned console surface; treat it like the `_auth/*` extensions —
+  pinned against Vibe's `http_whoami_gateway.py` and re-verified on Vibe upgrades.

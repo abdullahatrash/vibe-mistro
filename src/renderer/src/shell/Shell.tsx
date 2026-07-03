@@ -11,6 +11,8 @@ import {
   setSidebarWidth,
 } from './sidebar-width-store'
 import { cn } from '../lib/utils'
+import { planLabel } from '../auth/plan-label'
+import { useAccountPlan } from '../auth/use-account-plan'
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '../ui/menu'
 import { NavItem } from '../ui/nav-item'
 import { Logo } from './logo'
@@ -257,17 +259,20 @@ function PlaceholderNav({ icon, children }: { icon: JSX.Element; children: React
 
 /**
  * The account chip pinned to the sidebar's bottom — a gradient avatar + a name + a
- * tier, now the TRIGGER of an account dropdown (#130). The chip's chrome stays a
- * STATIC placeholder (#future): Vibe exposes no account identity (see ADR-0003 / the
- * Settings Account section), so the avatar/name/tier are fixed strings, not live data. The menu
- * holds a real "Settings" item (→ the routed Settings page that now hosts the env/CLI
- * status the sidebar gear used to toggle) plus room for future account actions.
+ * tier, the TRIGGER of an account dropdown (#130). The tier line is LIVE: the plan
+ * from console whoami (ADR-0003 amendment), rendered as "Mistral Vibe · <plan>" when
+ * known. The name stays a static placeholder — plan is the CEILING of account
+ * identity Vibe exposes (no email/name anywhere in its surfaces), so a real name
+ * can never render here. The menu holds a real "Settings" item (→ the routed
+ * Settings page that now hosts the env/CLI status the sidebar gear used to toggle)
+ * plus room for future account actions.
  */
 function AccountChip({ onOpenSettings }: { onOpenSettings: () => void }): JSX.Element {
+  const plan = planLabel(useAccountPlan())
   return (
     <Menu>
       <MenuTrigger className="flex items-center gap-2.5 rounded-[9px] px-2 py-2 text-left outline-none transition-colors hover:bg-accent/10 focus-visible:bg-accent/10 data-[popup-open]:bg-accent/10">
-        {/* placeholder — account identity + tier (#future); no live account API exists yet. */}
+        {/* static avatar/name — Vibe exposes no identity to fill them with (ADR-0003). */}
         <span
           aria-hidden
           className="flex size-8 shrink-0 items-center justify-center rounded-md text-sm font-semibold text-white"
@@ -277,7 +282,9 @@ function AccountChip({ onOpenSettings }: { onOpenSettings: () => void }): JSX.El
         </span>
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-[14px] font-semibold text-text-strong">Your account</span>
-          <span className="truncate text-[12px] text-faint">Mistral Vibe</span>
+          <span className="truncate text-[12px] text-faint">
+            {plan ? `Mistral Vibe · ${plan}` : 'Mistral Vibe'}
+          </span>
         </span>
         <ChevronDown className="size-4 shrink-0 text-muted" aria-hidden />
       </MenuTrigger>
@@ -286,8 +293,7 @@ function AccountChip({ onOpenSettings }: { onOpenSettings: () => void }): JSX.El
           <Settings className="size-3.5" aria-hidden />
           Settings
         </MenuItem>
-        {/* room for future account actions (profile, sign-out, tier) — #future;
-            no live account API exists yet (ADR-0003). */}
+        {/* room for future account actions (sign-out shortcut, plan upgrade) — #future. */}
       </MenuContent>
     </Menu>
   )

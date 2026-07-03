@@ -17,6 +17,7 @@ import {
   type RespondPermissionArgs,
   type SendPromptArgs,
   type SendPromptResult,
+  type AccountWhoamiResult,
   type CheckAuthStatusArgs,
   type CheckAuthStatusResult,
   type SetThreadConfigArgs,
@@ -37,6 +38,7 @@ import {
 } from '../shared/ipc'
 import { detectVibe } from './vibe-detect'
 import { getShellEnv } from './shell-env'
+import { getAccountWhoami, readKeychainApiKey, readVibeEnvFile } from './auth/whoami'
 import { groupThreadsByWorkspace, MetadataStore } from './persistence/metadata-store'
 import {
   acpEventEntry,
@@ -886,6 +888,24 @@ function registerIpc(deps: MainDeps): void {
       }
     },
   )
+
+  ipcMain.handle(IPC.accountWhoami, async (): Promise<AccountWhoamiResult> => {
+    // Plan display for the account chip (ADR-0003 amendment): read the key from
+    // Vibe's stores and ask console whoami for the plan tier. No agent involved —
+    // the credential is global, not per-Workspace. Best-effort: every failure is
+    // a typed result the renderer degrades on, but log it (log, don't swallow).
+    const env = getShellEnv()
+    const result = await getAccountWhoami({
+      env,
+      readEnvFile: () => readVibeEnvFile(env),
+      readKeyring: readKeychainApiKey,
+      fetchFn: fetch,
+    })
+    if (!result.ok && result.reason !== 'no-key') {
+      console.error(`[vibe-mistro:auth] account whoami failed (${result.reason}): ${result.error}`)
+    }
+    return result
+  })
 
   ipcMain.handle(IPC.stopAgent, (_event, agentId: string) => {
     // Explicit close: the pool stops the child and drops it; the Workspace
