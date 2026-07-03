@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createHash } from 'node:crypto'
-import { finalizeDiff, readGitDiff } from './diff'
+import { finalizeDiff, readGitDiff, readGitFullDiff } from './diff'
 import type { GitRun } from './run'
 
 /**
@@ -139,5 +139,90 @@ describe('readGitDiff', () => {
     const throwingRun: GitRun = () => Promise.reject(new Error('spawn failed'))
     const res = await readGitDiff('/repo', 'tracked.txt', false, false, throwingRun)
     expect(res).toEqual({ patch: '', diffHash: '', truncated: false })
+  })
+})
+
+describe('readGitFullDiff', () => {
+  /** A fake runner keyed by the diffed path (last arg): per-path canned responses. */
+  function fakeRunByPath(
+    byPath: Record<string, { stdout: string; code: number }>,
+    seen?: string[][],
+  ): GitRun {
+    return (args) => {
+      seen?.push(args)
+      const path = args[args.length - 1]
+      return Promise.resolve(byPath[path] ?? { stdout: '', code: 0 })
+    }
+  }
+
+  it('reads every file in ORDER — tracked via HEAD, untracked via --no-index — one entry each', async () => {
+    const seen: string[][] = []
+    const res = await readGitFullDiff(
+      '/repo',
+      [
+        { path: 'tracked.txt', untracked: false },
+        { path: 'untracked.txt', untracked: true },
+      ],
+      false,
+      fakeRunByPath(
+        { 'tracked.txt': { stdout: trackedPatch, code: 0 }, 'untracked.txt': { stdout: untrackedPatch, code: 1 } },
+        seen,
+      ),
+    )
+    expect(res.files.map((f) => f.path)).toEqual(['tracked.txt', 'untracked.txt'])
+    expect(res.files[0].patch).toBe(trackedPatch)
+    expect(res.files[1].patch).toBe(untrackedPatch)
+    // Each entry is individually finalized: its own hash + its own truncation flag.
+    expect(res.files[0].diffHash).toBe(createHash('sha256').update(trackedPatch).digest('hex'))
+    expect(res.files.every((f) => !f.truncated)).toBe(true)
+    // One git invocation per file, in the caller's order, in the two established forms.
+    expect(seen.find((a) => a.at(-1) === 'tracked.txt')).toContain('HEAD')
+    expect(seen.find((a) => a.at(-1) === 'untracked.txt')).toContain('--no-index')
+  })
+
+  it('caps and flags truncation PER FILE — one oversized file cannot hide its siblings', async () => {
+    const CAP = 120 * 1024
+    const huge = 'x'.repeat(CAP + 5000)
+    const res = await readGitFullDiff(
+      '/repo',
+      [
+        { path: 'huge.txt', untracked: false },
+        { path: 'tracked.txt', untracked: false },
+      ],
+      false,
+      fakeRunByPath({ 'huge.txt': { stdout: huge, code: 0 }, 'tracked.txt': { stdout: trackedPatch, code: 0 } }),
+    )
+    expect(res.files[0].truncated).toBe(true)
+    expect(Buffer.byteLength(res.files[0].patch, 'utf8')).toBe(CAP)
+    expect(res.files[1].truncated).toBe(false)
+    expect(res.files[1].patch).toBe(trackedPatch)
+  })
+
+  it('passes ignoreWhitespace through to every per-file read', async () => {
+    const seen: string[][] = []
+    await readGitFullDiff(
+      '/repo',
+      [
+        { path: 'a.txt', untracked: false },
+        { path: 'b.txt', untracked: true },
+      ],
+      true,
+      fakeRunByPath({}, seen),
+    )
+    for (const args of seen) expect(args).toContain('-w')
+  })
+
+  it('a failed per-file read degrades to that file’s empty entry — siblings unaffected, never throws', async () => {
+    const res = await readGitFullDiff(
+      '/repo',
+      [
+        { path: 'bad.txt', untracked: false },
+        { path: 'tracked.txt', untracked: false },
+      ],
+      false,
+      fakeRunByPath({ 'bad.txt': { stdout: 'fatal: bad', code: 128 }, 'tracked.txt': { stdout: trackedPatch, code: 0 } }),
+    )
+    expect(res.files[0]).toEqual({ path: 'bad.txt', patch: '', diffHash: '', truncated: false })
+    expect(res.files[1].patch).toBe(trackedPatch)
   })
 })
