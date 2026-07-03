@@ -1,5 +1,4 @@
 import { join } from 'node:path'
-import { MetadataStore } from './metadata-store'
 import type { MetadataStoreApi } from './metadata-store-api'
 import { importLegacyMetadata } from './import-legacy-metadata'
 import { openStateDb, type StateDb } from './sqlite-db'
@@ -7,66 +6,55 @@ import { SqliteMetadataStore } from './sqlite-metadata-store'
 import { STATE_MIGRATIONS } from './state-migrations'
 
 /**
- * The metadata-store construction seam (ADR-0019): decides which engine this
- * session runs on and performs the one-time legacy import. `index.ts` calls
- * this once at ready and types everything downstream as `MetadataStoreApi`.
+ * The metadata-store construction seam (ADR-0019): open `state.sqlite`, run the
+ * one-time legacy import, hand back the store. `index.ts` calls this once at
+ * ready and types everything downstream as `MetadataStoreApi`.
  *
- * Engine selection, in order:
- * 1. `VIBE_MISTRO_FORCE_JSON=1` → the legacy JSON store (field escape hatch,
- *    removed with the legacy store after the soak release — #298).
- * 2. `state.sqlite` opens → SQLite store. A LOCKED open (db written by a newer
- *    build) still selects SQLite: the store presents empty + read-only and
- *    `isLocked()` drives the same honest upgrade notice the JSON store did.
- * 3. The open THROWS (unreadable path/disk) → legacy JSON store, logged. The
- *    legacy import also falling over ('failed') runs this session on JSON and
- *    retries next launch — the transaction rollback left the db empty.
+ * The legacy JSON engine and its `VIBE_MISTRO_FORCE_JSON` escape hatch were
+ * removed in #298 after the migration soak. The remaining failure fallback is
+ * an IN-MEMORY database (`engine: 'memory'`): if `state.sqlite` cannot open —
+ * a disk so broken the JSON engine would not have fared better — the session
+ * runs non-durable rather than wedging launch, loudly logged. A LOCKED open
+ * (db written by a newer build) still selects the file db: the store presents
+ * empty + read-only and `isLocked()` drives the honest upgrade notice.
  */
 
 export interface CreateMetadataStoreResult {
   store: MetadataStoreApi
-  /** Non-null only when the SQLite engine was selected. */
-  stateDb: StateDb | null
-  engine: 'sqlite' | 'json'
+  stateDb: StateDb
+  engine: 'sqlite' | 'memory'
 }
 
 export interface CreateMetadataStoreDeps {
   userDataDir: string
-  /** Env override (tests pin it; production reads VIBE_MISTRO_FORCE_JSON). */
-  forceJson?: boolean
 }
 
 export async function createMetadataStore(
   deps: CreateMetadataStoreDeps,
 ): Promise<CreateMetadataStoreResult> {
-  const legacyPath = join(deps.userDataDir, 'metadata.json')
-  const forceJson = deps.forceJson ?? process.env.VIBE_MISTRO_FORCE_JSON === '1'
-
-  if (forceJson) {
-    console.log('[create-metadata-store] VIBE_MISTRO_FORCE_JSON=1 — using the legacy JSON store')
-    return jsonStore(legacyPath, null)
-  }
-
   let stateDb: StateDb
+  let engine: CreateMetadataStoreResult['engine'] = 'sqlite'
   try {
-    stateDb = openStateDb({ path: join(deps.userDataDir, 'state.sqlite'), migrations: STATE_MIGRATIONS })
+    stateDb = openStateDb({
+      path: join(deps.userDataDir, 'state.sqlite'),
+      migrations: STATE_MIGRATIONS,
+    })
   } catch (err) {
-    console.error('[create-metadata-store] state.sqlite failed to open — falling back to JSON:', err)
-    return jsonStore(legacyPath, null)
+    console.error(
+      '[create-metadata-store] state.sqlite failed to open — running NON-DURABLE in memory:',
+      err,
+    )
+    stateDb = openStateDb({ path: ':memory:', migrations: STATE_MIGRATIONS })
+    engine = 'memory'
   }
 
   const store = new SqliteMetadataStore({ stateDb })
-  if (!stateDb.locked) {
-    const imported = await importLegacyMetadata({ filePath: legacyPath, store })
-    if (imported === 'failed') {
-      // Rolled back to an empty db; run this session on the legacy JSON store
-      // (the file is still in place) and retry the import next launch.
-      stateDb.close()
-      return jsonStore(legacyPath, null)
-    }
+  if (engine === 'sqlite' && !stateDb.locked) {
+    // Best-effort: a failed import logs, rolls back, and leaves the legacy file
+    // for the next launch's retry — the session proceeds on the (empty) db.
+    // (Never into the memory fallback: importing would rename the legacy file
+    // to .bak while the imported rows evaporate with the session.)
+    await importLegacyMetadata({ filePath: join(deps.userDataDir, 'metadata.json'), store })
   }
-  return { store, stateDb, engine: 'sqlite' }
-}
-
-function jsonStore(legacyPath: string, stateDb: StateDb | null): CreateMetadataStoreResult {
-  return { store: new MetadataStore({ filePath: legacyPath }), stateDb, engine: 'json' }
+  return { store, stateDb, engine }
 }

@@ -58,10 +58,11 @@ import {
 import { getShellEnv } from './shell-env'
 import { getAccountWhoami, readKeychainApiKey, readVibeEnvFile } from './auth/whoami'
 import { searchThreads, tokenizeQuery } from './search/search-threads'
-import { proseEntries, type ProseEntry } from './search/transcript-prose'
+import type { ProseEntry } from './search/transcript-prose'
 import { groupThreadsByWorkspace } from './persistence/metadata-store'
 import type { MetadataStoreApi } from './persistence/metadata-store-api'
 import { createMetadataStore } from './persistence/create-metadata-store'
+import { maybeBackupStateDb } from './persistence/state-backup'
 import type { StateDb } from './persistence/sqlite-db'
 import {
   acpEventEntry,
@@ -361,14 +362,15 @@ let terminalManager: TerminalManager | null = null
  * (`createMetadataStore`, ADR-0019) always yields a working store — SQLite when
  * `state.sqlite` opens, the legacy JSON store otherwise — and `load()` degrades
  * to empty state internally (never a throw), so the old `| null` type and its
- * per-handler degraded forks were unreachable. `transcript` nullability IS real
- * (the dir `mkdir` can fail) — the bridge folds that into a silent-no-op tee.
+ * per-handler degraded forks were unreachable. Since #298 `transcript` is
+ * non-null too: it rides the same always-open state database.
  */
 interface MainDeps {
   store: MetadataStoreApi
-  transcript: TranscriptStoreApi | null
-  /** The SQLite engine's handle (ADR-0019); null on the legacy JSON engine. */
-  stateDb: StateDb | null
+  transcript: TranscriptStoreApi
+  /** The one open state database (ADR-0019) — `state.sqlite`, or the loudly-
+   * logged in-memory fallback when it couldn't open (#298). */
+  stateDb: StateDb
   bridge: TranscriptBridge
   /** Null when the attachments dir `mkdir` failed — image persistence no-ops (logged). */
   attachments: AttachmentStore | null
@@ -1102,7 +1104,7 @@ function registerIpc(deps: MainDeps): void {
     await deleteThread({
       threadId,
       store: deps.store,
-      transcript: deps.transcript ?? { delete: () => Promise.resolve() },
+      transcript: deps.transcript,
       attachments: deps.attachments ?? undefined,
       closeSession: bestEffortCloseFor(deps, threadId),
     })
@@ -1136,7 +1138,7 @@ function registerIpc(deps: MainDeps): void {
       await removeWorkspace({
         workspaceId,
         store: deps.store,
-        transcript: deps.transcript ?? { delete: () => Promise.resolve() },
+        transcript: deps.transcript,
         attachments: deps.attachments ?? undefined,
         // When a warm agent hosts this Workspace, stop it via the SAME path the
         // sweep/stop uses: `pool.dispose` (graceful teardown of hosted sessions) plus
@@ -1265,31 +1267,11 @@ function registerIpc(deps: MainDeps): void {
       const snapshot = groupThreadsByWorkspace(deps.store.snapshot())
       let prose: Map<string, ProseEntry[]> | undefined
       const tokens = tokenizeQuery(args.query)
-      if (tokens.length > 0) {
-        if (deps.stateDb && !deps.stateDb.locked) {
-          // SQLite engine (#296): ONE indexed FTS query feeds the same pure
-          // ranking `searchThreads` always ran — the scan-per-query is gone.
-          prose = ftsProseByThread(deps.stateDb.db, tokens)
-        } else if (deps.transcript) {
-          // Legacy JSON engine only (removed with it in #298): the original
-          // read-every-transcript scan, best-effort per thread — a failed read
-          // degrades that thread to title-only matching, never the query.
-          const store = deps.transcript
-          const threads = snapshot.flatMap((ws) => ws.threads)
-          const loaded = await Promise.all(
-            threads.map(async (thread) => {
-              try {
-                return [thread.id, proseEntries(await store.read(thread.id))] as const
-              } catch (err) {
-                console.error(
-                  `[vibe-mistro:search] transcript read failed (${thread.id}): ${String(err)}`,
-                )
-                return [thread.id, [] as ProseEntry[]] as const
-              }
-            }),
-          )
-          prose = new Map(loaded)
-        }
+      if (tokens.length > 0 && !deps.stateDb.locked) {
+        // ONE indexed FTS query (#296) feeds the same pure ranking
+        // `searchThreads` always ran; a locked (newer-build) db degrades to
+        // title-only matching, consistent with its empty stores.
+        prose = ftsProseByThread(deps.stateDb.db, tokens)
       }
       return searchThreads(snapshot, args.query, args.limit, prose)
     },
@@ -1304,7 +1286,6 @@ function registerIpc(deps: MainDeps): void {
       // usable snapshot (legacy engine, first open, version bump, forceFull
       // corruption fallback) degrades to the whole log as the tail. A missing
       // log reads back empty (never throws).
-      if (!deps.transcript) return Promise.resolve({ snapshot: null, tail: [], lastSeq: 0 })
       return deps.transcript.readWithSnapshot(args.threadId, args.reducerVersion, args.forceFull)
     },
   )
@@ -1313,7 +1294,6 @@ function registerIpc(deps: MainDeps): void {
     // Fire-and-forget (ADR-0019, #297): store the renderer's folded view as an
     // OPAQUE blob — main never parses it (ADR-0001). Best-effort like every
     // persistence write; the store refuses regressions and unknown Threads.
-    if (!deps.transcript) return
     if (!args || typeof args.threadId !== 'string' || typeof args.state !== 'string') return
     if (typeof args.reducerVersion !== 'number' || typeof args.lastSeq !== 'number') return
     void deps.transcript.putSnapshot(args)
@@ -1343,15 +1323,19 @@ app.whenReady().then(async () => {
   const { store, stateDb, engine } = await createMetadataStore({ userDataDir: app.getPath('userData') })
   await store.load()
   console.log(`[main] metadata store engine: ${engine}`)
+  stateDbGlobal = stateDb
 
-  // The per-Thread transcript store (ADR-0005/0019). Its engine FOLLOWS the
-  // metadata store's (same `state.sqlite`, never split-brain) via the stateDb
-  // handle; the SQLite path runs the one-time JSONL import (dir renamed to
-  // `transcripts.bak` when fully handled), the legacy path keeps the mkdir —
-  // a failure leaves `transcript` null and teeing becomes a silent no-op
-  // inside the bridge (best-effort — the conversation is fine).
+  // The per-Thread transcript store (ADR-0005/0019): the same `state.sqlite`
+  // as the metadata store (never split-brain), with the one-time JSONL import
+  // on the way (dir renamed to `transcripts.bak` when fully handled). On the
+  // in-memory fallback the import is SKIPPED — imported rows would evaporate
+  // with the session while the rename tombstoned the real files.
   const transcriptsDir = join(app.getPath('userData'), 'transcripts')
-  const { transcript } = await createTranscriptStore({ stateDb, transcriptsDir })
+  const transcript = await createTranscriptStore({
+    stateDb,
+    transcriptsDir,
+    skipImport: engine === 'memory',
+  })
 
 
   // The per-Thread prompt-image attachments dir (sibling of the transcripts —
@@ -1373,6 +1357,15 @@ app.whenReady().then(async () => {
     resolveBySession: (sessionId) => store.findThreadIdBySessionId(sessionId),
   })
   const deps: MainDeps = { store, transcript, bridge, attachments, stateDb }
+
+  // Daily rotating backup of state.sqlite (ADR-0019, #298) — scheduled off the
+  // launch path, best-effort, and never on the non-durable memory fallback
+  // (there is nothing durable to copy).
+  if (engine === 'sqlite') {
+    setTimeout(() => {
+      void maybeBackupStateDb({ stateDb, backupsDir: join(app.getPath('userData'), 'backups') })
+    }, 5_000)
+  }
 
   // Replace Electron's default Dock icon with the brand mark (dev-run parity with
   // a packaged bundle's icon.icns; t3code does the same). Dev-only: a packaged
@@ -1443,7 +1436,24 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
+/**
+ * The open state database (ADR-0019), module-level like the pool so the quit
+ * hook below can optimize + close it (closing checkpoints the WAL).
+ */
+let stateDbGlobal: StateDb | null = null
+
 app.on('will-quit', () => {
+  // Persist the query planner's learnings + checkpoint the WAL on the way out
+  // (ADR-0019, #298). Best-effort: a failure here must never block quitting.
+  if (stateDbGlobal) {
+    try {
+      stateDbGlobal.db.exec('PRAGMA optimize')
+    } catch {
+      // already closed / locked — nothing to optimize
+    }
+    stateDbGlobal.close()
+    stateDbGlobal = null
+  }
   // Stop the idle-evict sweep so no timer outlives the app (TB5 #50). The pool's
   // own teardown is `window-all-closed`'s `disposeAll`; this just clears the timer.
   if (sweepTimer) {

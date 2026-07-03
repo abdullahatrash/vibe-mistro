@@ -118,13 +118,19 @@ Thread whose stored session isn't hosted by the fresh agent resumes via `session
 fresh on a resume failure, surfacing a "context reset" notice). `index.ts` signals the renderer via
 `thread:bound` the instant a session is minted, before any event streams.
 
-**Persistence** (`src/main/persistence/`, `docs/adr/0005`). Split three ways by owner: (1) Workspace +
-Thread **metadata** — ours, small — in `MetadataStore` (single-writer JSON index at
-`userData/metadata.json`); (2) a per-Thread **JSONL transcript** we own (`TranscriptStore` under
-`userData/transcripts/`), teed best-effort from main's conversation inputs, replayed on reopen with NO
-agent spawned; (3) agent **context/history** — Vibe owns it. The cold launch list and process-free
-reopen are both served from our stores alone. **Every persistence write is best-effort and must never
-reject the live flow** — on a store failure, synthesize ids and continue.
+**Persistence** (`src/main/persistence/`, `docs/adr/0019`; ownership split from `docs/adr/0005`).
+One SQLite database (`userData/state.sqlite`, WAL, opened only by `sqlite-db.ts`; forward-only
+migrations in `state-migrations.ts`, fail-closed on a newer `user_version`): (1) Workspace + Thread
+**metadata** — ours, small — rows behind `SqliteMetadataStore`; (2) the per-Thread **transcript
+event log** we own (`transcript_entries`, global `seq`, behind `SqliteTranscriptStore`), teed
+best-effort from main's conversation inputs, replayed on reopen with NO agent spawned; (3) agent
+**context/history** — Vibe owns it. Two disposable projections derive from the log at write time:
+the FTS5 **prose index** (⌘K search) and per-Thread **fold snapshots** (the renderer's folded view
+as an opaque blob, versioned by `REDUCER_SCHEMA_VERSION` — bump it when conversation item shapes
+change). A one-time importer migrates pre-SQLite profiles (`metadata.json`/`transcripts/*.jsonl` →
+`.bak`, kept). Daily rotating `VACUUM INTO` backups under `userData/backups/`. The cold launch list
+and process-free reopen are both served from our stores alone. **Every persistence write is
+best-effort and must never reject the live flow** — on a store failure, synthesize ids and continue.
 
 **Per-Thread live status** (`src/main/thread-status.ts`). Single source of truth for the sidebar's
 `streaming` / `needsAttention` indicators, keyed by durable `threadId` (distinct from `inFlightTurns`,
@@ -157,8 +163,8 @@ agent-controls choreography behind `connection/use-workspace-actions.ts` /
 (`conversation/reducer.ts`); an event-router (`conversation/event-routing.ts`) subscribes once to
 `acp:event`, switches on the ACP method, and dispatches typed actions; per-kind row renderers live
 in `conversation/items/`, the composer (drafts, images, the unified `/`+`@` autocomplete) in
-`conversation/Composer.tsx`. Reopen replays the JSONL transcript through the same reducer
-(`conversation/replay.ts`). Renderer-only UI state (drafts, panel sizes, scroll) stays in
+`conversation/Composer.tsx`. Reopen hydrates tiered (`conversation/replay.ts`): in-memory LRU →
+durable fold snapshot + fold only the entry tail → full fold through the same reducer. Renderer-only UI state (drafts, panel sizes, scroll) stays in
 `localStorage`; durable state goes through IPC.
 
 ## Conventions

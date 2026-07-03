@@ -108,8 +108,16 @@ sub-millisecond. Per-event persistence and conversation loads are a non-issue.
   real Developer-ID releases are unaffected. For local smokes, re-sign without the runtime flag:
   `codesign --force --deep -s - "dist/mac-arm64/Vibe Mistro.app"`.
 - One database file concentrates what per-Thread JSONL spread out. WAL + transactions make torn
-  writes far rarer than torn JSONL lines; slice 6 (#298) decides a `VACUUM INTO` backup for the
-  residual risk.
+  writes far rarer than torn JSONL lines; **decided in #298: a daily rotating `VACUUM INTO` backup**
+  (`state-backup.ts`, newest 3 kept under `userData/backups/`, best-effort off the launch path)
+  covers the residual. Manual restore: quit, replace `state.sqlite` with a backup (drop `-wal`/
+  `-shm`), relaunch — projections ride inside the copy.
+- **Legacy engines removed in #298** (post-soak): the JSON `MetadataStore` / JSONL `TranscriptStore`
+  classes and the `VIBE_MISTRO_FORCE_JSON` escape hatch are gone; the one-time importer (and its
+  tolerant legacy parsers) stays for profiles that skipped the soak releases, and `.bak` files are
+  never touched. The open-failure fallback is now an in-memory database (non-durable session,
+  loudly logged, imports skipped) rather than the JSON engine. `PRAGMA optimize` + close (WAL
+  checkpoint) run at quit.
 - Changing conversation item shapes requires bumping the reducer schema version constant — the
   cost of a stale snapshot is one full re-fold per Thread, lazily.
 - The migration is delivered as slices #294–#298; this ADR is slice #293's output. No persistence
