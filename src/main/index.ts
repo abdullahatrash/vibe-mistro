@@ -15,6 +15,8 @@ import {
   type TranscriptImageRef,
   type RemoveWorkspaceResult,
   type RespondPermissionArgs,
+  type SearchQueryArgs,
+  type SearchQueryResult,
   type SendPromptArgs,
   type SendPromptResult,
   type AccountWhoamiResult,
@@ -39,6 +41,7 @@ import {
 import { detectVibe } from './vibe-detect'
 import { getShellEnv } from './shell-env'
 import { getAccountWhoami, readKeychainApiKey, readVibeEnvFile } from './auth/whoami'
+import { searchThreads } from './search/search-threads'
 import { groupThreadsByWorkspace, MetadataStore } from './persistence/metadata-store'
 import {
   acpEventEntry,
@@ -1092,6 +1095,13 @@ function registerIpc(deps: MainDeps): void {
     // The cold launch list (ADR-0005): persisted Workspaces + Threads from
     // metadata alone — no agent spawned, no transcript loaded.
     return groupThreadsByWorkspace(deps.store.snapshot())
+  })
+
+  ipcMain.handle(IPC.searchQuery, (_event, args: SearchQueryArgs): SearchQueryResult => {
+    // The Search palette's ranked hits (#174 slice 1): a pure scan over the same
+    // cold metadata snapshot listMetadata serves — no agent, no transcript I/O yet
+    // (slice 2 widens the corpus to transcript prose behind this same channel).
+    return searchThreads(groupThreadsByWorkspace(deps.store.snapshot()), args.query, args.limit)
   })
 
   ipcMain.handle(IPC.readTranscript, (_event, threadId: string): Promise<ReadTranscriptResult> => {

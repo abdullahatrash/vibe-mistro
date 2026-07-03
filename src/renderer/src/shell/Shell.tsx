@@ -49,6 +49,7 @@ export function Shell({
   onNewThread,
   actions,
   onOpenSettings,
+  onOpenSearch,
 }: {
   /** Whether the left sidebar is collapsed (#127) — animate its width to 0 (still mounted). */
   collapsed: boolean
@@ -74,6 +75,8 @@ export function Shell({
   actions: ThreadRowActions
   /** Open the routed Settings page (#130) — from the account chip's menu. */
   onOpenSettings: () => void
+  /** Open the Search palette (#174) — from the primary nav's Search row (or ⌘K). */
+  onOpenSearch: () => void
 }): JSX.Element {
   // The sidebar's EXPANDED width (#drag-to-resize): renderer-only UI state, seeded from
   // localStorage (clamped) and persisted on drag-release. `dragging` disables the
@@ -148,7 +151,7 @@ export function Shell({
         <div className="flex h-full flex-none flex-col gap-3 p-3" style={{ width }}>
           <div className="flex flex-none flex-col gap-3">
             <SidebarHeader />
-            <PrimaryNav busy={opening} onNewThread={onNewThread} />
+            <PrimaryNav busy={opening} onNewThread={onNewThread} onOpenSearch={onOpenSearch} />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             <WorkspaceNav
@@ -214,15 +217,17 @@ function SidebarHeader(): JSX.Element {
  * `--accent-fill`). It's ALWAYS actionable now — `onNewThread` (App's `startNewChat`)
  * targets the selected/most-recent project (connect-if-needed) or opens the picker when
  * there are none — so it's only disabled while a connect is in flight (`busy`). Below it,
- * Search / Scheduled / Plugins are net-new features (ADR-0010) shown as disabled "Soon"
- * rows until their own epics land, so they read as intentional rather than broken.
+ * Search opens the Search palette (#174; also ⌘K); Scheduled / Plugins are still
+ * net-new features (ADR-0010) shown as disabled "Soon" rows until their epics land.
  */
 function PrimaryNav({
   busy,
   onNewThread,
+  onOpenSearch,
 }: {
   busy: boolean
   onNewThread: () => void
+  onOpenSearch: () => void
 }): JSX.Element {
   return (
     <nav className="flex flex-col gap-0.5">
@@ -235,7 +240,11 @@ function PrimaryNav({
         <SquarePen className="size-[18px]" aria-hidden />
         New chat
       </button>
-      <PlaceholderNav icon={<Search className="size-[18px]" aria-hidden />}>Search</PlaceholderNav>
+      <NavItem onClick={onOpenSearch}>
+        <Search className="size-[18px]" aria-hidden />
+        <span className="flex-1">Search</span>
+        <span className="text-[11px] font-medium text-faint">⌘K</span>
+      </NavItem>
       <PlaceholderNav icon={<Clock className="size-[18px]" aria-hidden />}>Scheduled</PlaceholderNav>
       <PlaceholderNav icon={<Atom className="size-[18px]" aria-hidden />}>Plugins</PlaceholderNav>
     </nav>

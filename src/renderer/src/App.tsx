@@ -32,6 +32,7 @@ import { replayCache, wireReplayCacheInvalidation } from './conversation/replay-
 import { setWorkspaceControls, workspaceControlsKey } from './connection/workspace-controls-store'
 import { ArrowLeft, ArrowRight, Maximize2, PanelLeft, PanelRight, Terminal } from 'lucide-react'
 import { IconButton } from './ui/icon-button'
+import { SearchPalette } from './search/SearchPalette'
 import { Shell, type WorkspaceFlags } from './shell/Shell'
 import { firstRunState } from './shell/first-run'
 import { installBannerMessage } from './shell/install-banner'
@@ -89,6 +90,19 @@ export function App(): JSX.Element {
       return next
     })
   }
+  // The Search palette (#174): renderer-only open flag; ⌘K toggles it from
+  // anywhere (window-level, so it works with the composer focused).
+  const [searchOpen, setSearchOpen] = useState(false)
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent): void {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setSearchOpen((prev) => !prev)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
   // Navigation (decision 2): WHICH Workspace/Thread the user is looking at —
   // lifted here so the connect flow (Open project, Continue, sign-in) can drive it.
   const [nav, navDispatch] = useReducer(navReducer, initialNavState)
@@ -748,6 +762,13 @@ export function App(): JSX.Element {
           renameThread: actions.renameThread,
         }}
         onOpenSettings={() => navDispatch({ type: 'open-settings' })}
+        onOpenSearch={() => setSearchOpen(true)}
+      />
+
+      <SearchPalette
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        onSelectThread={selectThreadInWorkspace}
       />
     </div>
   )

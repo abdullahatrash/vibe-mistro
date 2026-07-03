@@ -46,6 +46,8 @@ import {
   type RemoveWorkspaceResult,
   type RespondPermissionArgs,
   type OpenThreadArgs,
+  type SearchQueryArgs,
+  type SearchQueryResult,
   type SendPromptArgs,
   type SendPromptResult,
   type AccountWhoamiResult,
@@ -119,6 +121,8 @@ const api = {
     ipcRenderer.invoke(IPC.readTranscript, threadId),
   readThreadAttachments: (threadId: string): Promise<ReadThreadAttachmentsResult> =>
     ipcRenderer.invoke(IPC.readThreadAttachments, threadId),
+  searchQuery: (args: SearchQueryArgs): Promise<SearchQueryResult> =>
+    ipcRenderer.invoke(IPC.searchQuery, args),
   gitSubscribeStatus: (args: GitStatusSubscriptionArgs): Promise<void> =>
     ipcRenderer.invoke(IPC.gitSubscribeStatus, args),
   gitUnsubscribeStatus: (args: GitStatusSubscriptionArgs): Promise<void> =>
