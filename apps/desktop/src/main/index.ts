@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, type WebContents } from 'electron'
+import electronUpdater, { type UpdateInfo } from 'electron-updater'
 import { mkdir } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { basename, join } from 'node:path'
@@ -38,9 +39,18 @@ import {
   type ThreadConnection,
   type ThreadStatusEvent,
   type ThreadTitleEvent,
+  type AppUpdateStatusEvent,
 } from '../shared/ipc'
 import { detectVibe } from './vibe-detect'
 import { checkVibeUpdate } from './vibe-update'
+import {
+  APP_UPDATE_CHECK_INTERVAL_MS,
+  APP_UPDATE_INITIAL,
+  reduceUpdaterEvent,
+  resolveUpdaterMode,
+  sameStatus,
+  type UpdaterEvent,
+} from './app-update'
 import { getShellEnv } from './shell-env'
 import { getAccountWhoami, readKeychainApiKey, readVibeEnvFile } from './auth/whoami'
 import { searchThreads, tokenizeQuery } from './search/search-threads'
@@ -194,6 +204,66 @@ function emitThreadTitle(event: ThreadTitleEvent): void {
     if (win.webContents.isDestroyed()) continue
     win.webContents.send(IPC.threadTitle, event)
   }
+}
+
+/**
+ * App update (#270, ADR-0018): electron-updater against the Release feed —
+ * the app-update.yml electron-builder embeds (GitHub Releases, stable channel),
+ * or the `VIBE_MISTRO_UPDATE_URL` mock-feed override. Passive: check on launch
+ * + every {@link APP_UPDATE_CHECK_INTERVAL_MS}, download in the background,
+ * stream coarse status; the INSTALL only ever happens on the renderer's explicit
+ * restart action or on normal quit (`autoInstallOnAppQuit`) — never a forced
+ * restart, which would kill in-flight turns. Event mapping goes through the pure
+ * `reduceUpdaterEvent` (app-update.ts, tested); this is the thin adapter.
+ */
+let appUpdateStatus: AppUpdateStatusEvent = APP_UPDATE_INITIAL
+
+function applyUpdaterEvent(event: UpdaterEvent): void {
+  const next = reduceUpdaterEvent(appUpdateStatus, event)
+  if (sameStatus(appUpdateStatus, next)) return
+  appUpdateStatus = next
+  console.log(`[app-update] ${next.phase}${next.version ? ` v${next.version}` : ''}`)
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.webContents.isDestroyed()) win.webContents.send(IPC.appUpdateStatus, next)
+  }
+}
+
+function startAppUpdater(): void {
+  const mode = resolveUpdaterMode({
+    isPackaged: app.isPackaged,
+    feedUrlOverride: process.env.VIBE_MISTRO_UPDATE_URL,
+  })
+  if (!mode.enabled) return
+  // electron-updater is CJS; a named ESM import of `autoUpdater` fails at runtime,
+  // so it comes off the default-import interop object.
+  const { autoUpdater } = electronUpdater
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+  if (mode.feedUrl) {
+    // Mock-feed runs may be unpackaged; electron-updater refuses dev runs unless told.
+    autoUpdater.forceDevUpdateConfig = true
+    autoUpdater.setFeedURL({ provider: 'generic', url: mode.feedUrl })
+  }
+  autoUpdater.on('checking-for-update', () => applyUpdaterEvent({ kind: 'checking' }))
+  autoUpdater.on('update-available', (info: UpdateInfo) =>
+    applyUpdaterEvent({ kind: 'update-available', version: info.version }),
+  )
+  autoUpdater.on('update-not-available', () => applyUpdaterEvent({ kind: 'update-not-available' }))
+  autoUpdater.on('update-downloaded', (info: UpdateInfo) =>
+    applyUpdaterEvent({ kind: 'update-downloaded', version: info.version }),
+  )
+  autoUpdater.on('error', (err) => {
+    console.error('[app-update] updater error:', err)
+    applyUpdaterEvent({ kind: 'error', message: err instanceof Error ? err.message : String(err) })
+  })
+  const check = (): void => {
+    autoUpdater.checkForUpdates().catch((err: unknown) => {
+      // Also surfaced via the 'error' event; log-don't-swallow either way.
+      console.error('[app-update] check failed:', err)
+    })
+  }
+  check()
+  setInterval(check, APP_UPDATE_CHECK_INTERVAL_MS)
 }
 
 /**
@@ -688,6 +758,15 @@ function registerIpc(deps: MainDeps): void {
   ipcMain.handle(IPC.checkVibeUpdate, (_event, args: CheckVibeUpdateArgs) =>
     checkVibeUpdate(args.vibeVersion),
   )
+
+  ipcMain.handle(IPC.appUpdateGetStatus, (): AppUpdateStatusEvent => appUpdateStatus)
+
+  ipcMain.on(IPC.appUpdateRestart, () => {
+    // Only meaningful once a download is ready; a stray send is a no-op rather
+    // than a surprise relaunch.
+    if (appUpdateStatus.phase !== 'ready') return
+    electronUpdater.autoUpdater.quitAndInstall()
+  })
 
   ipcMain.handle(IPC.openWorkspaceDialog, async (event): Promise<string | null> => {
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -1268,6 +1347,7 @@ app.whenReady().then(async () => {
   )
 
   registerIpc(deps)
+  startAppUpdater()
   createWindow()
 
   // The periodic sweep (TB5 #50): release any agent untouched past IDLE_EVICT_MS,
