@@ -83,38 +83,16 @@ const VIBE_CLI_URL = 'https://docs.mistral.ai/vibe/code/cli/install-setup'
           </div>
         </div>
 
-        <div class="session" aria-label="A Vibe Mistro conversation, illustrated">
-          <div class="window">
-            <div class="chrome">
-              <span class="light red"></span>
-              <span class="light amber"></span>
-              <span class="light green"></span>
-              <span class="thread-title">payments-api · Fix flaky webhook test</span>
-            </div>
-            <div class="rows">
-              <p class="row user">Find out why test_webhook_retry is flaky and fix it.</p>
-              <p class="row reasoning">Reading the test… the retry clock is real time — the assertion races the 2s backoff.</p>
-              <div class="row tool">
-                <span class="tool-icon">✎</span>
-                <code>Edit&nbsp;tests/webhooks/test_retry.py</code>
-                <span class="tool-state ok">done</span>
-              </div>
-              <div class="row tool">
-                <span class="tool-icon">⌘</span>
-                <code>Run&nbsp;pytest tests/webhooks -q</code>
-                <span class="tool-state ask">Allow once</span>
-              </div>
-              <div class="row tool">
-                <span class="tool-icon">⌘</span>
-                <code>pytest · 34 passed</code>
-                <span class="tool-state ok">0 flakes</span>
-              </div>
-              <p class="row answer">
-                The test now freezes the retry clock with <code>freezegun</code> — deterministic
-                across 200 repeat runs. Want me to commit it?
-              </p>
-            </div>
-          </div>
+        <div class="shot-wrap">
+          <img
+            class="shot"
+            src="/app-screenshot.jpg"
+            width="1800"
+            height="1126"
+            alt="Vibe Mistro running a live agent conversation: streamed responses in the center, project threads in the sidebar, and the Files surface open on the right"
+            loading="eager"
+            decoding="async"
+          />
         </div>
       </section>
 
@@ -247,13 +225,13 @@ const VIBE_CLI_URL = 'https://docs.mistral.ai/vibe/code/cli/install-setup'
         color: var(--accent-text);
       }
 
-      /* The above-the-fold composition: hero copy left, the live session card
+      /* The above-the-fold composition: hero copy left, the real app screenshot
          right as the visual counterweight — one complete viewport-height scene
          on wide screens instead of a left-hugging column with dead air. */
       .fold {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 32rem);
-        gap: clamp(2.5rem, 6vw, 5rem);
+        grid-template-columns: minmax(0, 1fr) minmax(0, 38rem);
+        gap: clamp(2.5rem, 5vw, 4.5rem);
         align-items: center;
         min-height: min(calc(100dvh - 160px), 56rem);
         padding: 1.5rem 0 3rem;
@@ -340,15 +318,38 @@ const VIBE_CLI_URL = 'https://docs.mistral.ai/vibe/code/cli/install-setup'
         text-decoration: underline;
       }
 
-      /* ------- the session card ------- */
-      .window {
+      /* ------- the app screenshot ------- */
+      .shot-wrap {
+        /* Fade-in lift so the fold still has one quiet entrance moment. */
+        opacity: 0;
+        transform: translateY(8px);
+        animation: reveal 600ms ease 200ms forwards;
+      }
+
+      @keyframes reveal {
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .shot-wrap {
+          animation: none;
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      .shot {
+        display: block;
+        width: 100%;
+        height: auto;
         border: 1px solid var(--border);
-        border-radius: 14px;
-        background: #fdfcfb;
+        border-radius: 12px;
         box-shadow:
           0 1px 2px rgba(28, 28, 28, 0.05),
-          0 24px 60px -30px rgba(82, 45, 20, 0.25);
-        overflow: hidden;
+          0 24px 60px -30px rgba(82, 45, 20, 0.3);
       }
 
       @media (max-width: 980px) {
@@ -358,129 +359,9 @@ const VIBE_CLI_URL = 'https://docs.mistral.ai/vibe/code/cli/install-setup'
           min-height: 0;
           padding: 3rem 0 1.5rem;
         }
-        .window {
+        .shot-wrap {
           max-width: 44rem;
         }
-      }
-
-      .chrome {
-        display: flex;
-        align-items: center;
-        gap: 0.45rem;
-        background: var(--sidebar);
-        border-bottom: 1px solid var(--border);
-        padding: 0.6rem 0.9rem;
-      }
-
-      .light {
-        width: 11px;
-        height: 11px;
-        border-radius: 50%;
-        opacity: 0.9;
-      }
-      .red { background: #f2635a; }
-      .amber { background: #f6bd3b; }
-      .green { background: #55c454; }
-
-      .thread-title {
-        margin-left: 0.6rem;
-        font-size: 0.8rem;
-        color: var(--muted);
-        font-family: var(--mono);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .rows {
-        padding: 1.1rem 1.2rem 1.3rem;
-        display: flex;
-        flex-direction: column;
-        gap: 0.7rem;
-        font-size: 0.92rem;
-      }
-
-      .row {
-        opacity: 0;
-        transform: translateY(6px);
-        animation: stream 480ms ease forwards;
-      }
-      .row:nth-child(1) { animation-delay: 250ms; }
-      .row:nth-child(2) { animation-delay: 750ms; }
-      .row:nth-child(3) { animation-delay: 1250ms; }
-      .row:nth-child(4) { animation-delay: 1750ms; }
-      .row:nth-child(5) { animation-delay: 2300ms; }
-      .row:nth-child(6) { animation-delay: 2850ms; }
-
-      @keyframes stream {
-        to {
-          opacity: 1;
-          transform: none;
-        }
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        .row {
-          animation: none;
-          opacity: 1;
-          transform: none;
-        }
-      }
-
-      .user {
-        align-self: flex-end;
-        background: var(--sidebar);
-        border: 1px solid var(--border);
-        border-radius: 12px 12px 4px 12px;
-        padding: 0.55rem 0.85rem;
-        max-width: 85%;
-      }
-
-      .reasoning {
-        color: var(--muted);
-        font-style: italic;
-        font-size: 0.85rem;
-      }
-
-      .tool {
-        display: flex;
-        align-items: center;
-        gap: 0.6rem;
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 0.5rem 0.75rem;
-        background: #fff;
-        font-family: var(--mono);
-        font-size: 0.8rem;
-      }
-
-      .tool code {
-        font-family: inherit;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .tool-icon {
-        color: var(--accent-text);
-        flex: none;
-      }
-
-      .tool-state {
-        margin-left: auto;
-        flex: none;
-        font-size: 0.72rem;
-        border-radius: 999px;
-        padding: 0.12rem 0.55rem;
-      }
-      .tool-state.ok {
-        color: var(--ok);
-        background: rgba(26, 127, 55, 0.1);
-      }
-      .tool-state.ask {
-        color: var(--accent-text);
-        background: rgba(207, 106, 58, 0.1);
-        border: 1px solid rgba(207, 106, 58, 0.3);
       }
 
       .answer {

@@ -4,6 +4,8 @@
 
 Vibe Mistro is a desktop app for running and orchestrating [Mistral Vibe](https://docs.mistral.ai/vibe/code/cli/install-setup) coding agents across your local projects. It drives Vibe's Agent Client Protocol (ACP) server, `vibe-acp`, and gives you a full GUI on top of it: parallel workspaces, persistent conversation threads, streamed tool calls and diffs, approval controls, and a set of side surfaces (git, terminal, files, skills) so you rarely have to leave the app.
 
+![Vibe Mistro — a live agent conversation with the Files surface open](apps/web/public/app-screenshot.jpg)
+
 ## Features
 
 - **Workspaces & threads** — open any local project, run one warm agent per workspace, and keep many named conversation threads per project. Threads persist across restarts and resume where you left off.
