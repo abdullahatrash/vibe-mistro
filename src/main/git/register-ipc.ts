@@ -13,10 +13,14 @@ import {
   type GhCreateResult,
   type GhCurrentPrArgs,
   type GhPrResult,
+  type GitActionProgressEvent,
+  type GitStackedActionArgs,
+  type GitStackedActionResult,
   type GitStatusSubscriptionArgs,
 } from '../../shared/ipc'
 import { readGitDiff } from './diff'
 import { gitCommit } from './commit'
+import { runStackedAction } from './stacked-action'
 import { gitBranches, gitCheckout, gitCreateBranch } from './branches'
 import { ghCreatePr, ghCurrentPr } from './github'
 import type { GitStatusManager } from './status-stream'
@@ -28,7 +32,11 @@ import type { GitStatusManager } from './status-stream'
  * so a git read/write never keeps a warm agent alive past its idle window (TB5 #50).
  * Every operation swallows its failure into a typed result (never throws).
  */
-export function registerGitIpc(deps: { gitStatus: GitStatusManager }): void {
+export function registerGitIpc(deps: {
+  gitStatus: GitStatusManager
+  /** Broadcast one stacked-action progress event to every window (#234) — wired to `webContents.send` in `index.ts`, like `gitStatus.emit`. */
+  emitGitActionProgress: (event: GitActionProgressEvent) => void
+}): void {
   /**
    * Settle a mutating git/gh op: on success optionally re-read the Workspace's streamed
    * status (a commit/switch touches only `.git/`, which the working-tree fs watcher
@@ -99,6 +107,23 @@ export function registerGitIpc(deps: { gitStatus: GitStatusManager }): void {
       args.workspaceDir,
     )
   })
+
+  ipcMain.handle(
+    IPC.gitRunStackedAction,
+    async (_event, args: GitStackedActionArgs): Promise<GitStackedActionResult> => {
+      // Run a stacked git action — slice 1: push / pull (#234). Progress streams over
+      // `gitActionProgress` while this invoke is in flight; the resolve is the final
+      // word. On success re-read status: a push moves ahead/behind + upstream, a pull
+      // rewrites the working tree — both are `.git`-side moves the watcher may miss.
+      const result = await runStackedAction(args, deps.emitGitActionProgress)
+      if (result.ok) {
+        deps.gitStatus.refresh(args.workspaceDir)
+      } else {
+        console.error(`[vibe-mistro:git] ${args.action} failed (${args.workspaceDir}): ${result.error}`)
+      }
+      return result
+    },
+  )
 
   ipcMain.handle(IPC.ghCurrentPr, (_event, args: GhCurrentPrArgs): Promise<GhPrResult> => {
     // Read the current branch's GitHub PR via `gh` (#88). A NETWORK call, but read-only.

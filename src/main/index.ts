@@ -6,6 +6,7 @@ import {
   IPC,
   type CancelTurnArgs,
   type DeleteThreadResult,
+  type GitActionProgressEvent,
   type GitStatusEvent,
   type ListMetadataResult,
   type OpenThreadArgs,
@@ -636,7 +637,16 @@ function registerIpc(deps: MainDeps): void {
   // Feature registrars (conventions.md `registerIpc(deps)` DI): the git and files
   // handler groups are self-contained pass-throughs to their modules, registered
   // next to them.
-  registerGitIpc({ gitStatus })
+  registerGitIpc({
+    gitStatus,
+    // Stacked-action progress (#234) fans out to every window like `gitStatus` above;
+    // the renderer filters by workspaceDir + actionId.
+    emitGitActionProgress: (event: GitActionProgressEvent) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.webContents.isDestroyed()) win.webContents.send(IPC.gitActionProgress, event)
+      }
+    },
+  })
   registerFilesIpc({ pool, cache: filesListCache })
   terminalManager = createTerminalManager()
   registerTerminalIpc({ pool, manager: terminalManager })

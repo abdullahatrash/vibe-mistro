@@ -11,9 +11,12 @@ import {
   type GitBranchOpArgs,
   type GitCommitArgs,
   type GitCommitResult,
+  type GitActionProgressEvent,
   type GitDiffArgs,
   type GitDiffResult,
   type GitOpResult,
+  type GitStackedActionArgs,
+  type GitStackedActionResult,
   type GhCreatePrArgs,
   type GhCreateResult,
   type GhCurrentPrArgs,
@@ -123,6 +126,8 @@ const api = {
     ipcRenderer.invoke(IPC.gitCheckout, args),
   gitCreateBranch: (args: GitBranchOpArgs): Promise<GitOpResult> =>
     ipcRenderer.invoke(IPC.gitCreateBranch, args),
+  gitRunStackedAction: (args: GitStackedActionArgs): Promise<GitStackedActionResult> =>
+    ipcRenderer.invoke(IPC.gitRunStackedAction, args),
   ghCurrentPr: (args: GhCurrentPrArgs): Promise<GhPrResult> =>
     ipcRenderer.invoke(IPC.ghCurrentPr, args),
   ghCreatePr: (args: GhCreatePrArgs): Promise<GhCreateResult> =>
@@ -152,6 +157,7 @@ const api = {
   onThreadTitle: subscribe<ThreadTitleEvent>(IPC.threadTitle),
   onAgentEvicted: subscribe<AgentEvictedEvent>(IPC.agentEvicted),
   onGitStatus: subscribe<GitStatusEvent>(IPC.gitStatus),
+  onGitActionProgress: subscribe<GitActionProgressEvent>(IPC.gitActionProgress),
 }
 
 export type VibeMistroApi = typeof api
