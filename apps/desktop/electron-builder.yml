@@ -1,0 +1,53 @@
+# Packaging config for the desktop Release (ADR-0018): signed + notarized arm64-only
+# DMG (what the download button serves) + ZIP (what electron-updater consumes on macOS).
+appId: com.abdullahatrash.vibe-mistro
+productName: Vibe Mistro
+
+# Versionless on purpose: the marketing page's download button is the permanent
+# `releases/latest/download/Vibe-Mistro-arm64.dmg` redirect, so the asset name must
+# be stable across Releases. The update feed doesn't care (latest-mac.yml pins
+# per-Release URLs + sha512).
+artifactName: Vibe-Mistro-${arch}.${ext}
+
+directories:
+  buildResources: resources
+
+files:
+  - out/**
+
+# node-pty ships prebuilds that already run under Electron in dev (the terminal
+# works there), so skip the native rebuild — it would demand a node-gyp toolchain
+# for no gain and replace known-good binaries.
+npmRebuild: false
+
+asar: true
+# node-pty's pty.node and spawn-helper must live on the real filesystem —
+# posix_spawnp can't exec a helper inside an asar archive.
+asarUnpack:
+  - "**/node_modules/node-pty/**"
+
+# Embeds app-update.yml in the bundle — electron-updater (#270) reads the same
+# GitHub Releases feed the button downloads from.
+publish:
+  provider: github
+  owner: abdullahatrash
+  repo: vibe-mistro
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: zip
+      arch:
+        - arm64
+  icon: icon.icns
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: resources/entitlements.mac.plist
+  entitlementsInherit: resources/entitlements.mac.plist
+  # Notarization runs automatically when the Apple credentials are present in the
+  # env (APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER, or APPLE_ID +
+  # APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID); unsigned local builds skip it.
+  notarize: true
