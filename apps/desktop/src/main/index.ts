@@ -46,6 +46,8 @@ import { checkVibeUpdate } from './vibe-update'
 import {
   APP_UPDATE_CHECK_INTERVAL_MS,
   APP_UPDATE_INITIAL,
+  describeUpdateCheck,
+  describeUpdaterDisabled,
   reduceUpdaterEvent,
   resolveUpdaterMode,
   sameStatus,
@@ -217,6 +219,8 @@ function emitThreadTitle(event: ThreadTitleEvent): void {
  * `reduceUpdaterEvent` (app-update.ts, tested); this is the thin adapter.
  */
 let appUpdateStatus: AppUpdateStatusEvent = APP_UPDATE_INITIAL
+/** Whether startAppUpdater actually armed the updater (packaged / mock-feed runs). */
+let appUpdaterEnabled = false
 
 function applyUpdaterEvent(event: UpdaterEvent): void {
   const next = reduceUpdaterEvent(appUpdateStatus, event)
@@ -234,6 +238,7 @@ function startAppUpdater(): void {
     feedUrlOverride: process.env.VIBE_MISTRO_UPDATE_URL,
   })
   if (!mode.enabled) return
+  appUpdaterEnabled = true
   // electron-updater is CJS; a named ESM import of `autoUpdater` fails at runtime,
   // so it comes off the default-import interop object.
   const { autoUpdater } = electronUpdater
@@ -264,6 +269,38 @@ function startAppUpdater(): void {
   }
   check()
   setInterval(check, APP_UPDATE_CHECK_INTERVAL_MS)
+}
+
+/**
+ * The menu bar's "Check for Updates…" — the ACTIVE counterpart of the passive
+ * sidebar chip. Runs a real check against the Release feed, then reports where
+ * the cycle stands via the pure `describeUpdateCheck`; when a download is
+ * already staged it offers the restart right in the dialog.
+ */
+async function handleMenuCheckForUpdates(): Promise<void> {
+  const icon = nativeImage.createFromPath(APP_ICON_PNG)
+  const copy = appUpdaterEnabled
+    ? await (async () => {
+        if (appUpdateStatus.phase !== 'ready') {
+          // Resolves once the check settles (available/none); the download, if
+          // any, continues in the background. Failures fold into the 'error'
+          // event and thus into the status we describe.
+          await electronUpdater.autoUpdater.checkForUpdates().catch(() => {})
+        }
+        return describeUpdateCheck(appUpdateStatus, app.getVersion(), APP_DISPLAY_NAME)
+      })()
+    : describeUpdaterDisabled(app.getVersion(), APP_DISPLAY_NAME)
+  const { response } = await dialog.showMessageBox({
+    type: 'info',
+    title: 'Check for Updates',
+    message: copy.message,
+    detail: copy.detail,
+    buttons: copy.offerRestart ? ['Restart Now', 'Later'] : ['OK'],
+    defaultId: 0,
+    cancelId: copy.offerRestart ? 1 : 0,
+    icon,
+  })
+  if (copy.offerRestart && response === 0) electronUpdater.autoUpdater.quitAndInstall()
 }
 
 /**
@@ -1313,27 +1350,16 @@ app.whenReady().then(async () => {
     }
   }
 
-  // The native application menu (app-menu.ts template — t3code's layout).
+  // The native application menu (app-menu.ts template).
   // "Settings…" is fulfilled by the renderer (it owns navigation), broadcast over
   // the typed `menu:action` channel like every other main->renderer push.
-  // "Check for Updates…" is honest about the beta: no updater is wired up yet, so
-  // it reports the running version — the item exists from day one and the flow
-  // deepens in place when a real updater lands.
+  // "Check for Updates…" drives the real updater (#270) via
+  // `handleMenuCheckForUpdates` — the on-demand counterpart of the passive chip.
   Menu.setApplicationMenu(
     Menu.buildFromTemplate(
       buildMenuTemplate(process.platform, {
         onCheckForUpdates: () => {
-          void dialog.showMessageBox({
-            type: 'info',
-            title: 'Check for Updates',
-            message: `${APP_DISPLAY_NAME} ${app.getVersion()}`,
-            detail:
-              'Automatic updates are not available in the beta. Pull the latest main and rebuild to update.',
-            buttons: ['OK'],
-            // Explicit brand icon: macOS otherwise stamps the dialog with the
-            // BUNDLE icon, which icon-services caches as Electron's in dev.
-            icon: nativeImage.createFromPath(APP_ICON_PNG),
-          })
+          void handleMenuCheckForUpdates()
         },
         onOpenSettings: () => {
           for (const win of BrowserWindow.getAllWindows()) {

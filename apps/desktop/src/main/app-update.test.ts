@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   APP_UPDATE_INITIAL,
+  describeUpdateCheck,
+  describeUpdaterDisabled,
   reduceUpdaterEvent,
   resolveUpdaterMode,
   sameStatus,
@@ -97,5 +99,45 @@ describe('resolveUpdaterMode', () => {
     expect(
       resolveUpdaterMode({ isPackaged: true, feedUrlOverride: 'http://localhost:8099 ' }),
     ).toEqual({ enabled: true, feedUrl: 'http://localhost:8099' })
+  })
+})
+
+describe('describeUpdateCheck', () => {
+  const at = (phase: AppUpdateStatusEvent['phase'], version: string | null = null, error: string | null = null): AppUpdateStatusEvent => ({ phase, version, error })
+
+  it('offers the restart only when a download is staged', () => {
+    const ready = describeUpdateCheck(at('ready', '0.2.0'), '0.1.2', 'Vibe Mistro (Beta)')
+    expect(ready.offerRestart).toBe(true)
+    expect(ready.message).toBe('Vibe Mistro (Beta) 0.2.0 is ready to install')
+    for (const phase of ['idle', 'checking', 'downloading', 'error'] as const) {
+      expect(describeUpdateCheck(at(phase), '0.1.2', 'X').offerRestart).toBe(false)
+    }
+  })
+
+  it('reports up-to-date with the running version when nothing is newer', () => {
+    const copy = describeUpdateCheck(at('idle'), '0.1.2', 'Vibe Mistro (Beta)')
+    expect(copy.message).toBe('Vibe Mistro (Beta) 0.1.2')
+    expect(copy.detail).toContain('latest version')
+  })
+
+  it('points at the sidebar chip while a download is in flight', () => {
+    const copy = describeUpdateCheck(at('downloading', '0.2.0'), '0.1.2', 'V')
+    expect(copy.message).toContain('0.2.0')
+    expect(copy.detail).toContain('chip')
+  })
+
+  it('surfaces the check error, never silently', () => {
+    const copy = describeUpdateCheck(at('error', null, 'net::DISCONNECTED'), '0.1.2', 'V')
+    expect(copy.message).toBe('Could not check for updates')
+    expect(copy.detail).toContain('net::DISCONNECTED')
+  })
+})
+
+describe('describeUpdaterDisabled', () => {
+  it('explains dev builds do not self-update and never offers a restart', () => {
+    const copy = describeUpdaterDisabled('0.1.2', 'Vibe Mistro (Beta)')
+    expect(copy.offerRestart).toBe(false)
+    expect(copy.message).toBe('Vibe Mistro (Beta) 0.1.2')
+    expect(copy.detail).toContain('packaged app')
   })
 })

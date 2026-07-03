@@ -67,7 +67,7 @@ export interface UpdaterMode {
  * Decide the updater's mode for this launch. Packaged builds update from the
  * embedded feed; a dev/unpackaged run is updater-OFF unless the mock-feed env
  * (`VIBE_MISTRO_UPDATE_URL`) forces it — the seam the #270 demo and any local
- * end-to-end run drive (t3code's mock-update-server pattern).
+ * end-to-end run drive (a static feed claiming a higher version).
  */
 export function resolveUpdaterMode(input: {
   isPackaged: boolean
@@ -79,3 +79,62 @@ export function resolveUpdaterMode(input: {
 
 /** Background re-check cadence after the launch check (passive; no UI ticker). */
 export const APP_UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
+
+/** What the menu-bar "Check for Updates…" dialog should say (pure; tested). */
+export interface UpdateDialogCopy {
+  message: string
+  detail: string
+  /** Show "Restart Now" as the primary button (a download is already staged). */
+  offerRestart: boolean
+}
+
+/**
+ * Map the post-check status to the dialog. The menu item is the ACTIVE
+ * counterpart of the passive chip: it runs a check on demand and reports where
+ * the cycle stands — up to date, downloading (the chip will follow), ready
+ * (offer the restart right here), or the check failed.
+ */
+export function describeUpdateCheck(
+  status: AppUpdateStatusEvent,
+  appVersion: string,
+  displayName: string,
+): UpdateDialogCopy {
+  switch (status.phase) {
+    case 'ready':
+      return {
+        message: `${displayName} ${status.version ?? ''} is ready to install`.replace('  ', ' '),
+        detail:
+          'It was downloaded in the background. Restart now to apply it — or keep working, and it installs when you quit.',
+        offerRestart: true,
+      }
+    case 'downloading':
+      return {
+        message: `${displayName} ${status.version ?? ''} is on its way`.replace('  ', ' '),
+        detail:
+          'Downloading in the background. The "Update ready — Restart" chip appears at the bottom of the sidebar when it\'s done.',
+        offerRestart: false,
+      }
+    case 'error':
+      return {
+        message: 'Could not check for updates',
+        detail: `${status.error ?? 'Unknown error'}. The app retries automatically in the background.`,
+        offerRestart: false,
+      }
+    default:
+      return {
+        message: `${displayName} ${appVersion}`,
+        detail: "You're on the latest version.",
+        offerRestart: false,
+      }
+  }
+}
+
+/** The dialog for a run where the updater is off (dev / unpackaged). */
+export function describeUpdaterDisabled(appVersion: string, displayName: string): UpdateDialogCopy {
+  return {
+    message: `${displayName} ${appVersion}`,
+    detail:
+      'Automatic App updates run only in the packaged app. Download a Release from GitHub — dev builds update by pulling main and rebuilding.',
+    offerRestart: false,
+  }
+}
