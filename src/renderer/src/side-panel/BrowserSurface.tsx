@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type JSX } from 'react'
-import { ArrowLeft, ArrowRight, Code, ExternalLink, Globe, Loader2, RefreshCw, RotateCw, TriangleAlert } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Code, ExternalLink, Globe, Loader2, MousePointerClick, RefreshCw, RotateCw, TriangleAlert } from 'lucide-react'
 import type { DevServer } from '../../../shared/ipc'
+import { emitComposerInsertImage, emitComposerInsertText } from '../conversation/composer-insert'
+import { parseDataUrl } from '../conversation/image-attach'
+import {
+  buildPickerScript,
+  coercePickedElement,
+  cropRectForElement,
+  formatPickAnnotation,
+} from './browser-picker'
 import { cn } from '../lib/utils'
 import {
   buildWebviewPreferencesAttribute,
@@ -37,12 +45,15 @@ export function BrowserSurface({
   workspaceDir,
   persistedUrl,
   onUrlChange,
+  activeThreadId,
 }: {
   workspaceDir: string
   /** The last-visited URL restored from the store (#217), or undefined for a fresh tab. */
   persistedUrl?: string
   /** Report a committed guest URL up to the store so it persists. */
   onUrlChange: (url: string) => void
+  /** The live Thread whose composer a picked element targets (#224); null when none. */
+  activeThreadId: string | null
 }): JSX.Element {
   // The mounted webview as STATE (not a ref): the `setView` setter is identity-stable,
   // so React invokes the callback ref only on real mount/unmount — an inline-closure
@@ -55,6 +66,7 @@ export function BrowserSurface({
   const [initialUrl, setInitialUrl] = useState<string | null>(persistedUrl ?? null)
   const [address, setAddress] = useState(persistedUrl ?? '')
   const [title, setTitle] = useState('')
+  const [picking, setPicking] = useState(false)
   const [load, setLoad] = useState<LoadState>(INITIAL_LOAD)
   // Back/forward availability is tracked from navigation EVENTS via the pure model —
   // the webview element's own canGoBack()/canGoForward() are unreliable. `pending`
@@ -103,6 +115,46 @@ export function BrowserSurface({
   }
   function openDevTools(): void {
     view?.openDevTools()
+  }
+
+  // Pick an element to chat (#224, ADR-0016): inject the picker into the guest via
+  // executeJavaScript (isolated world — no preload, isolation stays ON), await the click,
+  // screenshot the element, and drop a screenshot + text annotation into the active
+  // Thread's composer. A no-op without a mounted composer (Thread) or webview.
+  async function pickElement(): Promise<void> {
+    if (!view || !activeThreadId || picking) return
+    setPicking(true)
+    try {
+      const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#e8833a'
+      const raw: unknown = await view.executeJavaScript(buildPickerScript({ accent }), true)
+      const picked = coercePickedElement(raw)
+      if (!picked) return // cancelled (Esc/nav) or a malformed return — nothing to send
+      // Screenshot AFTER the picker overlay is gone (the injected script tore it down
+      // before resolving), so the crop is the page, not the picker chrome.
+      const crop = cropRectForElement(picked.rect, { width: view.offsetWidth, height: view.offsetHeight }, { padding: 8 })
+      if (crop) {
+        try {
+          const image = await view.capturePage(crop)
+          const parsed = parseDataUrl(image.toDataURL())
+          if (parsed) {
+            emitComposerInsertImage(activeThreadId, {
+              ...parsed,
+              name: `element-${picked.tagName}.png`,
+              previewUrl: image.toDataURL(),
+            })
+          }
+        } catch (err) {
+          // A capture failure is non-fatal — the text annotation still lands.
+          console.error('[browser] element screenshot failed', err)
+        }
+      }
+      emitComposerInsertText(activeThreadId, formatPickAnnotation(picked))
+    } catch (err) {
+      // executeJavaScript rejects if the guest navigated mid-pick — treat as a cancel.
+      console.error('[browser] pick cancelled', err)
+    } finally {
+      setPicking(false)
+    }
   }
 
   // The webview only exposes its state through DOM events — wire them once per mounted
@@ -199,6 +251,14 @@ export function BrowserSurface({
             />
           )}
         </form>
+        <BrowserAction
+          label="Pick an element to chat"
+          onClick={() => void pickElement()}
+          disabled={activeThreadId === null || picking}
+          active={picking}
+        >
+          <MousePointerClick aria-hidden />
+        </BrowserAction>
         <BrowserAction label="Open in browser" onClick={openExternal}>
           <ExternalLink aria-hidden />
         </BrowserAction>
@@ -345,6 +405,14 @@ function UnreachableOverlay({ url, onRetry }: { url: string; onRetry: () => void
   )
 }
 
+/**
+ * A minimal Electron `NativeImage` — only `toDataURL`, which the picker uses to turn a
+ * `capturePage` crop into a `data:` URL for the composer.
+ */
+interface NativeImageLike {
+  toDataURL(): string
+}
+
 /** The slice of Electron's WebviewTag the Surface drives (renderer must not import electron). */
 interface WebviewElement extends HTMLElement {
   loadURL(url: string): Promise<void>
@@ -353,6 +421,10 @@ interface WebviewElement extends HTMLElement {
   goToOffset(offset: number): void
   reload(): void
   openDevTools(): void
+  /** Run code in the guest's ISOLATED world; resolves with the last expression (awaited if a Promise). */
+  executeJavaScript(code: string, userGesture?: boolean): Promise<unknown>
+  /** Capture a crop of the live guest compositor (rect in CSS/DIP px). */
+  capturePage(rect?: { x: number; y: number; width: number; height: number }): Promise<NativeImageLike>
 }
 
 /** A browser toolbar icon button — the TerminalAction idiom. */
@@ -360,11 +432,13 @@ function BrowserAction({
   label,
   onClick,
   disabled,
+  active,
   children,
 }: {
   label: string
   onClick: () => void
   disabled?: boolean
+  active?: boolean
   children: JSX.Element
 }): JSX.Element {
   return (
@@ -373,12 +447,14 @@ function BrowserAction({
       onClick={onClick}
       disabled={disabled}
       aria-label={label}
+      aria-pressed={active}
       title={label}
       className={cn(
-        'flex size-6 shrink-0 items-center justify-center rounded text-muted outline-none transition-colors',
+        'flex size-6 shrink-0 items-center justify-center rounded outline-none transition-colors',
         'hover:bg-accent/10 hover:text-text-strong focus-visible:bg-accent/10',
         'disabled:pointer-events-none disabled:opacity-40',
         '[&_svg]:size-3.5 [&_svg]:shrink-0',
+        active ? 'bg-accent/15 text-accent-text' : 'text-muted',
       )}
     >
       {children}

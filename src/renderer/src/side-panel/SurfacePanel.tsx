@@ -371,6 +371,7 @@ function PanelBody({
                   workspaceDir={workspaceDir}
                   persistedUrl={browserSurface.url}
                   onUrlChange={persistBrowserUrl}
+                  activeThreadId={activeThreadId}
                 />
               </div>
             )}

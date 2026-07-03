@@ -22,7 +22,13 @@ import { IconButton } from '../ui/icon-button'
 import { Textarea } from '../ui/textarea'
 import type { AcpCommand } from './reducer'
 import { getDraft, setDraft as persistDraft, clearDraft } from './composer-draft-store'
-import { appendMention, appendText, subscribeComposerInsert, subscribeComposerInsertText } from './composer-insert'
+import {
+  appendMention,
+  appendText,
+  subscribeComposerInsert,
+  subscribeComposerInsertImage,
+  subscribeComposerInsertText,
+} from './composer-insert'
 import { ACCEPTED_IMAGE_TYPES, isAcceptedImageType, parseDataUrl } from './image-attach'
 import { nextQueueId, type FollowUpQueue } from './follow-up-queue'
 import { useComposerAutocomplete, CompletionPopover } from './use-composer-autocomplete'
@@ -172,6 +178,16 @@ export function Composer({
       inputRef.current?.focus()
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId])
+
+  // Stage an image from the Browser Surface's element picker (#224): the pre-split
+  // screenshot arrives through the module-level channel keyed by threadId (same sibling→
+  // composer path as text/@), so we just add an id — no FileReader, it's already a data URL.
+  useEffect(() => {
+    return subscribeComposerInsertImage(threadId, (image) => {
+      setPendingImages((prev) => [...prev, { id: `img:${imageSeq++}`, ...image }])
+      inputRef.current?.focus()
+    })
   }, [threadId])
 
   // Read a pasted/picked image blob to a data URL (DOM: FileReader lives here, not
