@@ -80,6 +80,7 @@ import {
   type VibeDetectResult,
   type CheckVibeUpdateArgs,
   type VibeUpdateResult,
+  type AppUpdateStatusEvent,
 } from '../shared/ipc'
 
 /**
@@ -100,6 +101,9 @@ const api = {
   detectVibe: (): Promise<VibeDetectResult> => ipcRenderer.invoke(IPC.detectVibe),
   checkVibeUpdate: (args: CheckVibeUpdateArgs): Promise<VibeUpdateResult> =>
     ipcRenderer.invoke(IPC.checkVibeUpdate, args),
+  getAppUpdateStatus: (): Promise<AppUpdateStatusEvent> =>
+    ipcRenderer.invoke(IPC.appUpdateGetStatus),
+  appUpdateRestart: (): void => ipcRenderer.send(IPC.appUpdateRestart),
   openWorkspaceDialog: (): Promise<string | null> => ipcRenderer.invoke(IPC.openWorkspaceDialog),
   startThread: (args: StartThreadArgs): Promise<StartThreadResult> =>
     ipcRenderer.invoke(IPC.startThread, args),
@@ -192,6 +196,7 @@ const api = {
   onThreadTitle: subscribe<ThreadTitleEvent>(IPC.threadTitle),
   onAgentEvicted: subscribe<AgentEvictedEvent>(IPC.agentEvicted),
   onMenuAction: subscribe<MenuActionEvent>(IPC.menuAction),
+  onAppUpdateStatus: subscribe<AppUpdateStatusEvent>(IPC.appUpdateStatus),
   onGitStatus: subscribe<GitStatusEvent>(IPC.gitStatus),
   onGitActionProgress: subscribe<GitActionProgressEvent>(IPC.gitActionProgress),
 }

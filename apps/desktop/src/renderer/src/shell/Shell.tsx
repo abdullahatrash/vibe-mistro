@@ -4,6 +4,7 @@ import type { ListMetadataResult } from '../../../shared/ipc'
 import type { NavState } from './nav-reducer'
 import type { UnifiedThreadRow } from './unified-threads'
 import { WorkspaceNav, type ThreadRowActions, type WorkspaceFlags } from './workspace-nav'
+import { UpdateReadyChip } from './UpdateReadyChip'
 import {
   clampSidebarWidth,
   DEFAULT_SIDEBAR_WIDTH,
@@ -172,6 +173,7 @@ export function Shell({
               actions={actions}
             />
           </div>
+          <UpdateReadyChip />
           <AccountChip onOpenSettings={onOpenSettings} />
         </div>
       </aside>
