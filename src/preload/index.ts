@@ -52,6 +52,9 @@ import {
   type OpenThreadArgs,
   type SearchQueryArgs,
   type SearchQueryResult,
+  type SkillsListArgs,
+  type SkillsListResult,
+  type SkillsRevealArgs,
   type SendPromptArgs,
   type SendPromptResult,
   type AccountWhoamiResult,
@@ -127,6 +130,10 @@ const api = {
     ipcRenderer.invoke(IPC.readThreadAttachments, threadId),
   searchQuery: (args: SearchQueryArgs): Promise<SearchQueryResult> =>
     ipcRenderer.invoke(IPC.searchQuery, args),
+  skillsList: (args: SkillsListArgs): Promise<SkillsListResult> =>
+    ipcRenderer.invoke(IPC.skillsList, args),
+  skillsReveal: (args: SkillsRevealArgs): Promise<void> =>
+    ipcRenderer.invoke(IPC.skillsReveal, args),
   gitSubscribeStatus: (args: GitStatusSubscriptionArgs): Promise<void> =>
     ipcRenderer.invoke(IPC.gitSubscribeStatus, args),
   gitUnsubscribeStatus: (args: GitStatusSubscriptionArgs): Promise<void> =>
