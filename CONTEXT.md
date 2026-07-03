@@ -101,3 +101,23 @@ _Avoid_: thinking (the ACP wire term), effort (reserve to avoid clashing with re
 **Agent controls**:
 The umbrella for Mode + Model + Reasoning effort together — the composer surface that sets them.
 _Avoid_: config options, settings.
+
+## Distribution
+
+**Release**:
+A published, signed + notarized macOS build of the app, versioned by git tag and hosted with its
+update manifest as the single stable channel. What the marketing page's download button serves and
+what App updates are checked against.
+_Avoid_: build (a local/CI compile artifact, not necessarily published), deploy (reserve for the
+marketing page).
+
+**App update**:
+vibe-mistro updating itself to a newer Release. Checked and downloaded in the background;
+applied only when the user chooses to restart (or on quit) — never mid-turn. Distinct from a
+**Vibe update**.
+_Avoid_: update (unqualified), self-update, upgrade.
+
+**Vibe update**:
+Updating the Mistral Vibe CLI (`vibe-acp`) that the app orchestrates — Vibe-owned, installed via the
+user's tool manager (uv/brew), surfaced in Settings. Distinct from an **App update**.
+_Avoid_: update (unqualified), CLI upgrade.

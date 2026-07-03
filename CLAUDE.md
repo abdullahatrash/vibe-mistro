@@ -15,23 +15,34 @@ language servers, no embedded model). See `docs/adr/0002`.
 Status: early scaffold, built one tracer-bullet vertical slice at a time (commits/PRs reference
 issue numbers and "TB" slice numbers). Features are ported from CodexMonitor.
 
+## Repo layout
+
+Bun-workspaces monorepo: the desktop app lives in **`apps/desktop`**, the marketing page (Astro,
+deployed to Vercel, deliberately independent — no workspace deps) in **`apps/web`**. Root scripts
+delegate via `bun run --cwd`. **Every `src/...`, `e2e/...`, `scripts/...`, or config path in this
+file is relative to `apps/desktop/`.** Distribution decisions (signing, GitHub Releases, App
+updates) are in `docs/adr/0018`.
+
 ## Commands
+
+All from the repo root:
 
 ```bash
 bun install
 bun run dev         # launch Electron + Vite dev server
-bun run typecheck   # tsc --noEmit over BOTH tsconfig.node.json (main/preload) and tsconfig.web.json (renderer)
-bun run build       # production build (electron-vite)
-bun run lint        # eslint .
+bun run dev:web     # marketing page dev server (Astro)
+bun run typecheck   # desktop: tsc over BOTH tsconfig.node.json (main/preload) and tsconfig.web.json (renderer); web: astro check
+bun run build       # production build (electron-vite + astro)
+bun run lint        # eslint . (desktop)
 bun run test        # vitest run (one-shot)
 bun run test:watch  # vitest watch
 ```
 
-Run a single test file or test:
+Run a single test file or test (the vitest project is `apps/desktop`):
 
 ```bash
-bunx vitest run src/main/agent-pool.test.ts
-bunx vitest run -t "evicts the least-recently-active"
+bun run --cwd apps/desktop test src/main/agent-pool.test.ts
+bun run --cwd apps/desktop test -t "evicts the least-recently-active"
 ```
 
 Tests are colocated as `*.test.ts` next to the code they cover and run in the `node` environment
@@ -165,7 +176,7 @@ in `conversation/items/`, the composer (drafts, images, the unified `/`+`@` auto
 
 ## Reference docs
 
-`docs/conventions.md` (decisions; wins on conflict), `docs/adr/` (0001–0007, the load-bearing
-architecture decisions; 0007 = Agent controls), `CONTEXT.md` (domain glossary), `HANDOFF.md` (latest
+`docs/conventions.md` (decisions; wins on conflict), `docs/adr/` (the load-bearing architecture
+decisions; 0018 = distribution/releases), `CONTEXT.md` (domain glossary), `HANDOFF.md` (latest
 session handoff / current state), `docs/acp-capture.md` (verbatim `vibe-acp` protocol capture — the
 backend contract), `docs/codexmonitor-reference.md` (the app being ported + build order).
