@@ -12,8 +12,8 @@ after the first prompt. Root cause is protocol-shaped and confirmed against grou
 advertises the control option lists ONLY in the `session/new` / `session/load` response, never at
 `initialize` (`docs/acp-capture.md:23-35`). We are a **thin orchestrator (ADR-0002)** and deliberately
 keep **no** client-side model/mode registry — so with no session there is nothing to populate the picker
-from. (Contrast t3code, which shows its pickers pre-prompt precisely because it *owns* a client-side
-provider/model registry — `ServerProviderModel[]` from its contracts layer — a design we rejected under
+from. (Contrast clients that show their pickers pre-prompt precisely because they *own* a client-side
+provider/model registry in a contracts layer — a design we rejected under
 ADR-0002 because Vibe owns the lists and they are per-account, e.g. vision only on `mistral-medium-3.5`.)
 
 ADR-0011 anticipated this exact gap and deferred it: "the very first Thread (no session yet) is
@@ -80,7 +80,7 @@ pre-ADR-0011 world (no empty Thread, no metadata write).
 
 - **Keep ADR-0011 + the #153 cache only (status quo)** — rejected as insufficient: the first-ever draft in
   a Workspace stays bare, which is the exact complaint. The cache cannot invent options with no session.
-- **Client-side model/mode registry (the t3code approach)** — rejected: violates ADR-0002 (thin
+- **Client-side model/mode registry** — rejected: violates ADR-0002 (thin
   orchestrator; Vibe owns the lists) and would drift from Vibe's real, per-account, per-version option sets
   (models differ by account; modes/effort can change across vibe-acp versions). A hardcoded list would lie.
 - **Eager session at connect, WITHOUT reuse (mint a fresh one on first prompt anyway)** — rejected: that is

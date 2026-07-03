@@ -12,7 +12,7 @@ shape fused two concerns that a real app shell must separate:
 Because they were fused, switching Workspaces tore the agent down and re-ran the handshake, and
 a Workspace's live turn died the moment you navigated away. That undercuts the persistent
 sidebar we want (Workspace switcher + a thread list that's always there + a conversation
-outlet — the t3code `AppSidebarLayout > Outlet` shape, see `docs/t3code-reference.md` §4).
+outlet — the classic sidebar-layout-plus-outlet shape).
 
 This ADR fixes the shell's structural primitives. It does **not** prescribe visual design
 (that lives in `docs/design/brand.md`) or the per-slice mechanics (the epic's tracer bullets).
@@ -30,8 +30,8 @@ This ADR fixes the shell's structural primitives. It does **not** prescribe visu
    (`selectedWorkspaceId`, `selectedThreadId`, and the warm-agent registry) lives in a single
    pure reducer at the shell root, mirroring `src/renderer/src/conversation/reducer.ts`
    (ADR-0001). No URL routing, no TanStack Router, no Zustand. Our own reference notes already
-   flag those as overkill at this scale ("a plain `useReducer` + IPC `useEffect` is fine" —
-   `docs/t3code-reference.md` §4). A router earns its place only if deep-linking / history is
+   flag those as overkill at this scale ("a plain `useReducer` + IPC `useEffect` is
+   fine"). A router earns its place only if deep-linking / history is
    ever required; a UI store earns its place only when prop-drilling genuinely hurts.
 
 3. **One warm `vibe-acp` agent per OPEN Workspace — a bounded pool, not one-at-a-time.** The
@@ -66,9 +66,9 @@ This ADR fixes the shell's structural primitives. It does **not** prescribe visu
 
 - **One agent at a time** (closest to today): simplest lifecycle, fewest processes; rejected
   because slow switching + dead background turns defeat the shell's purpose.
-- **Real router (TanStack/React Router)** with `_chat.$workspaceId.$threadId` routes (t3code's
-  approach): buys deep-linking/history we don't need yet; deferred, not foreclosed.
-- **Zustand UI store** split from server state (t3code's split): clean as panels multiply;
+- **Real router (TanStack/React Router)** with `_chat.$workspaceId.$threadId` routes: buys
+  deep-linking/history we don't need yet; deferred, not foreclosed.
+- **Zustand UI store** split from server state: clean as panels multiply;
   deferred until prop-drilling or reload-persistence actually demands it.
 - **An `AgentPool` seam + measure-then-decide spike:** adds an indirection layer before we know
   we need tuning; we instead commit to the warm pool and tune N/M in a dedicated hardening slice.

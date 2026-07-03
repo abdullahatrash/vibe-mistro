@@ -11,9 +11,9 @@ session**, the protocol handle from `session/new`). Agent-initiated **permission
 ## Considered options
 
 - **Main owns state, renderer mirrors** — rejected. More robust for multi-window, persistence, and a
-  future remote backend, but heavier and unnecessary now; CodexMonitor proves a renderer-owned
-  reducer scales for this app.
-- **Renderer owns state** (chosen) — simplest, least IPC, matches CodexMonitor's proven model.
+  future remote backend, but heavier and unnecessary now; production orchestrator GUIs prove a
+  renderer-owned reducer scales for this class of app.
+- **Renderer owns state** (chosen) — simplest, least IPC, a proven model in production apps.
 
 ## Consequences
 

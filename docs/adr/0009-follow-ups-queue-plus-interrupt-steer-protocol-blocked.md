@@ -4,8 +4,8 @@ When the user submits a message while a Thread's turn is still streaming, vibe-m
 (client-side) and auto-sends it as a fresh `session/prompt` once the turn ends, and offers a **Stop**
 button that **interrupts** the active turn via `session/cancel`. It does **not** "steer" (inject into the
 live turn): the #102 spike proved vibe-acp rejects a concurrent `session/prompt` and exposes no steer
-method. This mirrors CodexMonitor's Queue + Interrupt (`turn/start` + `turn/interrupt`) but drops its
-third verb (`turn/steer`) until vibe-acp gains one.
+method. This is the classic Queue + Interrupt posture, without a third "steer" verb until vibe-acp
+gains one.
 
 ## Verified protocol (acp-capture §12, spike #102, vibe-acp 2.18.3)
 
@@ -37,19 +37,19 @@ third verb (`turn/steer`) until vibe-acp gains one.
   the single-`acp:event`-channel discipline (ADR-0001) — cancel is an outbound control, not an event.
 - **The follow-up queue is renderer-only, per-Thread, ephemeral (slice 2).** It holds MULTIPLE pending
   messages keyed by `threadId`, lives ABOVE the conversation view's per-Thread remount (so it survives a
-  Thread switch), and is NOT persisted across app restart (like CodexMonitor; drafts/composer state are
+  Thread switch), and is NOT persisted across app restart (drafts/composer state are
   renderer-only, ADR-0006). It auto-flushes one message at a time as a fresh `session/prompt` when the
   Thread's turn ends. Queued messages render as removable rows above the composer; edit-in-place is deferred.
 - **Compose stays enabled while streaming (slice 2).** Enter during a turn ENQUEUES (composer no longer
-  hard-disables mid-turn); the Stop button interrupts. This is the CodexMonitor posture minus steer. The
-  per-message override key (queue-vs-steer flip) is moot without steer, so it is not built.
+  hard-disables mid-turn); the Stop button interrupts. This is the queue-plus-interrupt posture minus
+  steer. The per-message override key (queue-vs-steer flip) is moot without steer, so it is not built.
 
 ## Considered alternatives
 
-- **Steer (mid-turn injection), à la CodexMonitor `turn/steer`.** Rejected as impossible today: vibe-acp has
+- **Steer (mid-turn injection into the live turn).** Rejected as impossible today: vibe-acp has
   no steer method and rejects concurrent prompts (`-32602`, spike #102). Revisit if vibe adds a steer/inject
   capability; the queue's flush seam is where it would attach.
-- **Interrupt-only, no queue (t3code posture: block the composer while running + a Stop button).** Rejected
+- **Interrupt-only, no queue (block the composer while running + a Stop button).** Rejected
   as the end state — it's strictly less than what vibe supports (a client can safely serialize follow-ups).
   But it IS effectively slice 1 in isolation, so we ship it first and add the queue second.
 - **Persist the queue across restart / in the metadata store.** Rejected for v1: follow-ups are transient

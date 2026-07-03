@@ -13,7 +13,7 @@ file I/O, and answer its permission requests. **Never reimplement agent capabili
 language servers, no embedded model). See `docs/adr/0002`.
 
 Status: early scaffold, built one tracer-bullet vertical slice at a time (commits/PRs reference
-issue numbers and "TB" slice numbers). Features are ported from CodexMonitor.
+issue numbers and "TB" slice numbers).
 
 ## Repo layout
 
@@ -70,7 +70,7 @@ itself is unaffected (it uses its own Node).
 Three Electron layers, strictly separated (`docs/conventions.md`):
 
 - **`src/main`** — all Node/OS/process work: spawn & supervise `vibe-acp`, ACP transport,
-  persistence, fs serving, shell-env, eviction policy. This is CodexMonitor's Rust backend, in TS.
+  persistence, fs serving, shell-env, eviction policy. The entire backend lives here.
 - **`src/preload`** — typed `contextBridge` only. Exposes one `VibeMistroApi`. No logic.
 - **`src/renderer`** — UI only, **no Node, no `fs`** — everything via IPC. `contextIsolation: true`,
   `nodeIntegration: false`.
@@ -179,4 +179,4 @@ in `conversation/items/`, the composer (drafts, images, the unified `/`+`@` auto
 `docs/conventions.md` (decisions; wins on conflict), `docs/adr/` (the load-bearing architecture
 decisions; 0018 = distribution/releases), `CONTEXT.md` (domain glossary), `HANDOFF.md` (latest
 session handoff / current state), `docs/acp-capture.md` (verbatim `vibe-acp` protocol capture — the
-backend contract), `docs/codexmonitor-reference.md` (the app being ported + build order).
+backend contract).

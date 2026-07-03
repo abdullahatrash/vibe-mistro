@@ -3,8 +3,8 @@
 **Status: ACCEPTED** (2026-07-03). Builds on **ADR-0002** (thin orchestrator — no agent-facing
 browser automation), **ADR-0013** (the Surface/tab model the Browser Surface slots into),
 **ADR-0014** (the feature-registrar / pure-module-seam precedents). PRD #215; slice ladder
-#216/#217/#218. Reference implementation: t3code's "Preview" (`apps/web/src/browser/` +
-`apps/desktop/src/preview/`) — an Electron `<webview>` driven per-scope, security-clamped at
+#216/#217/#218. Reference implementation: a production Electron "preview" feature —
+an Electron `<webview>` driven per-scope, security-clamped at
 attach time.
 
 ## Context
@@ -18,38 +18,38 @@ question that decides everything else is the EMBEDDING MECHANISM. Three candidat
 - **`WebContentsView`/`BrowserView`** — Electron's headline recommendation, but it floats ABOVE
   the DOM in main-owned pixel coordinates: it doesn't clip to flex containers, so the panel's
   drag-resize, tab switching, the narrow-viewport Sheet, and background-Workspace hiding all
-  become manual bounds-sync IPC. t3code evaluated the same trade and chose the webview tag;
-  their workaround inventory for it (a rect-tracking overlay store) exists precisely because
-  even THEY needed webview's DOM behavior, just with a root-mounted host.
+  become manual bounds-sync IPC. The reference app evaluated the same trade and chose the
+  webview tag; its workaround inventory for it (a rect-tracking overlay store) exists precisely
+  because even IT needed webview's DOM behavior, just with a root-mounted host.
 - **`<webview>` tag** — a real DOM node: composites, clips, and resizes with CSS inside the
   panel like any other Surface. Electron's docs caution about the tag mostly concern its
   historical default prefs; every knob it warns about is clampable at attach time.
 
 ## Decision
 
-1. **The embed is the `<webview>` tag** (t3code's production-proven choice), declared by
+1. **The embed is the `<webview>` tag** (a production-proven choice), declared by
    `BrowserSurface` with `partition` / `webpreferences` / `useragent` computed by the pure,
    tested `src/shared/browser-guest.ts`. The `webpreferences` attribute string is locked by
    test because Electron splits it on `,` WITHOUT trimming and coerces non-boolean-literal
-   values to truthy STRINGS — a malformed string silently weakens the sandbox (t3code's
-   `WebviewPreferences` gotcha).
+   values to truthy STRINGS — a malformed string silently weakens the sandbox (a
+   webpreferences-parsing gotcha the reference app also documents).
 
-2. **The view is DISPOSABLE; no root-mounted overlay.** t3code mounts one global webview host
-   over an in-layout slot (rect-tracking store) so the page survives their panel unmounting. We
+2. **The view is DISPOSABLE; no root-mounted overlay.** The reference app mounts one global
+   webview host over an in-layout slot (rect-tracking store) so the page survives its panel unmounting. We
    skip that machinery but keep the WEBVIEW ELEMENT mounted across surface-TAB switches (hidden,
    not unmounted, when another tab is active — verified that `display:none` does not detach the
    guest), so the live page (scroll, form state, JS) survives switching tabs. The page is
    discarded only on a heavier context change — closing the tab or backgrounding the Workspace
    (the whole panel unmounts) — where the persisted URL (slice 2, #217) reloads it on return.
-   The t3code root-mounted overlay is the known upgrade path if even Workspace-switch reload
+   The root-mounted overlay is the known upgrade path if even Workspace-switch reload
    proves too costly.
 
-3. **Guest security posture, three layers, stricter than t3code where possible.**
+3. **Guest security posture, three layers, stricter than the reference where possible.**
    (a) Per-Workspace persisted partition `persist:vibe-browser-<fnv1a(workspaceDir)>` — preview
    cookies/storage survive restarts, never mix across Workspaces or with the app session.
    (b) Tag prefs: `sandbox=true`, `contextIsolation=true`, `nodeIntegration=false`,
-   `nodeIntegrationInSubFrames=false`, NO preload. (t3code runs `contextIsolation=false` for
-   their element-picker preload; we ship no guest preload, so isolation stays ON.)
+   `nodeIntegrationInSubFrames=false`, NO preload. (The reference runs `contextIsolation=false`
+   for its element-picker preload; we ship no guest preload, so isolation stays ON.)
    (c) Main's `will-attach-webview` clamp (`src/main/browser/webview-clamp.ts`, pure +
    unit-tested): an attachment is REJECTED unless its partition matches the derived grammar
    EXACTLY (`persist:vibe-browser-` + 8 hex — never a prefix test; `persist:` names map onto
@@ -67,7 +67,7 @@ question that decides everything else is the EMBEDDING MECHANISM. Three candidat
    no-op / report `false` against a genuine multi-entry history), so back/forward availability
    is tracked from navigation events via a pure index/length model (`browser-nav-history.ts`)
    and actioned with `goToOffset(±1)`, which works — verified by driving the real app. No per-navigation IPC, no main-side tab
-   registry — t3code's `webContents.fromId` control plane exists to serve agent automation
+   registry — a `webContents.fromId` control plane exists to serve agent automation
    (CDP click/type/screencast), which ADR-0002 rules out here: browser automation is an agent
    capability and belongs to Vibe, not the orchestrator. Everything the webview is asked to
    load passes the pure URL policy (`side-panel/browser-url.ts`): scheme-less input infers

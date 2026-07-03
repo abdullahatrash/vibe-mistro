@@ -258,7 +258,7 @@ authenticate(method_id, **kwargs) -> AuthenticateResponse
    A client that ignores `persistResult` reports sign-in success while `_auth/status` (and every other
    `vibe` process) stays signed out. Check it (`classifyPersistFailure`, `assertCredentialPersisted`).
    **This delegated mode is the right fit for vibe-mistro** (we open the URL via the system opener,
-   show progress, stay non-blocking) — it mirrors CodexMonitor's `login/start → open authUrl → complete`,
+   show progress, stay non-blocking) — the classic `start → open authUrl → complete` shape —
    and is the **primary** path per ADR-0003 (blocking `browser-auth` is the fallback).
 
 ### `_auth/signOut` — sign out (ACP extension method)

@@ -46,7 +46,7 @@ auto-loads `CLAUDE.md` + the memory index) and paste the block below as the firs
 - **Verification debt:** #80 sign-in re-check + #87/#88 git branches/PR were static-verified only — live-smoke
   when convenient.
 
-## Next-epic roadmap (CodexMonitor parity — user picks one; grill-with-docs → ADR → tracer-bullet issues)
+## Next-epic roadmap (feature-parity backlog — user picks one; grill-with-docs → ADR → tracer-bullet issues)
 - **File tree + prompt library** — a file browser in the side panel. Unblocks BOTH the paused **`@` file-path
   autocomplete** (needs a main-side file-listing IPC; the agent expands `@path` itself server-side — see
   `HANDOFF.md` §6) AND a cleaner path for #168's chips.
@@ -63,4 +63,4 @@ auto-loads `CLAUDE.md` + the memory index) and paste the block below as the firs
 - **ADR-0010** (design-system decisions) · **ADR-0011** (draft threads / lazy binding) · **ADR-0012** (eager
   primary session at connect, reused by first prompt — the fix for empty agent-control pickers on a fresh draft).
 - `docs/design-tokens.md` (exact values) · `docs/design-system-components.md` (what was lifted from
-  shadcn/t3code) · `docs/streamdown-spike.md` (the Response/markdown wiring + the security posture).
+  the reference UIs) · `docs/streamdown-spike.md` (the Response/markdown wiring + the security posture).

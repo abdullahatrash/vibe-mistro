@@ -1,9 +1,9 @@
 # Distribution: signed arm64 DMG + App updates via GitHub Releases
 
 **Status: ACCEPTED** (2026-07-03). Builds on **ADR-0002** (thin orchestrator — distribution is
-app-shell concern, no agent involvement). Reference implementation: t3code's release pipeline
-(`.github/workflows/release.yml`, `scripts/build-desktop-artifact.ts`, `electron-updater`), minus
-its nightly channel and custom manifest merging.
+app-shell concern, no agent involvement). Reference implementation: a production Electron release
+pipeline (a tag-triggered GitHub Actions workflow + a build-artifact script + `electron-updater`),
+minus its nightly channel and custom manifest merging.
 
 ## Context
 
@@ -19,7 +19,7 @@ stated goal. An Apple Developer account exists.
 1. **Artifacts and the update feed live on GitHub Releases** (public repo), single **stable
    channel**. `electron-builder --publish` uploads DMG + ZIP + `latest-mac.yml` on release;
    `electron-updater`'s GitHub provider reads the same feed. No buckets, no update server, no
-   nightlies — that machinery (t3code's) earns its keep only with private repos or multiple
+   nightlies — that machinery earns its keep only with private repos or multiple
    channels.
 2. **Apple Silicon (arm64) only** for the beta. Every Mac since 2020 is arm64, the audience
    (developers running Vibe agents) skews recent, and one arch avoids universal-binary
@@ -37,7 +37,7 @@ stated goal. An Apple Developer account exists.
    supervises live `vibe-acp` processes and a forced restart would kill in-flight turns (same
    rule as "no Vibe upgrade mid-turn").
 7. **Packager is electron-builder** — it is what `electron-updater` pairs with, what
-   electron-vite integrates with, and what t3code ships with. The packaged app gets a real
+   electron-vite integrates with, and what production Electron apps ship with. The packaged app gets a real
    `appId` (`com.abdullahatrash.vibe-mistro`); the dev-time "don't touch CFBundleIdentifier"
    rule (TCC) concerned patching the dev Electron binary and does not apply to the packaged app.
 
