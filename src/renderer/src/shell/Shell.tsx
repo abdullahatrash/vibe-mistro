@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX, type PointerEvent, type ReactNode } from 'react'
-import { Atom, ChevronDown, Clock, Search, Settings, SquarePen } from 'lucide-react'
+import { ChevronDown, Search, Settings, SquarePen } from 'lucide-react'
 import type { ListMetadataResult } from '../../../shared/ipc'
 import type { NavState } from './nav-reducer'
 import type { UnifiedThreadRow } from './unified-threads'
@@ -15,7 +15,6 @@ import { planLabel } from '../auth/plan-label'
 import { useAccountPlan } from '../auth/use-account-plan'
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '../ui/menu'
 import { NavItem } from '../ui/nav-item'
-import { Logo } from './logo'
 
 export type { WorkspaceFlags } from './workspace-nav'
 
@@ -24,8 +23,8 @@ export type { WorkspaceFlags } from './workspace-nav'
  * stays mounted and a right conversation OUTLET whose content swaps. Navigation
  * (the pure nav reducer, decision 2) and the per-Workspace connection registry
  * (decision 3) live in App; Shell is the presentational layout — now restyled onto
- * the design-system tokens + primitives (#113): a warm `--sidebar` surface, a logo +
- * wordmark header, a primary nav (New chat + placeholder Search/Scheduled/Plugins),
+ * the design-system tokens + primitives (#113): a warm `--sidebar` surface, a primary
+ * nav (New chat + Search; the logo + wordmark live in App's window-chrome header),
  * a collapsible Projects list (= Workspaces, the {@link WorkspaceNav} subtree) with
  * thread rows + relative timestamps + a "Show more" cap, and a placeholder account chip.
  * Behavior is unchanged: the same selection/New-thread/delete handlers, the same
@@ -144,13 +143,13 @@ export function Shell({
           dragging && 'transition-none',
         )}
       >
-        {/* Three-band sidebar: a PINNED top (logo + primary nav) and a PINNED bottom
+        {/* Three-band sidebar: a PINNED top (primary nav — the logo + wordmark moved
+            to the window-chrome header, user call 2026-07-03) and a PINNED bottom
             (account) sandwich the ONLY scroll region — the Projects list — so the nav
             and account stay put while just the projects scroll. The INNER holds the
             resized width (not shrinking) so content slides under the clip on collapse. */}
         <div className="flex h-full flex-none flex-col gap-3 p-3" style={{ width }}>
           <div className="flex flex-none flex-col gap-3">
-            <SidebarHeader />
             <PrimaryNav busy={opening} onNewThread={onNewThread} onOpenSearch={onOpenSearch} />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -202,23 +201,14 @@ export function Shell({
   )
 }
 
-/** Logo + wordmark, pinned at the sidebar's top. */
-function SidebarHeader(): JSX.Element {
-  return (
-    <div className="flex items-center gap-2.5 px-1 pt-1">
-      <Logo size={30} />
-      <span className="text-[14.5px] font-semibold tracking-tight text-text-strong">vibe mistro</span>
-    </div>
-  )
-}
-
 /**
  * The primary nav: the peach-tinted "New chat" pill (the ONE filled tint,
  * `--accent-fill`). It's ALWAYS actionable now — `onNewThread` (App's `startNewChat`)
  * targets the selected/most-recent project (connect-if-needed) or opens the picker when
  * there are none — so it's only disabled while a connect is in flight (`busy`). Below it,
- * Search opens the Search palette (#174; also ⌘K); Scheduled / Plugins are still
- * net-new features (ADR-0010) shown as disabled "Soon" rows until their epics land.
+ * Search opens the Search palette (#174; also ⌘K). The old Scheduled / Plugins "Soon"
+ * placeholders are HIDDEN for v1 (user call, 2026-07-03): their epics (#175 / #176)
+ * stay parked, and unbuilt rows shouldn't greet first-version users.
  */
 function PrimaryNav({
   busy,
@@ -245,24 +235,7 @@ function PrimaryNav({
         <span className="flex-1">Search</span>
         <span className="text-[11px] font-medium text-faint">⌘K</span>
       </NavItem>
-      <PlaceholderNav icon={<Clock className="size-[18px]" aria-hidden />}>Scheduled</PlaceholderNav>
-      <PlaceholderNav icon={<Atom className="size-[18px]" aria-hidden />}>Plugins</PlaceholderNav>
     </nav>
-  )
-}
-
-/**
- * A not-yet-built primary-nav entry (Search / Scheduled / Plugins — each its own future
- * epic, ADR-0010): a disabled `NavItem` with a muted "Soon" tag, so it reads as
- * intentionally-coming rather than a broken no-op.
- */
-function PlaceholderNav({ icon, children }: { icon: JSX.Element; children: ReactNode }): JSX.Element {
-  return (
-    <NavItem disabled title="Coming soon" className="cursor-default opacity-60">
-      {icon}
-      <span className="flex-1">{children}</span>
-      <span className="text-[11px] font-medium text-faint">Soon</span>
-    </NavItem>
   )
 }
 

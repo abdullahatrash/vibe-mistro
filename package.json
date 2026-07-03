@@ -18,7 +18,7 @@
     "test:e2e": "playwright test",
     "test:e2e:update": "playwright test --update-snapshots",
     "lint": "eslint .",
-    "postinstall": "node scripts/fix-node-pty-perms.mjs"
+    "postinstall": "node scripts/fix-node-pty-perms.mjs && node scripts/patch-dev-electron.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
@@ -39,6 +39,7 @@
     "node-pty": "^1.1.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "run": "^1.5.0",
     "streamdown": "2.5.0",
     "tailwind-merge": "^3",
     "tailwindcss": "^4",

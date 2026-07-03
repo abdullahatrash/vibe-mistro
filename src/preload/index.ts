@@ -4,6 +4,7 @@ import {
   type DiscoverDevServersResult,
   type AcpEvent,
   type AgentEvictedEvent,
+  type MenuActionEvent,
   type CancelTurnArgs,
   type DeleteThreadResult,
   type GitBranchesArgs,
@@ -175,6 +176,7 @@ const api = {
   onThreadStatus: subscribe<ThreadStatusEvent>(IPC.threadStatus),
   onThreadTitle: subscribe<ThreadTitleEvent>(IPC.threadTitle),
   onAgentEvicted: subscribe<AgentEvictedEvent>(IPC.agentEvicted),
+  onMenuAction: subscribe<MenuActionEvent>(IPC.menuAction),
   onGitStatus: subscribe<GitStatusEvent>(IPC.gitStatus),
   onGitActionProgress: subscribe<GitActionProgressEvent>(IPC.gitActionProgress),
 }

@@ -35,6 +35,7 @@ import { IconButton } from './ui/icon-button'
 import { OpenInEditorButton } from './editors/OpenInEditorButton'
 import { SearchPalette } from './search/SearchPalette'
 import { Shell, type WorkspaceFlags } from './shell/Shell'
+import { Logo } from './shell/logo'
 import { firstRunState } from './shell/first-run'
 import { installBannerMessage } from './shell/install-banner'
 import { InstallBanner } from './shell/InstallBanner'
@@ -286,6 +287,15 @@ export function App(): JSX.Element {
   useEffect(() => {
     return window.api.onAgentEvicted((e) => {
       connDispatch({ type: 'evict', agentIds: new Set(e.agentIds) })
+    })
+  }, [])
+
+  // Native application-menu actions (app-menu.ts): main owns the menu bar but the
+  // renderer owns navigation, so "Settings…" (Cmd+,) arrives here and routes
+  // through the same nav reducer as the in-app settings button.
+  useEffect(() => {
+    return window.api.onMenuAction((e) => {
+      if (e.action === 'open-settings') navDispatch({ type: 'open-settings' })
     })
   }, [])
 
@@ -714,6 +724,15 @@ export function App(): JSX.Element {
           >
             <PanelLeft className="size-4" aria-hidden />
           </IconButton>
+        </div>
+        {/* Brand — lifted from the sidebar's top band (user call, 2026-07-03) so it
+            stays visible when the sidebar collapses. Non-interactive, so it remains
+            part of the window's drag region like the rest of the bar. */}
+        <div className="ml-2 flex items-center gap-2">
+          <Logo size={20} />
+          <span className="text-[13.5px] font-semibold tracking-tight text-text-strong">
+            Vibe Mistro
+          </span>
         </div>
         <div className="flex-1" />
         {/* Right-region layout controls: the side-panel toggle is LIVE (#193, the design's

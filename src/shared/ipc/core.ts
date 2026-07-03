@@ -29,6 +29,8 @@ export const coreChannels = {
   agentEvicted: 'agent:evicted',
   /** Main -> renderer: streamed ACP event tagged by the owning agent — see {@link AcpEvent}. */
   acpEvent: 'acp:event',
+  /** Main -> renderer: a native application-menu item the renderer must act on — see {@link MenuActionEvent}. */
+  menuAction: 'menu:action',
 } as const
 
 export interface VibeDetectResult {
@@ -149,6 +151,16 @@ export type StartThreadResult =
   // but no Thread was opened. `authMethods` feeds the sign-in panel's label.
   | { ok: false; kind: 'not-signed-in'; agentId: string; workspaceDir: string; authMethods: AuthMethod[] }
   | { ok: false; kind: 'error'; error: string; hint: string | null }
+
+/**
+ * A native application-menu action that must be fulfilled by the renderer (the
+ * t3code `dispatchMenuAction` shape): main owns the menu bar but not the views,
+ * so items like "Settings…" broadcast an action and the renderer routes it
+ * through its own navigation. A union so future menu items extend it typed.
+ */
+export interface MenuActionEvent {
+  action: 'open-settings'
+}
 
 export interface AcpEvent {
   /** Id of the Workspace agent the payload came from. */
