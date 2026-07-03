@@ -157,14 +157,17 @@ const COPY_FEEDBACK_MS = 1000
 function MessageCopyButton({ text }: { text: string }): JSX.Element {
   const [feedback, setFeedback] = useState<'copied' | 'failed' | null>(null)
   const timeoutRef = useRef<number | null>(null)
+  // Set true in SETUP, not just the initializer — StrictMode's dev-only
+  // mount→cleanup→remount rehearsal otherwise leaves this false forever and every
+  // click silently bails (no feedback in dev, fine in prod — the worst kind of bug).
   const mountedRef = useRef(true)
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
       mountedRef.current = false
       if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current)
-    },
-    [],
-  )
+    }
+  }, [])
   function showFeedback(next: 'copied' | 'failed'): void {
     // The clipboard write is async — bail if we unmounted between click and settle.
     if (!mountedRef.current) return
