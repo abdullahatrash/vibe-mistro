@@ -319,6 +319,7 @@ function PanelBody({
                 isActive={isActive}
                 busy={busy}
                 onCollapse={() => closeWorkspaceSurface(workspaceId, 'review')}
+                activeThreadId={activeThreadId}
               />
             )}
             {active?.kind === 'files' && (

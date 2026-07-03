@@ -64,7 +64,7 @@ export const DiffFileSection = memo(
     }, [diffHash, diffStyle, wrap])
 
     return (
-      <section ref={refFn} className="border-b border-border-muted">
+      <section ref={refFn} data-diff-path={path} className="border-b border-border-muted">
         <button
           type="button"
           onClick={onToggle}

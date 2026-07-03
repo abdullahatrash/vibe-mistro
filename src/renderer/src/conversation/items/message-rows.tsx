@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
-import { Check, Copy, File, MousePointerClick, RotateCcw, Sparkles, ThumbsDown, ThumbsUp } from 'lucide-react'
+import { Check, Copy, File, MessageSquareText, MousePointerClick, RotateCcw, Sparkles, ThumbsDown, ThumbsUp } from 'lucide-react'
 import { IconButton } from '../../ui/icon-button'
 import { Response } from '../Response'
 import { matchInvokedCommand } from '../command-autocomplete'
@@ -18,7 +18,7 @@ export function UserRow({
   // `<attached_files>` / `<element_context>` marker blocks; strip them back into chips at
   // RENDER time so the bubble shows the clean prose — live and on JSONL replay, which
   // ride the same text. User-typed inline `@path` mentions pass through untouched.
-  const { cleanText, files, elements } = extractPromptContexts(item.text)
+  const { cleanText, files, elements, reviews } = extractPromptContexts(item.text)
   // Skill/command chip: vibe-acp invokes a skill when the prompt opens with a
   // known `/name`, but gives NO wire-level acknowledgment — so we surface the
   // match ourselves. Matched at RENDER time against the CURRENT list (not stamped
@@ -29,7 +29,7 @@ export function UserRow({
   // instead of spanning the pane. Echoed attachments (#100) re-home into the bubble.
   return (
     <div className="flex flex-col items-end gap-1.5">
-      {(command || files.length > 0 || elements.length > 0) && (
+      {(command || files.length > 0 || elements.length > 0 || reviews.length > 0) && (
         <div className="flex max-w-[80%] flex-wrap justify-end gap-1.5">
           {command && (
             <span
@@ -62,6 +62,26 @@ export function UserRow({
             >
               <MousePointerClick className="size-3 shrink-0" aria-hidden />
               <span className="truncate">{element.selector ?? `<${element.tagName}>`}</span>
+            </span>
+          ))}
+          {reviews.map((review) => (
+            // Review-comment chips (#239): the sent-turn mirror of the composer's
+            // staged comments — path + line range, note + excerpt in the tooltip.
+            <span
+              key={review.id}
+              data-review-chip
+              title={[review.note, '', review.excerpt].join('\n')}
+              className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] px-1.5 py-0.5 font-mono text-xs leading-none text-accent-text"
+            >
+              <MessageSquareText className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">
+                {review.filePath}
+                {review.startLine !== null && review.endLine !== null
+                  ? review.startLine === review.endLine
+                    ? `:${review.startLine}`
+                    : `:${review.startLine}-${review.endLine}`
+                  : ''}
+              </span>
             </span>
           ))}
         </div>

@@ -5,6 +5,7 @@ import { Button } from '../ui'
 import { readDiffPrefs, writeDiffPrefs, type DiffPrefs } from './diff-prefs-store'
 import { diffRequestKey, type GitFileView } from './status-view'
 import { DiffFileSection, DiffToggles } from './diff-view-chrome'
+import { ReviewSelectionLayer } from './ReviewSelectionLayer'
 
 /**
  * The ALL-FILES working-tree diff view (#235, PRD #233) — every changed file as a
@@ -25,6 +26,7 @@ export function AllFilesDiffView({
   files,
   initialPath,
   onBack,
+  activeThreadId,
 }: {
   workspaceDir: string
   /** The LIVE sorted view files — sections follow this order and churn drives refetch. */
@@ -32,6 +34,8 @@ export function AllFilesDiffView({
   /** The section to scroll to on open (the clicked row), if any. */
   initialPath: string | null
   onBack: () => void
+  /** The active Thread for review comments (#239) — null renders the layer inert. */
+  activeThreadId: string | null
 }): JSX.Element {
   const [prefs, setPrefs] = useState<DiffPrefs>(() => readDiffPrefs(window.localStorage))
   const [result, setResult] = useState<GitFullDiffResult | null>(null)
@@ -107,7 +111,9 @@ export function AllFilesDiffView({
 
       <DiffToggles prefs={prefs} onChange={updatePrefs} />
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      {/* Review comments (#239): select lines in any section → floating Comment →
+          note editor → a pending-context chip in the active Thread's composer. */}
+      <ReviewSelectionLayer threadId={activeThreadId} getPatch={(path) => entryByPath.get(path)?.patch}>
         {loading && !result ? (
           <p className="px-3 py-3 text-[13px] text-muted">Loading diff…</p>
         ) : (
@@ -136,7 +142,7 @@ export function AllFilesDiffView({
             />
           ))
         )}
-      </div>
+      </ReviewSelectionLayer>
     </div>
   )
 }

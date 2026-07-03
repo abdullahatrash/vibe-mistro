@@ -42,10 +42,55 @@ type ElementListener = (payload: ComposerInsertElement) => void
 
 type ImageListener = (image: ComposerInsertImage) => void
 
+/**
+ * A Review Surface diff comment to stage in a Thread's composer (#239): the file, the
+ * located new-file line range (null when the selection couldn't be mapped), the user's
+ * note, and the verbatim +/-/space diff excerpt. The composer mints the chip id.
+ */
+export interface ComposerInsertReviewComment {
+  filePath: string
+  startLine: number | null
+  endLine: number | null
+  note: string
+  excerpt: string
+}
+
+type ReviewCommentListener = (payload: ComposerInsertReviewComment) => void
+
 const listenersByThread = new Map<string, Set<InsertListener>>()
 const textListenersByThread = new Map<string, Set<InsertListener>>()
 const imageListenersByThread = new Map<string, Set<ImageListener>>()
 const elementListenersByThread = new Map<string, Set<ElementListener>>()
+const reviewListenersByThread = new Map<string, Set<ReviewCommentListener>>()
+
+/** Subscribe a Thread's composer to review-comment payloads (#239); returns an unsubscribe. */
+export function subscribeComposerInsertReviewComment(
+  threadId: string,
+  listener: ReviewCommentListener,
+): () => void {
+  let set = reviewListenersByThread.get(threadId)
+  if (!set) {
+    set = new Set()
+    reviewListenersByThread.set(threadId, set)
+  }
+  set.add(listener)
+  return () => {
+    const current = reviewListenersByThread.get(threadId)
+    if (!current) return
+    current.delete(listener)
+    if (current.size === 0) reviewListenersByThread.delete(threadId)
+  }
+}
+
+/** Deliver a Review Surface diff comment to the Thread's composer; a no-op if none is mounted. */
+export function emitComposerInsertReviewComment(
+  threadId: string,
+  payload: ComposerInsertReviewComment,
+): void {
+  const set = reviewListenersByThread.get(threadId)
+  if (!set) return
+  for (const listener of set) listener(payload)
+}
 
 /**
  * Subscribe a Thread's composer to STANDALONE image insert requests (#226 page
