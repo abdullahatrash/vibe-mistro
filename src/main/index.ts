@@ -22,6 +22,7 @@ import {
   type AccountWhoamiResult,
   type CheckAuthStatusArgs,
   type CheckAuthStatusResult,
+  type CheckVibeUpdateArgs,
   type SetThreadConfigArgs,
   type SetThreadConfigResult,
   type SetThreadFlagsArgs,
@@ -39,6 +40,7 @@ import {
   type ThreadTitleEvent,
 } from '../shared/ipc'
 import { detectVibe } from './vibe-detect'
+import { checkVibeUpdate } from './vibe-update'
 import { getShellEnv } from './shell-env'
 import { getAccountWhoami, readKeychainApiKey, readVibeEnvFile } from './auth/whoami'
 import { searchThreads, tokenizeQuery } from './search/search-threads'
@@ -682,6 +684,10 @@ function registerIpc(deps: MainDeps): void {
   registerBrowserIpc()
 
   ipcMain.handle(IPC.detectVibe, () => detectVibe())
+
+  ipcMain.handle(IPC.checkVibeUpdate, (_event, args: CheckVibeUpdateArgs) =>
+    checkVibeUpdate(args.vibeVersion),
+  )
 
   ipcMain.handle(IPC.openWorkspaceDialog, async (event): Promise<string | null> => {
     const win = BrowserWindow.fromWebContents(event.sender)

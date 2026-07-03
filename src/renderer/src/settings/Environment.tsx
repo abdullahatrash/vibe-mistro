@@ -1,8 +1,9 @@
-import type { JSX } from 'react'
-import type { VibeDetectResult } from '../../../shared/ipc'
+import { useEffect, useState, type JSX } from 'react'
+import type { VibeDetectResult, VibeUpdateResult } from '../../../shared/ipc'
 import { INSTALL_DOCS_URL } from '../../../shared/install-guidance'
 import { Button } from '../ui/button'
 import { CodeText } from '../ui/code-text'
+import { describeUpdateStatus } from './update-status'
 
 /** The environment check: whether `vibe` / `vibe-acp` are installed + reachable. */
 export function Environment({
@@ -14,6 +15,8 @@ export function Environment({
   loading: boolean
   onRecheck: () => void
 }): JSX.Element {
+  const update = useVibeUpdate(detect)
+  const updateStatus = describeUpdateStatus(update)
   return (
     <div className="flex flex-col gap-2.5 rounded-[9px] border border-border p-3">
       <div className="flex items-center justify-between text-[13px] font-semibold text-text-strong">
@@ -30,6 +33,18 @@ export function Environment({
             <span className="status__label">version</span>
             <span className="status__value">{detect.vibeVersion ?? '—'}</span>
           </li>
+          {updateStatus && (
+            <li className="status__row">
+              <span className="status__label">latest</span>
+              <span className="status__value">{updateStatus}</span>
+            </li>
+          )}
+          {update?.updateAvailable && (
+            <li className="text-[13px] leading-normal text-faint">
+              Update with <CodeText text="uv tool upgrade mistral-vibe" /> (or{' '}
+              <CodeText text="brew upgrade mistral-vibe" />), then Re-check.
+            </li>
+          )}
           {detect.error && (
             <li className="status__error">
               <CodeText text={detect.error} />{' '}
@@ -42,6 +57,29 @@ export function Environment({
       )}
     </div>
   )
+}
+
+/**
+ * Check PyPI (via main) for a newer `mistral-vibe` once per detection result —
+ * a Re-check mints a fresh `detect` object, so it also re-runs this. Skipped
+ * until the CLI is actually found; a check failure renders as its own row copy.
+ */
+function useVibeUpdate(detect: VibeDetectResult | null): VibeUpdateResult | null {
+  const [update, setUpdate] = useState<VibeUpdateResult | null>(null)
+  useEffect(() => {
+    if (!detect?.vibeFound) {
+      setUpdate(null)
+      return
+    }
+    let cancelled = false
+    void window.api.checkVibeUpdate({ vibeVersion: detect.vibeVersion }).then((result) => {
+      if (!cancelled) setUpdate(result)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [detect])
+  return update
 }
 
 function StatusRow({ ok, label }: { ok: boolean; label: string }): JSX.Element {

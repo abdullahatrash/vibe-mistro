@@ -10,6 +10,8 @@ import type { AuthMethod } from './auth'
 export const coreChannels = {
   /** Detect whether `vibe` / `vibe-acp` are installed and reachable. */
   detectVibe: 'vibe:detect',
+  /** Check PyPI for a newer `mistral-vibe` release than the installed CLI. */
+  checkVibeUpdate: 'vibe:check-update',
   /** Open a native directory picker to choose a Workspace. */
   openWorkspaceDialog: 'workspace:open-dialog',
   /** Start a Workspace agent, run the ACP handshake, and open a Thread. */
@@ -39,6 +41,25 @@ export interface VibeDetectResult {
   vibeVersion: string | null
   /** Resolved absolute path to the vibe-acp binary, when found. */
   vibeAcpPath: string | null
+  error: string | null
+}
+
+export interface CheckVibeUpdateArgs {
+  /** The raw `vibe --version` line from {@link VibeDetectResult.vibeVersion} (e.g. `vibe 2.18.4`). */
+  vibeVersion: string | null
+}
+
+/**
+ * Result of the PyPI update check. The comparison happens in main (the same
+ * `pypi.org` source Vibe's own update notifier queries); the renderer only renders.
+ * Best-effort like detection: a failed check sets `error`, never throws.
+ */
+export interface VibeUpdateResult {
+  /** Installed version parsed out of the `vibe --version` line, e.g. `2.18.4`. */
+  installedVersion: string | null
+  /** Latest release on PyPI, e.g. `2.19.0`. */
+  latestVersion: string | null
+  updateAvailable: boolean
   error: string | null
 }
 

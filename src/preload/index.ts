@@ -78,6 +78,8 @@ import {
   type ThreadStatusEvent,
   type ThreadTitleEvent,
   type VibeDetectResult,
+  type CheckVibeUpdateArgs,
+  type VibeUpdateResult,
 } from '../shared/ipc'
 
 /**
@@ -96,6 +98,8 @@ function subscribe<T>(channel: string): (listener: (event: T) => void) => () => 
 
 const api = {
   detectVibe: (): Promise<VibeDetectResult> => ipcRenderer.invoke(IPC.detectVibe),
+  checkVibeUpdate: (args: CheckVibeUpdateArgs): Promise<VibeUpdateResult> =>
+    ipcRenderer.invoke(IPC.checkVibeUpdate, args),
   openWorkspaceDialog: (): Promise<string | null> => ipcRenderer.invoke(IPC.openWorkspaceDialog),
   startThread: (args: StartThreadArgs): Promise<StartThreadResult> =>
     ipcRenderer.invoke(IPC.startThread, args),
