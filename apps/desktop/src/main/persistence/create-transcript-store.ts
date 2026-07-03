@@ -1,55 +1,37 @@
-import { mkdir } from 'node:fs/promises'
 import { importLegacyTranscripts } from './import-legacy-transcripts'
 import { SqliteTranscriptStore } from './sqlite-transcript-store'
-import { TranscriptStore } from './transcript'
 import type { TranscriptStoreApi } from './transcript-store-api'
 import type { StateDb } from './sqlite-db'
 
 /**
- * The transcript-store construction seam (ADR-0019). The engine FOLLOWS the
- * metadata store's: `stateDb` is non-null exactly when `createMetadataStore`
- * selected SQLite, so both stores always run on the same engine — never a
- * split-brain where metadata rows and transcript files disagree about where
- * truth lives. Runs the one-time JSONL import (per-file self-gating; the dir
- * renames to `transcripts.bak` when fully handled).
- *
- * The legacy path keeps its existing semantics: mkdir the transcripts dir and
- * return null on failure — teeing then no-ops inside the bridge (best-effort).
+ * The transcript-store construction seam (ADR-0019). The store shares the
+ * metadata store's `stateDb` (same `state.sqlite`, never split-brain) and runs
+ * the one-time JSONL import (per-file self-gating; the legacy dir renames to
+ * `transcripts.bak` when fully handled). The legacy JSONL engine was removed
+ * in #298 — on the in-memory failure fallback this store simply rides the same
+ * non-durable db.
  */
 
-export interface CreateTranscriptStoreResult {
-  transcript: TranscriptStoreApi | null
-  engine: 'sqlite' | 'json'
-}
-
 export interface CreateTranscriptStoreDeps {
-  /** From `createMetadataStore` — non-null selects the SQLite engine. */
-  stateDb: StateDb | null
-  /** The legacy `userData/transcripts` dir (import source / legacy home). */
+  /** From `createMetadataStore` — the one open state database. */
+  stateDb: StateDb
+  /** The legacy `userData/transcripts` dir (import source only). */
   transcriptsDir: string
+  /** Skip the import (the in-memory fallback: imported rows would evaporate
+   * while the rename tombstones the real files). */
+  skipImport?: boolean
 }
 
 export async function createTranscriptStore(
   deps: CreateTranscriptStoreDeps,
-): Promise<CreateTranscriptStoreResult> {
-  if (deps.stateDb) {
-    const store = new SqliteTranscriptStore({ stateDb: deps.stateDb })
-    if (!deps.stateDb.locked) {
-      // Best-effort: a failed import logs and leaves the dir for the next
-      // launch's retry — it must never block the store (or launch) itself.
-      try {
-        await importLegacyTranscripts({ dir: deps.transcriptsDir, store })
-      } catch (err) {
-        console.error('[create-transcript-store] legacy transcript import failed:', err)
-      }
+): Promise<TranscriptStoreApi> {
+  const store = new SqliteTranscriptStore({ stateDb: deps.stateDb })
+  if (!deps.stateDb.locked && !deps.skipImport) {
+    try {
+      await importLegacyTranscripts({ dir: deps.transcriptsDir, store })
+    } catch (err) {
+      console.error('[create-transcript-store] legacy transcript import failed:', err)
     }
-    return { transcript: store, engine: 'sqlite' }
   }
-
-  try {
-    await mkdir(deps.transcriptsDir, { recursive: true })
-    return { transcript: new TranscriptStore({ dir: deps.transcriptsDir }), engine: 'json' }
-  } catch {
-    return { transcript: null, engine: 'json' }
-  }
+  return store
 }

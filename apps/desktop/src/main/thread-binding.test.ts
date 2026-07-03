@@ -1,10 +1,9 @@
-import { describe, it, expect, afterAll } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { describe, it, expect } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { ensureBoundSession, resolveContinueTarget, type SessionBinder } from './thread-binding'
-import { MetadataStore } from './persistence/metadata-store'
+import { openStateDb } from './persistence/sqlite-db'
+import { SqliteMetadataStore } from './persistence/sqlite-metadata-store'
+import { STATE_MIGRATIONS } from './persistence/state-migrations'
 import { SessionLoadError, WorkspaceAgentError } from './workspace-agent'
 import type { ThreadInfo } from '../shared/ipc'
 
@@ -19,8 +18,12 @@ import type { ThreadInfo } from '../shared/ipc'
  * `session/new` calls) over a REAL temp-dir store — never a live `vibe-acp`.
  */
 
-const dir = mkdtempSync(join(tmpdir(), 'vibe-binding-'))
-afterAll(() => rmSync(dir, { recursive: true, force: true }))
+/** An isolated in-memory metadata store per test (#298 — the JSON engine is gone). */
+function memStore(): SqliteMetadataStore {
+  return new SqliteMetadataStore({
+    stateDb: openStateDb({ path: ':memory:', migrations: STATE_MIGRATIONS }),
+  })
+}
 
 /**
  * A fake binder that mints a fresh sessionId per `openThread` (one per session/new)
@@ -81,7 +84,7 @@ function fakeBinder(opts: {
 
 describe('ensureBoundSession', () => {
   it('persists a renderer-minted draft id on first prompt (nothing before), binds it, and reuses it', async () => {
-    const store = new MetadataStore({ filePath: join(dir, 'bind.json') })
+    const store = memStore()
     await store.load()
     const ws = await store.upsertWorkspace({ dir: '/proj/bind' })
     // #58: the draft is renderer-only — its id is minted in the renderer and NO
@@ -123,7 +126,7 @@ describe('ensureBoundSession', () => {
   })
 
   it('reuses a preopened primary session on first prompt — binds it, NO session/new (ADR-0012)', async () => {
-    const store = new MetadataStore({ filePath: join(dir, 'reuse.json') })
+    const store = memStore()
     await store.load()
     const ws = await store.upsertWorkspace({ dir: '/proj/reuse' })
     const threadId = randomUUID()
@@ -161,7 +164,7 @@ describe('ensureBoundSession', () => {
   })
 
   it('mints a fresh session/new for a draft when NO preopened primary session is supplied', async () => {
-    const store = new MetadataStore({ filePath: join(dir, 'no-preopen.json') })
+    const store = memStore()
     await store.load()
     const ws = await store.upsertWorkspace({ dir: '/proj/no-preopen' })
     const agent = fakeOpener()
@@ -182,7 +185,7 @@ describe('ensureBoundSession', () => {
   })
 
   it('binds two drafts under one agent to two distinct sessions (multi-Thread per Workspace)', async () => {
-    const store = new MetadataStore({ filePath: join(dir, 'multi.json') })
+    const store = memStore()
     await store.load()
     const ws = await store.upsertWorkspace({ dir: '/proj/multi' })
     // Two renderer-minted draft ids, neither persisted until its first prompt (#58).
@@ -211,11 +214,11 @@ describe('ensureBoundSession', () => {
  */
 describe('ensureBoundSession — reopened Thread (TB4 #33)', () => {
   async function reopenedStore(sessionId: string): Promise<{
-    store: MetadataStore
+    store: SqliteMetadataStore
     workspaceId: string
     threadId: string
   }> {
-    const store = new MetadataStore({ filePath: join(dir, `reopen-${randomName()}.json`) })
+    const store = memStore()
     await store.load()
     const ws = await store.upsertWorkspace({ dir: `/proj/${randomName()}` })
     const thread = await store.upsertThread({ workspaceId: ws.id, sessionId })
@@ -297,7 +300,7 @@ describe('ensureBoundSession — reopened Thread (TB4 #33)', () => {
  */
 describe('resolveContinueTarget — continue without opening a Thread (TB4 #33)', () => {
   it('seeds from the existing record without persisting a new Thread, then resumes on first prompt', async () => {
-    const store = new MetadataStore({ filePath: join(dir, `continue-${randomName()}.json`) })
+    const store = memStore()
     await store.load()
     const ws = await store.upsertWorkspace({ dir: '/proj/continue' })
     const existing = await store.upsertThread({ workspaceId: ws.id, sessionId: 'cursor-1', title: 'Earlier' })
@@ -330,7 +333,7 @@ describe('resolveContinueTarget — continue without opening a Thread (TB4 #33)'
   })
 
   it('returns null for an unknown Thread id (caller falls back to opening fresh)', async () => {
-    const store = new MetadataStore({ filePath: join(dir, `continue-miss-${randomName()}.json`) })
+    const store = memStore()
     await store.load()
     expect(resolveContinueTarget(store, 'no-such-thread')).toBeNull()
   })

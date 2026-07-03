@@ -7,8 +7,7 @@ import { openStateDb, type StateDb } from './sqlite-db'
 import { SqliteMetadataStore } from './sqlite-metadata-store'
 import { SqliteTranscriptStore } from './sqlite-transcript-store'
 import { STATE_MIGRATIONS } from './state-migrations'
-import { TranscriptStore, turnCompleteEntry, userPromptEntry } from './transcript'
-import type { TranscriptStoreApi } from './transcript-store-api'
+import { turnCompleteEntry, userPromptEntry } from './transcript'
 
 /**
  * The durable fold-snapshot tiering (ADR-0019, #297): `readWithSnapshot` /
@@ -205,28 +204,5 @@ describe('snapshot cleanup + fail-closed', () => {
       store.putSnapshot({ threadId: 't1', reducerVersion: V, lastSeq: 1, state: '{}' }),
     ).resolves.toBeUndefined()
     stateDb.close()
-  })
-})
-
-describe('legacy TranscriptStore behind the same seam', () => {
-  it('readWithSnapshot answers the whole log as the tail with lastSeq 0; putSnapshot no-ops', async () => {
-    const legacyDir = join(dir, 'legacy-jsonl')
-    const { mkdirSync } = await import('node:fs')
-    mkdirSync(legacyDir, { recursive: true })
-    // Typed as the seam interface — the class implementation legitimately
-    // declares fewer parameters (it ignores them), but callers use the API.
-    const store: TranscriptStoreApi = new TranscriptStore({ dir: legacyDir })
-    await store.append('t1', userPromptEntry('u1', 'legacy'))
-
-    const result = await store.readWithSnapshot('t1', V)
-    expect(result).toEqual({
-      snapshot: null,
-      tail: [userPromptEntry('u1', 'legacy')],
-      lastSeq: 0, // the renderer's put policy keys off this — never snapshots
-    })
-    await expect(
-      store.putSnapshot({ threadId: 't1', reducerVersion: V, lastSeq: 5, state: '{}' }),
-    ).resolves.toBeUndefined()
-    expect(await store.readWithSnapshot('t1', V)).toEqual(result) // nothing stored
   })
 })

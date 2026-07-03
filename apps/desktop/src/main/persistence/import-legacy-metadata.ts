@@ -1,5 +1,5 @@
-import { access, rename } from 'node:fs/promises'
-import { MetadataStore } from './metadata-store'
+import { access, readFile, rename } from 'node:fs/promises'
+import { parseLegacyMetadata } from './metadata-store'
 import type { SqliteMetadataStore } from './sqlite-metadata-store'
 
 /**
@@ -11,8 +11,8 @@ import type { SqliteMetadataStore } from './sqlite-metadata-store'
  * - state db non-empty → already imported; only the `.bak` rename is retried
  *   (covers a crash between commit and rename) — records are NEVER merged into
  *   existing data, so a re-run can't clobber newer SQLite rows with stale JSON;
- * - otherwise → parse through the legacy store itself (its envelope handling,
- *   per-record shape guards, and flag normalization for free), insert verbatim
+ * - otherwise → parse via `parseLegacyMetadata` (the removed JSON engine's
+ *   exact envelope handling, shape guards, and flag normalization), insert verbatim
  *   in one transaction, then rename the file to `metadata.json.bak` — kept, not
  *   deleted, as the rollback path.
  *
@@ -35,6 +35,7 @@ export interface ImportLegacyMetadataDeps {
   store: SqliteMetadataStore
   /** fs seams (tests) — default to node:fs/promises. */
   exists?: (path: string) => Promise<boolean>
+  readFileAt?: (path: string) => Promise<string>
   renameFile?: (from: string, to: string) => Promise<void>
 }
 
@@ -42,14 +43,20 @@ export async function importLegacyMetadata(
   deps: ImportLegacyMetadataDeps,
 ): Promise<ImportLegacyMetadataResult> {
   const exists = deps.exists ?? defaultExists
+  const readFileAt = deps.readFileAt ?? ((path: string) => readFile(path, 'utf8'))
   const renameFile = deps.renameFile ?? rename
   const bakPath = `${deps.filePath}.bak`
 
   if (!(await exists(deps.filePath))) return 'skipped-absent'
 
-  const legacy = new MetadataStore({ filePath: deps.filePath })
-  await legacy.load()
-  if (legacy.isLocked()) {
+  let raw: string
+  try {
+    raw = await readFileAt(deps.filePath)
+  } catch {
+    return 'skipped-absent' // raced away between the exists check and the read
+  }
+  const legacy = parseLegacyMetadata(raw)
+  if (legacy.locked) {
     // Written by a newer build than even this one understands — preserve it.
     console.error(`[import-legacy-metadata] ${deps.filePath} is newer than this build; left as-is`)
     return 'skipped-locked'
@@ -68,7 +75,7 @@ export async function importLegacyMetadata(
   }
 
   try {
-    deps.store.importSnapshot(legacy.snapshot())
+    deps.store.importSnapshot(legacy.snapshot)
   } catch (err) {
     console.error(`[import-legacy-metadata] import failed (rolled back):`, err)
     return 'failed'
