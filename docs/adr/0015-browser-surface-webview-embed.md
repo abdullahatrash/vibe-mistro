@@ -36,10 +36,13 @@ question that decides everything else is the EMBEDDING MECHANISM. Three candidat
 
 2. **The view is DISPOSABLE; no root-mounted overlay.** t3code mounts one global webview host
    over an in-layout slot (rect-tracking store) so the page survives their panel unmounting. We
-   deliberately skip that machinery: the webview lives inside the Surface; unmounting (tab
-   close, Workspace backgrounded) discards the page and the persisted URL (slice 2, #217)
-   reloads it on return. Dev-server pages are cheap to reload; the overlay pattern is the known
-   upgrade path if that assumption fails.
+   skip that machinery but keep the WEBVIEW ELEMENT mounted across surface-TAB switches (hidden,
+   not unmounted, when another tab is active — verified that `display:none` does not detach the
+   guest), so the live page (scroll, form state, JS) survives switching tabs. The page is
+   discarded only on a heavier context change — closing the tab or backgrounding the Workspace
+   (the whole panel unmounts) — where the persisted URL (slice 2, #217) reloads it on return.
+   The t3code root-mounted overlay is the known upgrade path if even Workspace-switch reload
+   proves too costly.
 
 3. **Guest security posture, three layers, stricter than t3code where possible.**
    (a) Per-Workspace persisted partition `persist:vibe-browser-<fnv1a(workspaceDir)>` — preview
