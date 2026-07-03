@@ -11,7 +11,9 @@ import {
   type GitStatusEvent,
   type ListMetadataResult,
   type OpenThreadArgs,
+  type ReadTranscriptArgs,
   type ReadTranscriptResult,
+  type ThreadSnapshotPutArgs,
   type ReadThreadAttachmentsResult,
   type TranscriptImageRef,
   type RemoveWorkspaceResult,
@@ -1293,12 +1295,28 @@ function registerIpc(deps: MainDeps): void {
     },
   )
 
-  ipcMain.handle(IPC.readTranscript, (_event, threadId: string): Promise<ReadTranscriptResult> => {
-    // The process-free reopen source (ADR-0005, TB3): hand the renderer the
-    // Thread's logged input stream so it can replay through the reducer with NO
-    // `vibe-acp` spawned. A missing/absent log reads back as [] (never throws).
-    if (!deps.transcript) return Promise.resolve([])
-    return deps.transcript.read(threadId)
+  ipcMain.handle(
+    IPC.readTranscript,
+    (_event, args: ReadTranscriptArgs): Promise<ReadTranscriptResult> => {
+      // The process-free reopen source (ADR-0005, TB3), tiered since ADR-0019
+      // (#297): a reducer-version-matched fold snapshot + only the entry tail
+      // beyond it — the renderer folds O(tail) instead of O(conversation). No
+      // usable snapshot (legacy engine, first open, version bump, forceFull
+      // corruption fallback) degrades to the whole log as the tail. A missing
+      // log reads back empty (never throws).
+      if (!deps.transcript) return Promise.resolve({ snapshot: null, tail: [], lastSeq: 0 })
+      return deps.transcript.readWithSnapshot(args.threadId, args.reducerVersion, args.forceFull)
+    },
+  )
+
+  ipcMain.on(IPC.threadSnapshotPut, (_event, args: ThreadSnapshotPutArgs) => {
+    // Fire-and-forget (ADR-0019, #297): store the renderer's folded view as an
+    // OPAQUE blob — main never parses it (ADR-0001). Best-effort like every
+    // persistence write; the store refuses regressions and unknown Threads.
+    if (!deps.transcript) return
+    if (!args || typeof args.threadId !== 'string' || typeof args.state !== 'string') return
+    if (typeof args.reducerVersion !== 'number' || typeof args.lastSeq !== 'number') return
+    void deps.transcript.putSnapshot(args)
   })
 
   ipcMain.handle(
