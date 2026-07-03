@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type JSX } from 'react'
 import { SquareArrowOutUpRight } from 'lucide-react'
 import type { EditorId } from '../../../shared/editors'
-import { IconButton } from '../ui/icon-button'
+import { Button } from '../ui/button'
 import { firstAvailableEditor, openFailureMessage } from './open-in-editor'
 
 /**
@@ -61,15 +61,19 @@ export function OpenInEditorButton({
           {error}
         </span>
       )}
-      <IconButton
-        size="icon-sm"
+      {/* Labeled (not icon-only) so the affordance is discoverable in the header;
+          the title still names the concrete editor the click will open. */}
+      <Button
+        variant="ghost"
+        size="sm"
         aria-label={label}
         title={label}
         disabled={!agentId || !editor}
         onClick={() => void open()}
       >
         <SquareArrowOutUpRight className="size-4" aria-hidden />
-      </IconButton>
+        Open
+      </Button>
     </div>
   )
 }
