@@ -5,6 +5,7 @@ import { Input, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '
 import { readDiffPrefs, writeDiffPrefs, type DiffPrefs } from './diff-prefs-store'
 import { buildBaseRefChoices, filterRefChoices } from './branch-scope'
 import { DiffFileSection, DiffToggles } from './diff-view-chrome'
+import { ReviewSelectionLayer } from './ReviewSelectionLayer'
 
 /**
  * The BRANCH-CHANGES scope (#237, PRD #233): `base...HEAD` — what this branch adds
@@ -24,6 +25,7 @@ export function BranchDiffView({
   baseRef,
   onBaseRefChange,
   refreshKey,
+  activeThreadId,
 }: {
   workspaceDir: string
   /** The checked-out branch, or null when detached (no range to show). */
@@ -33,6 +35,8 @@ export function BranchDiffView({
   onBaseRefChange: (baseRef: string | null) => void
   /** Bumped by the panel's manual refresh — the on-demand re-read trigger. */
   refreshKey: number
+  /** The active Thread for review comments (#239) — null renders the layer inert. */
+  activeThreadId: string | null
 }): JSX.Element {
   const [prefs, setPrefs] = useState<DiffPrefs>(() => readDiffPrefs(window.localStorage))
   const [result, setResult] = useState<GitRangeDiffResult | null>(null)
@@ -138,7 +142,11 @@ export function BranchDiffView({
 
       <DiffToggles prefs={prefs} onChange={updatePrefs} />
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      {/* Review comments work in BOTH scopes (#239): whatever the diff shows is quotable. */}
+      <ReviewSelectionLayer
+        threadId={activeThreadId}
+        getPatch={(path) => (result?.ok ? result.files.find((f) => f.path === path)?.patch : undefined)}
+      >
         {loading && !result ? (
           <p className="px-3 py-3 text-[13px] text-muted">Loading branch diff…</p>
         ) : result && !result.ok ? (
@@ -172,7 +180,7 @@ export function BranchDiffView({
             />
           ))
         )}
-      </div>
+      </ReviewSelectionLayer>
     </div>
   )
 }
