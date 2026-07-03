@@ -16,6 +16,8 @@ import {
   Textarea,
 } from '../ui'
 import { getCommitDraft, setCommitDraft } from './commit-draft-store'
+import { readDiffScope, writeDiffScope, type DiffScopeState } from './diff-scope-store'
+import { BranchDiffView } from './BranchDiffView'
 import { buildChangesView, reconcileUnchecked } from './status-view'
 import { autoCommitMessage, isDefaultBranch, suggestBranchName } from './commit-guard'
 import { deriveQuickAction, type QuickActionKind } from './quick-action'
@@ -108,6 +110,19 @@ export function ChangesPanel({
   // The current branch's PR, reported up by PrSection (#236) — feeds the quick-action
   // derivation (an OPEN PR flips the dirty-tree primary to "Commit & push").
   const [pr, setPr] = useState<GhPr | null>(null)
+  // The diff scope (#237): Working tree (live, the #84 stream) vs Branch changes
+  // (`base...HEAD`, on demand). Persisted per Workspace so reopening the panel
+  // restores the review context.
+  const [diffScope, setDiffScope] = useState<DiffScopeState>(() =>
+    readDiffScope(window.localStorage, workspaceDir),
+  )
+  function updateDiffScope(patch: Partial<DiffScopeState>): void {
+    setDiffScope((prev) => {
+      const next = { ...prev, ...patch }
+      writeDiffScope(window.localStorage, workspaceDir, next)
+      return next
+    })
+  }
   // The in-flight stacked action (#236): its kind, the streamed phase line, its error,
   // and the renderer-minted id the progress events are filtered by.
   const [acting, setActing] = useState<GitStackedActionKind | null>(null)
@@ -362,7 +377,49 @@ export function ChangesPanel({
         onPrChange={setPr}
       />
 
-      {view.files.length === 0 ? (
+      {/* Diff scope (#237): Working tree (live) vs Branch changes (`base...HEAD`, on
+          demand) — persisted per Workspace. Branch scope swaps the list + commit area
+          for the read-only range view; review keeps working after commits land. */}
+      <div className="flex items-center border-b border-border-muted px-3 py-2 text-[13px]">
+        <div className="flex overflow-hidden rounded-md border border-border">
+          <button
+            type="button"
+            aria-pressed={diffScope.scope === 'working'}
+            onClick={() => updateDiffScope({ scope: 'working' })}
+            className={
+              diffScope.scope === 'working'
+                ? 'bg-accent/10 px-2.5 py-1 text-accent-text'
+                : 'px-2.5 py-1 text-muted transition-colors hover:text-accent-text'
+            }
+          >
+            Working tree
+          </button>
+          <button
+            type="button"
+            aria-pressed={diffScope.scope === 'branch'}
+            onClick={() => updateDiffScope({ scope: 'branch' })}
+            className={
+              diffScope.scope === 'branch'
+                ? 'bg-accent/10 px-2.5 py-1 text-accent-text'
+                : 'px-2.5 py-1 text-muted transition-colors hover:text-accent-text'
+            }
+          >
+            Branch changes
+          </button>
+        </div>
+      </div>
+
+      {diffScope.scope === 'branch' ? (
+        <DiffWorkerProvider>
+          <BranchDiffView
+            workspaceDir={workspaceDir}
+            currentBranch={status.branch}
+            baseRef={diffScope.baseRef}
+            onBaseRefChange={(baseRef) => updateDiffScope({ baseRef })}
+            refreshKey={prRefreshKey}
+          />
+        </DiffWorkerProvider>
+      ) : view.files.length === 0 ? (
         <p className="px-3 py-3 text-[13px] text-muted">No changes — working tree clean.</p>
       ) : (
         <ul className="flex flex-col gap-0.5 py-1.5">
@@ -390,7 +447,7 @@ export function ChangesPanel({
           quick-action control (primary follows repo state: Commit, push & PR / Commit &
           push / Push / Pull / View PR; the rest in the attached menu). Disabled while a
           turn streams (`busy`) or an action runs. git's reason surfaces inline. */}
-      {(view.files.length > 0 || quickAction.primary !== null) && (
+      {diffScope.scope === 'working' && (view.files.length > 0 || quickAction.primary !== null) && (
         <div className="flex flex-col gap-2 border-t border-border-muted px-3 py-2.5">
           {view.files.length > 0 && (
             <Textarea
