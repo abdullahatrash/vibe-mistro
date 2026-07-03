@@ -1223,9 +1223,10 @@ app.whenReady().then(async () => {
   const deps: MainDeps = { store, transcript, bridge, attachments }
 
   // Replace Electron's default Dock icon with the brand mark (dev-run parity with
-  // a packaged bundle's icon.icns; t3code does the same). Best-effort — a missing
-  // or unreadable PNG must never block launch.
-  if (process.platform === 'darwin') {
+  // a packaged bundle's icon.icns; t3code does the same). Dev-only: a packaged
+  // bundle gets its icon from icon.icns and doesn't pack the PNG (#268).
+  // Best-effort — a missing or unreadable PNG must never block launch.
+  if (process.platform === 'darwin' && !app.isPackaged) {
     try {
       app.dock?.setIcon(APP_ICON_PNG)
     } catch (err) {

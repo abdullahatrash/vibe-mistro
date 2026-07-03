@@ -19,6 +19,8 @@
     "test:watch": "bun run --cwd apps/desktop test:watch",
     "test:e2e": "bun run --cwd apps/desktop test:e2e",
     "test:e2e:update": "bun run --cwd apps/desktop test:e2e:update",
+    "dist": "bun run --cwd apps/desktop dist",
+    "dist:unsigned": "bun run --cwd apps/desktop dist:unsigned",
     "lint": "bun run --cwd apps/desktop lint"
   },
   "overrides": {
