@@ -63,6 +63,7 @@ import { chokidarWatchFactory, realClock } from './git/runtime'
 import { registerGitIpc } from './git/register-ipc'
 import { registerFilesIpc } from './files/register-ipc'
 import { createTerminalManager, registerTerminalIpc } from './terminal/register-ipc'
+import { registerBrowserIpc } from './browser/register-ipc'
 import type { TerminalManager } from './terminal/terminal-manager'
 import { FilesListCache, shouldInvalidateFilesCacheOnGitStatus } from './files/cache'
 import { clampWebviewAttachment } from './browser/webview-clamp'
@@ -639,6 +640,7 @@ function registerIpc(deps: MainDeps): void {
   registerFilesIpc({ pool, cache: filesListCache })
   terminalManager = createTerminalManager()
   registerTerminalIpc({ pool, manager: terminalManager })
+  registerBrowserIpc()
 
   ipcMain.handle(IPC.detectVibe, () => detectVibe())
 
