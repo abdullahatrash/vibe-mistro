@@ -15,6 +15,8 @@ import {
   type GitFullDiffArgs,
   type GitFullDiffResult,
   type GitOpResult,
+  type GitRangeDiffArgs,
+  type GitRangeDiffResult,
   type GitStackedActionArgs,
   type GitStackedActionResult,
   type GhCreatePrArgs,
@@ -122,6 +124,8 @@ const api = {
     ipcRenderer.invoke(IPC.gitUnsubscribeStatus, args),
   gitFullDiff: (args: GitFullDiffArgs): Promise<GitFullDiffResult> =>
     ipcRenderer.invoke(IPC.gitFullDiff, args),
+  gitRangeDiff: (args: GitRangeDiffArgs): Promise<GitRangeDiffResult> =>
+    ipcRenderer.invoke(IPC.gitRangeDiff, args),
   gitCommit: (args: GitCommitArgs): Promise<GitCommitResult> => ipcRenderer.invoke(IPC.gitCommit, args),
   gitBranches: (args: GitBranchesArgs): Promise<GitBranchesResult> =>
     ipcRenderer.invoke(IPC.gitBranches, args),

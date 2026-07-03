@@ -25,6 +25,8 @@ export const gitChannels = {
   gitStatus: 'git:status',
   /** Renderer -> main: read the FULL working-tree diff — one entry per changed path (#235) — see {@link GitFullDiffArgs}. */
   gitFullDiff: 'git:full-diff',
+  /** Renderer -> main: read a BRANCH-RANGE diff (`base...HEAD`, #237) — see {@link GitRangeDiffArgs}. */
+  gitRangeDiff: 'git:range-diff',
   /** Renderer -> main: COMMIT working-tree changes from the Changes panel (#86) — see {@link GitCommitArgs}. */
   gitCommit: 'git:commit',
   /** Renderer -> main: list the active Workspace's branches (#87) — see {@link GitBranchesArgs}. */
@@ -138,6 +140,31 @@ export interface GitFileDiff extends GitDiffResult {
 export interface GitFullDiffResult {
   files: GitFileDiff[]
 }
+
+/**
+ * Args for `gitRangeDiff` (#237, PRD #233): read the branch's diff against a base —
+ * `<baseRef>...HEAD`, what the branch adds relative to where it forked. `baseRef`
+ * OMITTED means Automatic: main resolves the repository's default branch from
+ * origin/HEAD. `ignoreWhitespace` re-reads with `-w` (same rationale as the
+ * working-tree reads). Read-only; not agent activity.
+ */
+export interface GitRangeDiffArgs {
+  workspaceDir: string
+  baseRef?: string
+  ignoreWhitespace?: boolean
+}
+
+/**
+ * The `gitRangeDiff` reply (#237). `{ok:true}` carries the RESOLVED base (so
+ * "Automatic" shows what it compared against) + per-file entries, individually
+ * capped + hashed like {@link GitFullDiffResult}. Unlike the working-tree reads, a
+ * bad RANGE is a meaningful state — an unknown base, an unresolvable default, a
+ * detached HEAD — so it surfaces as `{ok:false, error}` (git's actual reason; the
+ * renderer wraps it in friendly copy) instead of degrading to an empty diff.
+ */
+export type GitRangeDiffResult =
+  | { ok: true; baseRef: string; files: GitFileDiff[] }
+  | { ok: false; error: string }
 
 /**
  * Args for `gitCommit` (#86, ADR-0008 — the first git WRITE): commit working-tree

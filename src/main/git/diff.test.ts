@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createHash } from 'node:crypto'
-import { finalizeDiff, readGitDiff, readGitFullDiff } from './diff'
+import { finalizeDiff, readGitDiff, readGitFullDiff, readGitRangeDiff } from './diff'
 import type { GitRun } from './run'
 
 /**
@@ -224,5 +224,89 @@ describe('readGitFullDiff', () => {
     )
     expect(res.files[0]).toEqual({ path: 'bad.txt', patch: '', diffHash: '', truncated: false })
     expect(res.files[1].patch).toBe(trackedPatch)
+  })
+})
+
+describe('readGitRangeDiff', () => {
+  /** A scripted runner: responses consumed in call order, args recorded. */
+  function fakeRun(
+    seen: string[][],
+    responses: { stdout?: string; stderr?: string; code: number }[] = [],
+  ): GitRun {
+    let i = 0
+    return (args) => {
+      seen.push(args)
+      const r = responses[i++] ?? { code: 0 }
+      return Promise.resolve({ stdout: r.stdout ?? '', stderr: r.stderr ?? '', code: r.code })
+    }
+  }
+
+  it('explicit base: enumerates `base...HEAD` names (NUL-separated) then reads each file, per-file cap/hash', async () => {
+    const seen: string[][] = []
+    const res = await readGitRangeDiff(
+      '/repo',
+      'main',
+      false,
+      fakeRun(seen, [
+        { stdout: 'a.txt\0dir/b.txt\0', code: 0 }, // name enumeration
+        { stdout: trackedPatch, code: 0 }, // a.txt
+        { stdout: untrackedPatch, code: 0 }, // dir/b.txt
+      ]),
+    )
+    expect(res).toMatchObject({ ok: true, baseRef: 'main' })
+    if (!res.ok) throw new Error('unreachable')
+    expect(res.files.map((f) => f.path)).toEqual(['a.txt', 'dir/b.txt'])
+    expect(res.files[0].patch).toBe(trackedPatch)
+    expect(res.files[0].diffHash).toBe(createHash('sha256').update(trackedPatch).digest('hex'))
+    // Enumeration + each per-file read use the three-dot range form.
+    expect(seen[0]).toContain('main...HEAD')
+    expect(seen[0]).toContain('--name-only')
+    expect(seen[1].slice(-3)).toEqual(['main...HEAD', '--', 'a.txt'])
+  })
+
+  it('AUTOMATIC base (undefined): resolves origin/HEAD first and diffs against it', async () => {
+    const seen: string[][] = []
+    const res = await readGitRangeDiff(
+      '/repo',
+      undefined,
+      false,
+      fakeRun(seen, [
+        { stdout: 'origin/main\n', code: 0 }, // symbolic-ref origin/HEAD
+        { stdout: 'a.txt\0', code: 0 },
+        { stdout: trackedPatch, code: 0 },
+      ]),
+    )
+    expect(res).toMatchObject({ ok: true, baseRef: 'origin/main' })
+    expect(seen[0]).toEqual(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'])
+    expect(seen[1]).toContain('origin/main...HEAD')
+  })
+
+  it('AUTOMATIC base with NO resolvable default → {ok:false} with an actionable reason', async () => {
+    const res = await readGitRangeDiff('/repo', undefined, false, fakeRun([], [{ stdout: '', code: 1 }]))
+    expect(res.ok).toBe(false)
+    if (res.ok) throw new Error('unreachable')
+    expect(res.error).toContain('default branch')
+  })
+
+  it('an UNKNOWN base surfaces git’s reason as {ok:false} (the renderer wraps it in friendly copy)', async () => {
+    const res = await readGitRangeDiff(
+      '/repo',
+      'nope',
+      false,
+      fakeRun([], [{ stderr: "fatal: bad revision 'nope...HEAD'", code: 128 }]),
+    )
+    expect(res).toEqual({ ok: false, error: "fatal: bad revision 'nope...HEAD'" })
+  })
+
+  it('empty range (no names) → ok with zero files; -w passes through everywhere', async () => {
+    const seen: string[][] = []
+    const res = await readGitRangeDiff('/repo', 'main', true, fakeRun(seen, [{ stdout: '', code: 0 }]))
+    expect(res).toEqual({ ok: true, baseRef: 'main', files: [] })
+    expect(seen[0]).toContain('-w')
+  })
+
+  it('never throws — a rejecting runner degrades to {ok:false}', async () => {
+    const res = await readGitRangeDiff('/repo', 'main', false, () => Promise.reject(new Error('boom')))
+    expect(res).toEqual({ ok: false, error: 'boom' })
   })
 })

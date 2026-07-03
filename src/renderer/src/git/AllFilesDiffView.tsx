@@ -1,11 +1,10 @@
-import { memo, useEffect, useMemo, useRef, useState, type JSX } from 'react'
-import { ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react'
-import { PatchDiff } from '@pierre/diffs/react'
-import type { GitFileDiff, GitFullDiffResult } from '../../../shared/ipc'
-import { cn } from '../lib/utils'
+import { useEffect, useRef, useState, type JSX } from 'react'
+import { ArrowLeft } from 'lucide-react'
+import type { GitFullDiffResult } from '../../../shared/ipc'
 import { Button } from '../ui'
 import { readDiffPrefs, writeDiffPrefs, type DiffPrefs } from './diff-prefs-store'
-import { diffRequestKey, glyphClass, type GitFileView } from './status-view'
+import { diffRequestKey, type GitFileView } from './status-view'
+import { DiffFileSection, DiffToggles } from './diff-view-chrome'
 
 /**
  * The ALL-FILES working-tree diff view (#235, PRD #233) — every changed file as a
@@ -18,7 +17,8 @@ import { diffRequestKey, glyphClass, type GitFileView } from './status-view'
  * Refetches when the changed set / churn changes (`diffRequestKey` over the LIVE
  * files — the streamed status is the trigger, like the old per-file churn dep) and on
  * the whitespace toggle (a fresh `-w` read). Stacked/Split and word WRAP are pure
- * relayout — no re-fetch. All three toggles persist via `diff-prefs-store`.
+ * relayout — no re-fetch. All three toggles persist via `diff-prefs-store`; the
+ * section + toggle chrome is shared with #237's `BranchDiffView` (`diff-view-chrome`).
  */
 export function AllFilesDiffView({
   workspaceDir,
@@ -105,49 +105,17 @@ export function AllFilesDiffView({
         </span>
       </div>
 
-      <div className="flex items-center gap-2 border-b border-border-muted px-3 py-2 text-[13px]">
-        <div className="flex overflow-hidden rounded-md border border-border">
-          <ToggleButton active={prefs.diffStyle === 'unified'} onClick={() => updatePrefs({ diffStyle: 'unified' })}>
-            Stacked
-          </ToggleButton>
-          <ToggleButton active={prefs.diffStyle === 'split'} onClick={() => updatePrefs({ diffStyle: 'split' })}>
-            Split
-          </ToggleButton>
-        </div>
-        <button
-          type="button"
-          onClick={() => updatePrefs({ wrap: !prefs.wrap })}
-          aria-pressed={prefs.wrap}
-          title={prefs.wrap ? 'Scroll long lines' : 'Wrap long lines'}
-          className={cn(
-            'shrink-0 rounded-md border border-border px-2.5 py-1 transition-colors',
-            prefs.wrap ? 'bg-accent/10 text-accent-text' : 'text-muted hover:text-accent-text',
-          )}
-        >
-          Wrap
-        </button>
-        <button
-          type="button"
-          onClick={() => updatePrefs({ ignoreWhitespace: !prefs.ignoreWhitespace })}
-          aria-pressed={prefs.ignoreWhitespace}
-          title={prefs.ignoreWhitespace ? 'Show whitespace changes' : 'Hide whitespace changes'}
-          className={cn(
-            'ml-auto shrink-0 rounded-md border border-border px-2.5 py-1 transition-colors',
-            prefs.ignoreWhitespace ? 'bg-accent/10 text-accent-text' : 'text-muted hover:text-accent-text',
-          )}
-        >
-          Ignore whitespace
-        </button>
-      </div>
+      <DiffToggles prefs={prefs} onChange={updatePrefs} />
 
       <div className="min-h-0 flex-1 overflow-auto">
         {loading && !result ? (
           <p className="px-3 py-3 text-[13px] text-muted">Loading diff…</p>
         ) : (
           files.map((file) => (
-            <FileSection
+            <DiffFileSection
               key={file.path}
-              file={file}
+              path={file.path}
+              meta={{ glyph: file.glyph, insertions: file.insertions, deletions: file.deletions }}
               entry={entryByPath.get(file.path)}
               collapsed={collapsed.has(file.path)}
               onToggle={() =>
@@ -170,125 +138,5 @@ export function AllFilesDiffView({
         )}
       </div>
     </div>
-  )
-}
-
-/**
- * One file's collapsible section: a STICKY header (glyph + path + churn + truncated
- * marker + collapse chevron) over its own `PatchDiff`. Memoized so a sibling section's
- * collapse or an unchanged refetch (same `diffHash`) doesn't re-render this one —
- * per-file memoization is the whole point of per-file hashes.
- */
-const FileSection = memo(
-  function FileSection({
-    file,
-    entry,
-    collapsed,
-    onToggle,
-    refFn,
-    diffStyle,
-    wrap,
-    ignoreWhitespace,
-  }: {
-    file: GitFileView
-    entry: GitFileDiff | undefined
-    collapsed: boolean
-    onToggle: () => void
-    refFn: (el: HTMLElement | null) => void
-    diffStyle: 'unified' | 'split'
-    wrap: boolean
-    ignoreWhitespace: boolean
-  }): JSX.Element {
-    const patch = entry?.patch ?? ''
-    const diffHash = entry?.diffHash ?? ''
-    const rendered = useMemo(() => {
-      if (!patch) return null
-      return (
-        <PatchDiff
-          patch={patch}
-          options={{
-            diffStyle,
-            theme: 'pierre-light',
-            themeType: 'light',
-            overflow: wrap ? 'wrap' : 'scroll',
-          }}
-        />
-      )
-      // diffHash is a 1:1 proxy for `patch`; depend on it (not the long string).
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [diffHash, diffStyle, wrap])
-
-    return (
-      <section ref={refFn} className="border-b border-border-muted">
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={!collapsed}
-          className="sticky top-0 z-10 flex w-full items-center gap-1.5 border-b border-border-muted bg-background px-3 py-1.5 text-left"
-        >
-          {collapsed ? (
-            <ChevronRight className="size-3.5 shrink-0 text-muted" aria-hidden />
-          ) : (
-            <ChevronDown className="size-3.5 shrink-0 text-muted" aria-hidden />
-          )}
-          <span className={cn('w-3 shrink-0 text-center text-[11px] font-semibold', glyphClass(file.glyph))}>
-            {file.glyph}
-          </span>
-          <span className="min-w-0 flex-1 truncate text-[13px] text-text" dir="rtl" title={file.path}>
-            {file.path}
-          </span>
-          {entry?.truncated && (
-            <span className="shrink-0 text-[11px] text-muted" title="Diff truncated — file too large">
-              truncated
-            </span>
-          )}
-          <span className="shrink-0 text-[11px] tabular-nums">
-            {file.insertions > 0 && <span className="text-ok">+{file.insertions}</span>}{' '}
-            {file.deletions > 0 && <span className="text-bad">−{file.deletions}</span>}
-          </span>
-        </button>
-        {!collapsed &&
-          (rendered ?? (
-            <p className="px-3 py-2 text-[13px] text-muted">
-              No changes to show{ignoreWhitespace ? ' (whitespace-only changes hidden).' : '.'}
-            </p>
-          ))}
-      </section>
-    )
-  },
-  (prev, next) =>
-    prev.entry?.diffHash === next.entry?.diffHash &&
-    prev.entry?.truncated === next.entry?.truncated &&
-    prev.collapsed === next.collapsed &&
-    prev.diffStyle === next.diffStyle &&
-    prev.wrap === next.wrap &&
-    prev.ignoreWhitespace === next.ignoreWhitespace &&
-    prev.file.insertions === next.file.insertions &&
-    prev.file.deletions === next.file.deletions &&
-    prev.file.glyph === next.file.glyph,
-)
-
-/** A segmented-control button (Stacked / Split) — rounded via its container's clip. */
-function ToggleButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: React.ReactNode
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        'px-2.5 py-1 transition-colors',
-        active ? 'bg-accent/10 text-accent-text' : 'text-muted hover:text-accent-text',
-      )}
-    >
-      {children}
-    </button>
   )
 }

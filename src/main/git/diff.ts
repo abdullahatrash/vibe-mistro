@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { defaultGitRun, type GitRun } from './run'
-import type { GitDiffResult, GitFullDiffResult } from '../../shared/ipc'
+import { defaultGitRun, errorMessage, failReason, type GitRun } from './run'
+import type { GitDiffResult, GitFullDiffResult, GitRangeDiffResult } from '../../shared/ipc'
 
 /**
  * Read a single changed path's WORKING-TREE unified diff (#85, ADR-0008). Like #84's
@@ -103,4 +103,52 @@ export async function readGitFullDiff(
     }),
   )
   return { files: entries }
+}
+
+/**
+ * Read a BRANCH-RANGE diff — `<base>...HEAD`, what this branch adds relative to where
+ * it forked (#237, PRD #233). `baseRef` undefined means AUTOMATIC: resolve the
+ * repository's default branch from `origin/HEAD` (same source as #87's default-branch
+ * flag). Shape mirrors `readGitFullDiff`: enumerate the range's paths, then one
+ * per-file read (concurrent), each entry individually capped + hashed. Unlike the
+ * working-tree reads, a bad RANGE is a meaningful, user-actionable state — an unknown
+ * base or an unresolvable default returns `{ok:false, error}` (git's actual reason)
+ * instead of degrading to an empty diff the renderer can't explain. A failed PER-FILE
+ * read still degrades to that file's empty entry. Never throws.
+ */
+export async function readGitRangeDiff(
+  cwd: string,
+  baseRef: string | undefined,
+  ignoreWhitespace = false,
+  run: GitRun = defaultGitRun,
+): Promise<GitRangeDiffResult> {
+  try {
+    const ws = ignoreWhitespace ? ['-w'] : []
+    let base = baseRef
+    if (base === undefined) {
+      // Automatic: the default branch via origin/HEAD (kept fresh by #84's fetch loop).
+      const head = await run(['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], cwd)
+      if (head.code !== 0 || !head.stdout.trim()) {
+        return { ok: false, error: 'Could not resolve the default branch — pick a base ref explicitly.' }
+      }
+      base = head.stdout.trim()
+    }
+    const range = `${base}...HEAD`
+    // `-z` NUL-separation so non-ASCII / space-y paths round-trip unmangled.
+    const names = await run(
+      ['-c', 'core.quotePath=false', 'diff', '--no-color', ...ws, '-z', '--name-only', range],
+      cwd,
+    )
+    if (names.code !== 0) return { ok: false, error: failReason(names) }
+    const paths = names.stdout.split('\0').filter(Boolean)
+    const files = await Promise.all(
+      paths.map(async (path) => {
+        const res = await run(['-c', 'core.quotePath=false', 'diff', '--no-color', ...ws, range, '--', path], cwd)
+        return { path, ...finalizeDiff(res.code === 0 ? res.stdout : '') }
+      }),
+    )
+    return { ok: true, baseRef: base, files }
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) }
+  }
 }

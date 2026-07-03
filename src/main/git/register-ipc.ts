@@ -9,6 +9,8 @@ import {
   type GitFullDiffArgs,
   type GitFullDiffResult,
   type GitOpResult,
+  type GitRangeDiffArgs,
+  type GitRangeDiffResult,
   type GhCreatePrArgs,
   type GhCreateResult,
   type GhCurrentPrArgs,
@@ -18,7 +20,7 @@ import {
   type GitStackedActionResult,
   type GitStatusSubscriptionArgs,
 } from '../../shared/ipc'
-import { readGitFullDiff } from './diff'
+import { readGitFullDiff, readGitRangeDiff } from './diff'
 import { gitCommit } from './commit'
 import { runStackedAction } from './stacked-action'
 import { gitBranches, gitCheckout, gitCreateBranch } from './branches'
@@ -73,6 +75,13 @@ export function registerGitIpc(deps: {
     // view (#235). Per-file failure swallows into that file's empty entry inside
     // `readGitFullDiff` (#85 style); the invoke itself never rejects.
     return readGitFullDiff(args.workspaceDir, args.files, args.ignoreWhitespace ?? false)
+  })
+
+  ipcMain.handle(IPC.gitRangeDiff, (_event, args: GitRangeDiffArgs): Promise<GitRangeDiffResult> => {
+    // Read a branch-range diff (`base...HEAD`) for the Branch-changes scope (#237).
+    // A bad range (unknown base / unresolvable default) resolves {ok:false, error} —
+    // meaningful, user-actionable — but the invoke itself never rejects.
+    return readGitRangeDiff(args.workspaceDir, args.baseRef, args.ignoreWhitespace ?? false)
   })
 
   ipcMain.handle(IPC.gitCommit, async (_event, args: GitCommitArgs): Promise<GitCommitResult> => {
