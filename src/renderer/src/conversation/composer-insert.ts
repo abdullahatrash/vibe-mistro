@@ -15,8 +15,23 @@
 /** A subscriber receiving the plain-text fragment to append to its Thread's composer draft. */
 type InsertListener = (mention: string) => void
 
+/**
+ * A pre-split image to stage in a Thread's composer (#224 element picker): `data` is BARE
+ * base64 (sent to the agent), `previewUrl` the full data URL (thumbnail + echoed turn) —
+ * the exact shape the composer's `PendingImage` needs, so the subscriber just adds an id.
+ */
+export interface ComposerInsertImage {
+  data: string
+  mimeType: string
+  name: string
+  previewUrl: string
+}
+
+type ImageListener = (image: ComposerInsertImage) => void
+
 const listenersByThread = new Map<string, Set<InsertListener>>()
 const textListenersByThread = new Map<string, Set<InsertListener>>()
+const imageListenersByThread = new Map<string, Set<ImageListener>>()
 
 /**
  * Append a plain-text `@path` reference to `draft`, keeping it space-separated: a trailing space
@@ -88,4 +103,32 @@ export function emitComposerInsertText(threadId: string, text: string): void {
   const set = textListenersByThread.get(threadId)
   if (!set) return
   for (const listener of set) listener(text)
+}
+
+/**
+ * Subscribe a Thread's composer to IMAGE insert requests (#224): the Browser Surface's
+ * element picker stages a screenshot as a pending image through here — a side-panel
+ * sibling reaching the composer, keyed by threadId, exactly like the text/@ channels.
+ * Returns an unsubscribe.
+ */
+export function subscribeComposerInsertImage(threadId: string, listener: ImageListener): () => void {
+  let set = imageListenersByThread.get(threadId)
+  if (!set) {
+    set = new Set()
+    imageListenersByThread.set(threadId, set)
+  }
+  set.add(listener)
+  return () => {
+    const current = imageListenersByThread.get(threadId)
+    if (!current) return
+    current.delete(listener)
+    if (current.size === 0) imageListenersByThread.delete(threadId)
+  }
+}
+
+/** Request the given Thread's composer stage `image`; a no-op if none is mounted. */
+export function emitComposerInsertImage(threadId: string, image: ComposerInsertImage): void {
+  const set = imageListenersByThread.get(threadId)
+  if (!set) return
+  for (const listener of set) listener(image)
 }
