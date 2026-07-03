@@ -102,10 +102,16 @@ export function SearchPalette({
                         </Badge>
                       )}
                     </span>
-                    <span className="truncate text-[11px] text-faint">{hit.workspaceName}</span>
+                    <span className="truncate text-[11px] text-faint">
+                      {hit.workspaceName}
+                      {hit.snippet && <span className="text-muted"> · {hit.snippet}</span>}
+                    </span>
                   </span>
-                  <span className="shrink-0 text-[11px] tabular-nums text-faint">
-                    {formatRelativeTime(hit.lastActiveAt, Date.now())}
+                  <span className="flex shrink-0 flex-col items-end text-[11px] tabular-nums text-faint">
+                    <span>{formatRelativeTime(hit.lastActiveAt, Date.now())}</span>
+                    {typeof hit.hitCount === 'number' && hit.hitCount > 1 && (
+                      <span>{hit.hitCount} matches</span>
+                    )}
                   </span>
                 </CommandItem>
               )}
