@@ -1,5 +1,9 @@
 # Persistence: JSON metadata + a per-Thread JSONL transcript we own; Vibe owns agent context
 
+> **Engine decision superseded by ADR-0019** (2026-07-03, #292): the deferred-SQLite trigger named
+> below — full-text queries at scale — fired with transcript search (#174). Storage moves to
+> `node:sqlite` (event log + projections); the three-way ownership split here still governs.
+
 vibe-mistro needs Workspaces and Threads to survive a restart: reopen the app and your
 Workspaces, their Threads, titles, last-active order, **and the visible conversation** are
 back — instantly, without spawning an agent. This ADR fixes the storage primitives for that
