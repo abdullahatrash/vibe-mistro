@@ -12,6 +12,8 @@ export const skillsChannels = {
   skillsList: 'skills:list',
   /** Reveal a LISTED skill's SKILL.md in the OS file manager (validated in main). */
   skillsReveal: 'skills:reveal',
+  /** Read a LISTED skill's SKILL.md body for the in-app preview (same gate as reveal). */
+  skillsRead: 'skills:read',
 } as const
 
 /** List installed skills. `workspaceDir` = the selected Workspace (null = global only). */
@@ -47,3 +49,16 @@ export interface SkillsRevealArgs {
   workspaceDir: string | null
   path: string
 }
+
+/** Read a skill's `SKILL.md` for the preview — same path gate as reveal. */
+export interface SkillsReadArgs {
+  workspaceDir: string | null
+  path: string
+}
+
+/**
+ * The preview content: the Markdown BODY after the frontmatter (the skill's
+ * instructions — name/description already live on the row). `ok: false` covers
+ * a refused path or a read failure; the renderer degrades to a hint.
+ */
+export type SkillsReadResult = { ok: true; markdown: string } | { ok: false }
