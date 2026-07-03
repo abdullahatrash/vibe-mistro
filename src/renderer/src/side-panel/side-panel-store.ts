@@ -40,7 +40,7 @@ export type Surface =
   | { id: 'files'; kind: 'files' }
   | { id: `file:${string}`; kind: 'file'; relativePath: string }
   | { id: `terminal:${string}`; kind: 'terminal'; resourceId: string }
-  | { id: `browser:${string}`; kind: 'browser'; resourceId: string }
+  | { id: `browser:${string}`; kind: 'browser'; resourceId: string; url?: string }
 
 /** One Workspace's panel state: open flag + ordered Surfaces + which is active. */
 export interface WorkspacePanelState {
@@ -173,7 +173,32 @@ const BROWSER_SURFACE: Surface = { id: 'browser:main', kind: 'browser', resource
  * own resource-id'd descriptor shape.
  */
 export function openBrowserSurface(state: WorkspacePanelState): WorkspacePanelState {
+  // upsertSurface keeps the EXISTING descriptor when present, so a stored url survives a
+  // re-open — only a first open inserts the bare BROWSER_SURFACE (no url yet).
   return upsertSurface(state, BROWSER_SURFACE)
+}
+
+/**
+ * Record the browser's last-visited url on its descriptor (#217), so a reopen /
+ * app-restart reloads the preview where it left off. A no-op (same ref) when no browser
+ * surface is open. The url is validated on the way BACK IN by `coerceSurface`; here we
+ * trust the component (which only feeds committed guest URLs).
+ */
+export function setBrowserSurfaceUrl(state: WorkspacePanelState, url: string): WorkspacePanelState {
+  let changed = false
+  const surfaces = state.surfaces.map((surface) => {
+    if (surface.kind !== 'browser' || surface.url === url) return surface
+    changed = true
+    return { ...surface, url }
+  })
+  return changed ? { ...state, surfaces } : state
+}
+
+/** Open/activate the singleton Browser Surface, or hide the panel if it's already active (⌘T). */
+export function toggleBrowserSurface(state: WorkspacePanelState): WorkspacePanelState {
+  const active = state.surfaces.find((surface) => surface.id === state.activeSurfaceId)
+  if (state.isOpen && active?.kind === 'browser') return { ...state, isOpen: false }
+  return openBrowserSurface(state)
 }
 
 /**
@@ -279,6 +304,21 @@ export function updateWorkspace(
 // --- Coercion + (de)serialization (defensive against corrupt / legacy blobs) ---
 
 /**
+ * A persisted browser url is trusted ONLY if it's a string that parses to an http/https
+ * URL — mirrors the renderer URL policy so a tampered blob can't seed the webview with a
+ * `file:`/`javascript:` src. Returns the normalized href, or null to drop it.
+ */
+function coerceBrowserUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string' || raw.length === 0) return null
+  try {
+    const url = new URL(raw)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Coerce an untrusted descriptor into a valid `Surface`, or `null` to drop it. Every
  * implemented kind validates its full shape (id/resource conventions) — anything
  * unknown or malformed is dropped rather than trusted.
@@ -311,13 +351,17 @@ export function coerceSurface(raw: unknown): Surface | null {
     return null
   }
   if (kind === 'browser') {
-    // A persisted browser tab restores its slot (the page itself is discarded on
-    // unmount — #217 adds URL persistence). Only the singleton shape exists this
-    // slice; drop anything else.
+    // A persisted browser tab restores its slot AND its last url (#217) — the page
+    // reloads there on reopen. Only the singleton shape exists this slice; drop anything
+    // else. A stored url is restored ONLY if it's a safe http/https URL (an untrusted
+    // blob could carry `file:`/`javascript:`); a bad url is dropped but the tab survives.
     const resourceId = (raw as { resourceId?: unknown }).resourceId
     const id = (raw as { id?: unknown }).id
     if (resourceId === 'main' && id === 'browser:main') {
-      return { id: 'browser:main', kind: 'browser', resourceId: 'main' }
+      const url = coerceBrowserUrl((raw as { url?: unknown }).url)
+      return url
+        ? { id: 'browser:main', kind: 'browser', resourceId: 'main', url }
+        : { id: 'browser:main', kind: 'browser', resourceId: 'main' }
     }
     return null
   }
@@ -451,6 +495,8 @@ export const openWorkspaceSurface = bindWorkspaceOp(openSurface)
 export const openWorkspaceFileSurface = bindWorkspaceOp(openFileSurface)
 export const openWorkspaceTerminalSurface = bindWorkspaceOp(openTerminalSurface)
 export const openWorkspaceBrowserSurface = bindWorkspaceOp(openBrowserSurface)
+export const toggleWorkspaceBrowserSurface = bindWorkspaceOp(toggleBrowserSurface)
+export const setWorkspaceBrowserSurfaceUrl = bindWorkspaceOp(setBrowserSurfaceUrl)
 export const toggleWorkspaceSurface = bindWorkspaceOp(toggleSurface)
 export const activateWorkspaceSurface = bindWorkspaceOp(activateSurface)
 export const closeWorkspaceSurface = bindWorkspaceOp(closeSurface)

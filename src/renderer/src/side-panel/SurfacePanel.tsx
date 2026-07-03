@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX, type PointerEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type JSX, type PointerEvent, type ReactNode } from 'react'
 import { FileDiff, FileText, Files, Globe, Plus, SquareTerminal, X } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { useMediaQuery } from '../lib/use-media-query'
@@ -33,6 +33,8 @@ import {
   openWorkspaceFileSurface,
   openWorkspaceSurface,
   openWorkspaceTerminalSurface,
+  setWorkspaceBrowserSurfaceUrl,
+  toggleWorkspaceBrowserSurface,
   terminalSurfaceCount,
   toggleWorkspaceSurface,
   useWorkspacePanel,
@@ -101,7 +103,10 @@ export function SurfacePanel({
       const kind = surfaceForChord(e)
       if (!kind) return
       e.preventDefault()
-      toggleWorkspaceSurface(workspaceId, kind)
+      // Browser is a singleton but not a `SingletonKind` (its descriptor carries a
+      // resourceId + url), so it has its own toggle op; the rest share `toggleSurface`.
+      if (kind === 'browser') toggleWorkspaceBrowserSurface(workspaceId)
+      else toggleWorkspaceSurface(workspaceId, kind)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -220,6 +225,11 @@ function PanelBody({
   // The singleton browser tab (if open) — rendered persistently (see below) rather
   // than only when active, so its live <webview> survives tab switches.
   const browserSurface = panel.surfaces.find((s) => s.kind === 'browser') ?? null
+  // Stable so BrowserSurface's event-listener effect doesn't re-subscribe each render.
+  const persistBrowserUrl = useCallback(
+    (url: string) => setWorkspaceBrowserSurfaceUrl(workspaceId, url),
+    [workspaceId],
+  )
 
   // A close op is a VIEW op for every Surface except terminal, whose tab IS the
   // session's lifetime (ADR-0014): unmount keeps the shell (reattach later), but
@@ -356,7 +366,12 @@ function PanelBody({
                 the page). Keyed by id for a future multi-tab browser. */}
             {browserSurface && (
               <div className={cn('flex min-h-0 flex-1 flex-col', active?.kind !== 'browser' && 'hidden')}>
-                <BrowserSurface key={browserSurface.id} workspaceDir={workspaceDir} />
+                <BrowserSurface
+                  key={browserSurface.id}
+                  workspaceDir={workspaceDir}
+                  persistedUrl={browserSurface.url}
+                  onUrlChange={persistBrowserUrl}
+                />
               </div>
             )}
           </div>
@@ -549,9 +564,9 @@ const CARDS: readonly CardDef[] = [
   {
     target: 'browser',
     label: 'Browser',
-    // No shortcut hint until #217 wires the ⌘T chord — advertised chrome must work.
     description: 'Preview a local dev server.',
     icon: <Globe aria-hidden />,
+    hint: '⌘T',
     live: true,
   },
   {
