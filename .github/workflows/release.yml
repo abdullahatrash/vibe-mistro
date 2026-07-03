@@ -1,0 +1,94 @@
+# The Release pipeline (#269, ADR-0018): push a v*.*.* tag → build, sign,
+# notarize, and publish the arm64 DMG + ZIP + latest-mac.yml to a GitHub
+# Release — the single stable channel serving both the marketing page's
+# download button and electron-updater's feed. workflow_dispatch is the re-run
+# escape hatch (run it ON the tag's ref from the Actions UI).
+#
+# Releases are ALWAYS signed + notarized — an unsigned Release would be
+# Gatekeeper-blocked for every downloader and rejected by the updater, so the
+# workflow fails loudly when secrets are missing instead of shipping one.
+#
+# Repository secrets:
+#   CSC_LINK              base64 .p12 export of the Developer ID Application cert
+#   CSC_KEY_PASSWORD      the .p12 passphrase
+#   APPLE_API_KEY         App Store Connect API key CONTENT (the .p8 body)
+#   APPLE_API_KEY_ID      its key id
+#   APPLE_API_ISSUER      its issuer id
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  # electron-builder uploads the Release assets with the workflow token.
+  contents: write
+
+jobs:
+  release:
+    name: Build, sign, notarize, publish (macOS arm64)
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # The repo commits no lockfile (bun.lock is gitignored), so this is a
+      # plain resolve-and-install — no --frozen-lockfile.
+      - name: Install dependencies
+        run: bun install
+
+      # The feed must never disagree with the binary: the tag IS the version.
+      - name: Guard — tag matches apps/desktop package.json version
+        if: github.ref_type == 'tag'
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          pkg_version="$(node -p "require('./apps/desktop/package.json').version")"
+          if [[ "$tag_version" != "$pkg_version" ]]; then
+            echo "Tag v$tag_version does not match apps/desktop/package.json version $pkg_version." >&2
+            echo "Bump the version in a release commit, then re-tag." >&2
+            exit 1
+          fi
+
+      - name: Guard — signing + notarization secrets present
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          missing=()
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER; do
+            [[ -n "${!name}" ]] || missing+=("$name")
+          done
+          if (( ${#missing[@]} > 0 )); then
+            echo "Refusing to build an unsigned Release — missing secrets: ${missing[*]}" >&2
+            exit 1
+          fi
+
+      - name: Build, sign, notarize, publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          # electron-builder's notarize step wants APPLE_API_KEY as a file PATH
+          # (t3code does the same dance): materialize the secret's content.
+          key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s' "$APPLE_API_KEY_CONTENT" > "$key_path"
+          export APPLE_API_KEY="$key_path"
+          bun run --cwd apps/desktop release
+
+      - name: Gatekeeper assessment of the published app
+        run: |
+          spctl -a -vv "apps/desktop/dist/mac-arm64/Vibe Mistro.app"

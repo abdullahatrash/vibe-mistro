@@ -20,6 +20,7 @@
     "lint": "eslint .",
     "dist": "electron-vite build && electron-builder --mac --arm64 --publish never",
     "dist:unsigned": "CSC_IDENTITY_AUTO_DISCOVERY=false bun run dist",
+    "release": "electron-vite build && electron-builder --mac --arm64 --publish always",
     "postinstall": "node scripts/fix-node-pty-perms.mjs && node scripts/patch-dev-electron.mjs"
   },
   "dependencies": {
