@@ -1,6 +1,16 @@
 ---
-// Placeholder page — the real marketing content (pitch + macOS download button)
-// is issue #271. This exists so the workspace builds and deploys end-to-end.
+// The marketing page (#271, ADR-0018): one page, one macOS download button.
+// The button's href is the PERMANENT `releases/latest/download` redirect — the
+// asset name is versionless by design, so this page never redeploys per Release.
+// Brand-matched to the app (warm paper, Geist, the stepped flame mark) but fully
+// self-contained: fonts ship from this workspace, no external requests.
+import '@fontsource-variable/geist'
+import '@fontsource-variable/geist-mono'
+
+const DOWNLOAD_URL =
+  'https://github.com/abdullahatrash/vibe-mistro/releases/latest/download/Vibe-Mistro-arm64.dmg'
+const REPO_URL = 'https://github.com/abdullahatrash/vibe-mistro'
+const VIBE_CLI_URL = 'https://docs.mistral.ai/vibe/code/cli/install-setup'
 ---
 
 <!doctype html>
@@ -8,12 +18,500 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Vibe Mistro</title>
+    <title>Vibe Mistro — orchestrate your Mistral Vibe coding agents</title>
+    <meta
+      name="description"
+      content="Vibe Mistro is a macOS desktop app that runs and orchestrates Mistral Vibe coding agents across your local projects — parallel workspaces, streamed tool calls, approvals, git, and terminal."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta property="og:title" content="Vibe Mistro" />
+    <meta
+      property="og:description"
+      content="A desktop conductor for Mistral Vibe coding agents. macOS, beta."
+    />
   </head>
   <body>
+    <div class="steps" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="/">
+        <svg class="mark" viewBox="0 0 191 135" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M54.3221 0H27.1531V27.0892H54.3221V0Z" fill="#FFD800"></path>
+          <path d="M162.984 0H135.815V27.0892H162.984V0Z" fill="#FFD800"></path>
+          <path d="M81.4823 27.0918H27.1531V54.181H81.4823V27.0918Z" fill="#FFAF00"></path>
+          <path d="M162.99 27.0918H108.661V54.181H162.99V27.0918Z" fill="#FFAF00"></path>
+          <path d="M162.972 54.168H27.1531V81.2572H162.972V54.168Z" fill="#FF8205"></path>
+          <path d="M54 81H27V135H54V81Z" fill="#FA500F"></path>
+          <path d="M108.661 81.2598H81.4917V108.349H108.661V81.2598Z" fill="#FA500F"></path>
+          <path d="M163 81H136V135H163V81Z" fill="#FA500F"></path>
+        </svg>
+        <span class="wordmark">Vibe Mistro</span>
+        <span class="beta-chip">Beta</span>
+      </a>
+      <nav>
+        <a class="quiet-link" href={REPO_URL} target="_blank" rel="noreferrer">GitHub</a>
+      </nav>
+    </header>
+
     <main>
-      <h1>Vibe Mistro</h1>
-      <p>Desktop orchestrator for Mistral Vibe coding agents.</p>
+      <section class="hero">
+        <h1>
+          Conduct your <span class="flame">Mistral&nbsp;Vibe</span> agents.
+        </h1>
+        <p class="pitch">
+          Vibe Mistro is a macOS desktop app that runs and orchestrates Mistral Vibe coding
+          agents across your local projects — parallel workspaces, streamed tool calls,
+          approvals, git, and a terminal, all in one calm window.
+        </p>
+        <div class="cta">
+          <a class="download" href={DOWNLOAD_URL}>
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="apple">
+              <path
+                d="M17.05 20.28c-.98.95-2.05.86-3.08.38-1.09-.5-2.08-.53-3.2 0-1.44.62-2.2.44-3.06-.38C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.08ZM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25Z"
+              ></path>
+            </svg>
+            Download for macOS
+          </a>
+          <p class="cta-note">
+            Apple&nbsp;Silicon · free &amp; open source · requires the&nbsp;<a
+              href={VIBE_CLI_URL}
+              target="_blank"
+              rel="noreferrer">Mistral Vibe CLI</a
+            >
+          </p>
+        </div>
+      </section>
+
+      <section class="session" aria-label="A Vibe Mistro conversation, illustrated">
+        <div class="window">
+          <div class="chrome">
+            <span class="light red"></span>
+            <span class="light amber"></span>
+            <span class="light green"></span>
+            <span class="thread-title">payments-api · Fix flaky webhook test</span>
+          </div>
+          <div class="rows">
+            <p class="row user">Find out why test_webhook_retry is flaky and fix it.</p>
+            <p class="row reasoning">Reading the test… the retry clock is real time — the assertion races the 2s backoff.</p>
+            <div class="row tool">
+              <span class="tool-icon">✎</span>
+              <code>Edit&nbsp;tests/webhooks/test_retry.py</code>
+              <span class="tool-state ok">done</span>
+            </div>
+            <div class="row tool">
+              <span class="tool-icon">⌘</span>
+              <code>Run&nbsp;pytest tests/webhooks -q</code>
+              <span class="tool-state ask">Allow once</span>
+            </div>
+            <div class="row tool">
+              <span class="tool-icon">⌘</span>
+              <code>pytest · 34 passed</code>
+              <span class="tool-state ok">0 flakes</span>
+            </div>
+            <p class="row answer">
+              The test now freezes the retry clock with <code>freezegun</code> — deterministic
+              across 200 repeat runs. Want me to commit it?
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="triad">
+        <div>
+          <h2>Parallel workspaces</h2>
+          <p>One warm agent per project, many persistent threads. Everything resumes where you left it.</p>
+        </div>
+        <div>
+          <h2>Approvals built in</h2>
+          <p>Sensitive actions pause for you — allow once, plan first, or hand over the keys per thread.</p>
+        </div>
+        <div>
+          <h2>Git &amp; terminal at hand</h2>
+          <p>Review diffs, stage, commit, and drop into a real shell without leaving the conversation.</p>
+        </div>
+      </section>
     </main>
+
+    <footer>
+      <p>
+        MIT licensed · <a class="quiet-link" href={REPO_URL} target="_blank" rel="noreferrer">Source on GitHub</a>
+      </p>
+      <p class="fine">An open-source companion for the Mistral Vibe CLI. Not affiliated with Mistral AI.</p>
+    </footer>
+
+    <style>
+      :root {
+        --bg: #fbfaf8;
+        --sidebar: #f5f3ef;
+        --border: #ecdfd3;
+        --text: #1c1c1c;
+        --text-body: #33302c;
+        --muted: #6b645d;
+        --accent-text: #cf6a3a;
+        --on-accent: #241a12;
+        --accent-grad: linear-gradient(160deg, #ee9b5b, #df6f38);
+        --accent-shadow: rgba(200, 90, 30, 0.3);
+        --ok: #1a7f37;
+        --sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+        --mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+      }
+
+      html {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      body {
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        max-width: 68rem;
+        margin: 0 auto;
+        padding: 0 1.5rem;
+        position: relative;
+      }
+
+      /* The stepped-pixel motif from the mark, echoed as a faint page ornament. */
+      .steps {
+        position: absolute;
+        inset: 0 0 auto auto;
+        width: min(38vw, 420px);
+        height: 300px;
+        pointer-events: none;
+        background-image:
+          linear-gradient(rgba(223, 111, 56, 0.055) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(223, 111, 56, 0.055) 1px, transparent 1px);
+        background-size: 27px 27px;
+        mask-image: linear-gradient(215deg, #000 15%, transparent 70%);
+        -webkit-mask-image: linear-gradient(215deg, #000 15%, transparent 70%);
+      }
+
+      .site-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 1.4rem 0;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 0.65rem;
+        text-decoration: none;
+        color: var(--text);
+      }
+
+      .mark {
+        height: 26px;
+        width: auto;
+      }
+
+      .wordmark {
+        font-weight: 650;
+        font-size: 1.05rem;
+        letter-spacing: -0.01em;
+      }
+
+      .beta-chip {
+        font-size: 0.7rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--accent-text);
+        border: 1px solid var(--border);
+        background: var(--sidebar);
+        border-radius: 999px;
+        padding: 0.15rem 0.55rem;
+      }
+
+      .quiet-link {
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 0.95rem;
+      }
+      .quiet-link:hover {
+        color: var(--accent-text);
+      }
+
+      .hero {
+        padding: clamp(3rem, 9vh, 6.5rem) 0 2.5rem;
+        max-width: 46rem;
+      }
+
+      h1 {
+        font-size: clamp(2.6rem, 6.5vw, 4.4rem);
+        line-height: 1.04;
+        font-weight: 720;
+        letter-spacing: -0.035em;
+        text-wrap: balance;
+      }
+
+      .flame {
+        background: linear-gradient(100deg, #ef8a3c 10%, #e2452a 90%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .pitch {
+        margin-top: 1.4rem;
+        font-size: clamp(1.05rem, 1.8vw, 1.25rem);
+        line-height: 1.55;
+        color: var(--text-body);
+        max-width: 40rem;
+      }
+
+      .cta {
+        margin-top: 2.2rem;
+      }
+
+      .download {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.6rem;
+        font-size: 1.05rem;
+        font-weight: 600;
+        color: var(--on-accent);
+        text-decoration: none;
+        background: var(--accent-grad);
+        border-radius: 12px;
+        padding: 0.85rem 1.5rem;
+        box-shadow:
+          0 1px 2px rgba(28, 28, 28, 0.12),
+          0 8px 24px -8px var(--accent-shadow);
+        transition:
+          transform 140ms ease,
+          box-shadow 140ms ease,
+          filter 140ms ease;
+      }
+      .download:hover {
+        transform: translateY(-1px);
+        filter: brightness(1.03);
+        box-shadow:
+          0 2px 3px rgba(28, 28, 28, 0.12),
+          0 12px 30px -8px var(--accent-shadow);
+      }
+      .download:active {
+        transform: translateY(0);
+        filter: brightness(0.97);
+      }
+
+      .apple {
+        width: 1.15em;
+        height: 1.15em;
+        margin-top: -0.1em;
+      }
+
+      .cta-note {
+        margin-top: 0.8rem;
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+      .cta-note a {
+        color: var(--accent-text);
+        text-decoration: none;
+      }
+      .cta-note a:hover {
+        text-decoration: underline;
+      }
+
+      /* ------- the session card ------- */
+      .session {
+        padding: 1.5rem 0 1rem;
+      }
+
+      .window {
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: #fdfcfb;
+        box-shadow:
+          0 1px 2px rgba(28, 28, 28, 0.05),
+          0 24px 60px -30px rgba(82, 45, 20, 0.25);
+        overflow: hidden;
+        max-width: 44rem;
+      }
+
+      .chrome {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        background: var(--sidebar);
+        border-bottom: 1px solid var(--border);
+        padding: 0.6rem 0.9rem;
+      }
+
+      .light {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        opacity: 0.9;
+      }
+      .red { background: #f2635a; }
+      .amber { background: #f6bd3b; }
+      .green { background: #55c454; }
+
+      .thread-title {
+        margin-left: 0.6rem;
+        font-size: 0.8rem;
+        color: var(--muted);
+        font-family: var(--mono);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .rows {
+        padding: 1.1rem 1.2rem 1.3rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.7rem;
+        font-size: 0.92rem;
+      }
+
+      .row {
+        opacity: 0;
+        transform: translateY(6px);
+        animation: stream 480ms ease forwards;
+      }
+      .row:nth-child(1) { animation-delay: 250ms; }
+      .row:nth-child(2) { animation-delay: 750ms; }
+      .row:nth-child(3) { animation-delay: 1250ms; }
+      .row:nth-child(4) { animation-delay: 1750ms; }
+      .row:nth-child(5) { animation-delay: 2300ms; }
+      .row:nth-child(6) { animation-delay: 2850ms; }
+
+      @keyframes stream {
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .row {
+          animation: none;
+          opacity: 1;
+          transform: none;
+        }
+      }
+
+      .user {
+        align-self: flex-end;
+        background: var(--sidebar);
+        border: 1px solid var(--border);
+        border-radius: 12px 12px 4px 12px;
+        padding: 0.55rem 0.85rem;
+        max-width: 85%;
+      }
+
+      .reasoning {
+        color: var(--muted);
+        font-style: italic;
+        font-size: 0.85rem;
+      }
+
+      .tool {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 0.5rem 0.75rem;
+        background: #fff;
+        font-family: var(--mono);
+        font-size: 0.8rem;
+      }
+
+      .tool code {
+        font-family: inherit;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .tool-icon {
+        color: var(--accent-text);
+        flex: none;
+      }
+
+      .tool-state {
+        margin-left: auto;
+        flex: none;
+        font-size: 0.72rem;
+        border-radius: 999px;
+        padding: 0.12rem 0.55rem;
+      }
+      .tool-state.ok {
+        color: var(--ok);
+        background: rgba(26, 127, 55, 0.1);
+      }
+      .tool-state.ask {
+        color: var(--accent-text);
+        background: rgba(207, 106, 58, 0.1);
+        border: 1px solid rgba(207, 106, 58, 0.3);
+      }
+
+      .answer {
+        line-height: 1.55;
+        color: var(--text-body);
+      }
+      .answer code {
+        font-family: var(--mono);
+        font-size: 0.85em;
+        background: var(--sidebar);
+        border-radius: 5px;
+        padding: 0.08em 0.35em;
+      }
+
+      /* ------- triad + footer ------- */
+      .triad {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 2rem;
+        padding: 3rem 0 2rem;
+        border-top: 1px solid var(--border);
+        margin-top: 2.5rem;
+      }
+
+      .triad h2 {
+        font-size: 1rem;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+      }
+
+      .triad p {
+        margin-top: 0.45rem;
+        font-size: 0.92rem;
+        line-height: 1.5;
+        color: var(--muted);
+      }
+
+      @media (max-width: 640px) {
+        .triad {
+          grid-template-columns: 1fr;
+          gap: 1.4rem;
+        }
+      }
+
+      footer {
+        margin-top: auto;
+        padding: 2.5rem 0 2rem;
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+
+      .fine {
+        margin-top: 0.3rem;
+        font-size: 0.75rem;
+        color: #a89f95;
+      }
+    </style>
   </body>
 </html>
