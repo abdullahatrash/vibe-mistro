@@ -13,13 +13,23 @@
 import { execFileSync } from 'node:child_process'
 import { copyFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 const APP_DISPLAY_NAME = 'Vibe Mistro (Beta)'
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
-const APP_BUNDLE = join(ROOT, 'node_modules/electron/dist/Electron.app')
-const ICNS = join(ROOT, 'resources/icon.icns')
+const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+// Resolve electron through the module graph, not a literal `../node_modules` —
+// the workspace root hoists it.
+const require = createRequire(import.meta.url)
+let electronRoot
+try {
+  electronRoot = dirname(require.resolve('electron/package.json'))
+} catch {
+  process.exit(0)
+}
+const APP_BUNDLE = join(electronRoot, 'dist/Electron.app')
+const ICNS = join(PKG_ROOT, 'resources/icon.icns')
 
 function setPlistName(plistPath, name) {
   for (const key of ['CFBundleDisplayName', 'CFBundleName']) {

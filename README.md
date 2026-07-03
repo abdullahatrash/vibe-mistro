@@ -52,13 +52,17 @@ There is no public docs site yet — see the markdown files in [docs](./docs).
 
 ## Contributing
 
+The repo is a Bun-workspaces monorepo: the desktop app lives in [`apps/desktop`](./apps/desktop)
+and the marketing page in [`apps/web`](./apps/web). All commands run from the repo root:
+
 ```bash
 bun install
 bun run dev         # launch Electron + Vite dev server
-bun run typecheck   # type-check main + renderer
+bun run dev:web     # marketing page dev server
+bun run typecheck   # type-check main + renderer + web
 bun run lint        # eslint
 bun run test        # vitest
-bun run build       # production build
+bun run build       # production build (both apps)
 ```
 
 Before opening a PR, make sure all four gates pass:
