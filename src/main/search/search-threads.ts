@@ -110,6 +110,7 @@ export function searchThreads(
                 snippet: buildSnippet(strong.entry.text, tokens),
                 hitCount: strong.count,
                 entryIndex: strong.entry.index,
+                ...(strong.entry.itemId ? { jumpItemId: strong.entry.itemId } : {}),
               }
             : {}),
         },

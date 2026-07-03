@@ -5,6 +5,7 @@ import { UsageBar } from './items/UsageBar'
 import { initialConversationState, type ConversationState } from './reducer'
 import { replayTranscript, transcriptHasImages } from './replay'
 import { replayCache } from './replay-cache'
+import { useJumpToItem } from './use-jump-to-item'
 import { getWorkspaceCommands } from './workspace-commands'
 
 /**
@@ -80,8 +81,12 @@ export function ColdThread({
   const view = state ?? initialConversationState
   const title = view.title ?? thread.title ?? 'Untitled thread'
 
+  // Land a Search jump (#174 slice 3) once the replay has rendered its items.
+  const convRef = useRef<HTMLDivElement | null>(null)
+  useJumpToItem(thread.id, state !== null && view.items.length > 0, convRef)
+
   return (
-    <div className="conv conv--cold">
+    <div className="conv conv--cold" ref={convRef}>
       <div className="conv__head">
         <button className="btn btn--ghost" onClick={onClose}>
           ← Back
@@ -107,13 +112,15 @@ export function ColdThread({
             // Read-only reopened history: no live turn, so reasoning renders collapsed.
             // The retroactive skill chip (PR #213) matches against the Workspace-level
             // commands cache (#241) — no agent runs here, so there is no session list.
-            <Item
-              key={item.id}
-              item={item}
-              streaming={false}
-              onPermission={noPermission}
-              availableCommands={getWorkspaceCommands(window.localStorage, thread.workspaceId)}
-            />
+            // The data-item-id wrapper is the Search jump anchor (#174 slice 3).
+            <div key={item.id} data-item-id={item.id} className="rounded-lg">
+              <Item
+                item={item}
+                streaming={false}
+                onPermission={noPermission}
+                availableCommands={getWorkspaceCommands(window.localStorage, thread.workspaceId)}
+              />
+            </div>
           ))
         )}
       </div>

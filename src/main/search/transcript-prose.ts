@@ -10,27 +10,38 @@ import type { TranscriptEntry } from '../../shared/ipc'
  * `agent_message_chunk` = `{content:{type:"text",text}, messageId}`.
  */
 
-/** One searchable prose piece: its transcript line index (the slice-3 jump
- * pointer) + the raw text. */
+/** One searchable prose piece: its transcript line index + the CONVERSATION ITEM
+ * id the replay reducer will mint for it (the jump-to-message anchor) + raw text. */
 export interface ProseEntry {
   /** Index of the source line in the Thread's transcript (replay order). */
   index: number
+  /**
+   * The reducer's item id for this entry — `user-prompt` replays as a user item
+   * with the prompt's own id; an `agent_message_chunk` folds into the assistant
+   * item keyed `assistant:${messageId}` (reducer.ts `appendChunk`). Null when
+   * the id can't be derived (e.g. a chunk with no messageId) — still searchable,
+   * just not jumpable.
+   */
+  itemId: string | null
   text: string
 }
 
-/** Extract an entry's searchable prose, or null when the entry carries none. */
-export function extractProse(entry: TranscriptEntry): string | null {
-  if (entry.t === 'user-prompt') return entry.text || null
+/** Extract an entry's searchable prose + jump anchor, or null when it carries none. */
+export function extractProse(entry: TranscriptEntry): { text: string; itemId: string | null } | null {
+  if (entry.t === 'user-prompt') {
+    return entry.text ? { text: entry.text, itemId: entry.id || null } : null
+  }
   if (entry.t !== 'acp-event') return null
   const message = entry.payload as { method?: unknown; params?: unknown } | null
   if (!message || message.method !== 'session/update') return null
   const update = (message.params as { update?: unknown } | undefined)?.update as
-    | { sessionUpdate?: unknown; content?: unknown }
+    | { sessionUpdate?: unknown; content?: unknown; messageId?: unknown }
     | undefined
   if (!update || update.sessionUpdate !== 'agent_message_chunk') return null
   const content = update.content as { type?: unknown; text?: unknown } | undefined
-  if (content?.type !== 'text' || typeof content.text !== 'string') return null
-  return content.text || null
+  if (content?.type !== 'text' || typeof content.text !== 'string' || !content.text) return null
+  const itemId = typeof update.messageId === 'string' ? `assistant:${update.messageId}` : null
+  return { text: content.text, itemId }
 }
 
 /**
@@ -43,8 +54,8 @@ export function proseEntries(entries: TranscriptEntry[]): ProseEntry[] {
   for (let index = 0; index < entries.length; index += 1) {
     const entry = entries[index]
     if (!entry) continue
-    const text = extractProse(entry)
-    if (text) prose.push({ index, text })
+    const extracted = extractProse(entry)
+    if (extracted) prose.push({ index, ...extracted })
   }
   return prose
 }

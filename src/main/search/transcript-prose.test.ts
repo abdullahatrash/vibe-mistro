@@ -12,9 +12,21 @@ function agentChunk(text: string): TranscriptEntry {
 }
 
 describe('extractProse', () => {
-  it('extracts user prompts and agent message chunks (the conversation proper)', () => {
-    expect(extractProse({ t: 'user-prompt', id: 'p1', text: 'fix the pool' })).toBe('fix the pool')
-    expect(extractProse(agentChunk('use execFileAsync here'))).toBe('use execFileAsync here')
+  it('extracts user prompts and agent message chunks with their reducer item ids', () => {
+    expect(extractProse({ t: 'user-prompt', id: 'p1', text: 'fix the pool' })).toEqual({
+      text: 'fix the pool',
+      itemId: 'p1',
+    })
+    expect(extractProse(agentChunk('use execFileAsync here'))).toEqual({
+      text: 'use execFileAsync here',
+      itemId: 'assistant:m1',
+    })
+  })
+
+  it('degrades to itemId null (searchable, not jumpable) when the id is missing', () => {
+    expect(
+      extractProse(acpEvent({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hi' } })),
+    ).toEqual({ text: 'hi', itemId: null })
   })
 
   it('ignores reasoning, tool payloads, and non-conversation entries (CONTEXT.md Search)', () => {
@@ -46,8 +58,8 @@ describe('proseEntries', () => {
       { t: 'turn-complete' },
     ]
     expect(proseEntries(entries)).toEqual([
-      { index: 0, text: 'hello' },
-      { index: 2, text: 'answer' },
+      { index: 0, text: 'hello', itemId: 'p1' },
+      { index: 2, text: 'answer', itemId: 'assistant:m1' },
     ])
   })
 })
