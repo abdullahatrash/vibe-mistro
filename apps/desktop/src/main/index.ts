@@ -60,6 +60,7 @@ import { proseEntries, type ProseEntry } from './search/transcript-prose'
 import { groupThreadsByWorkspace } from './persistence/metadata-store'
 import type { MetadataStoreApi } from './persistence/metadata-store-api'
 import { createMetadataStore } from './persistence/create-metadata-store'
+import type { StateDb } from './persistence/sqlite-db'
 import {
   acpEventEntry,
   agentReboundEntry,
@@ -73,6 +74,7 @@ import {
 import type { TranscriptStoreApi } from './persistence/transcript-store-api'
 import { createTranscriptStore } from './persistence/create-transcript-store'
 import { TranscriptBridge } from './persistence/transcript-bridge'
+import { ftsProseByThread } from './search/fts-prose'
 import { AttachmentStore } from './persistence/attachment-store'
 import { WorkspaceAgent, WorkspaceAgentError } from './workspace-agent'
 import { AgentPool } from './agent-pool'
@@ -363,6 +365,8 @@ let terminalManager: TerminalManager | null = null
 interface MainDeps {
   store: MetadataStoreApi
   transcript: TranscriptStoreApi | null
+  /** The SQLite engine's handle (ADR-0019); null on the legacy JSON engine. */
+  stateDb: StateDb | null
   bridge: TranscriptBridge
   /** Null when the attachments dir `mkdir` failed — image persistence no-ops (logged). */
   attachments: AttachmentStore | null
@@ -1251,31 +1255,39 @@ function registerIpc(deps: MainDeps): void {
   ipcMain.handle(
     IPC.searchQuery,
     async (_event, args: SearchQueryArgs): Promise<SearchQueryResult> => {
-      // The Search palette's ranked hits (#174): a pure scan over the same cold
-      // metadata snapshot listMetadata serves — no agent involved. A NON-empty
-      // query also scans transcript prose (slice 2): read every Thread's JSONL
-      // through the TranscriptStore seam (its only reader, ADR-0005) and extract
-      // the conversation proper; scan-on-query per the epic decision (no index
-      // until measured slow). Best-effort per thread — a failed read degrades
-      // that thread to title-only matching, never the query.
+      // The Search palette's ranked hits (#174): title/Workspace ranking over
+      // the same cold metadata snapshot listMetadata serves — no agent involved.
+      // A NON-empty query also searches transcript prose via the FTS projection
+      // (ADR-0019, #296) — the "measured slow" moment ADR-0005 deferred the
+      // index for arrived with the epic.
       const snapshot = groupThreadsByWorkspace(deps.store.snapshot())
       let prose: Map<string, ProseEntry[]> | undefined
-      if (deps.transcript && tokenizeQuery(args.query).length > 0) {
-        const store = deps.transcript
-        const threads = snapshot.flatMap((ws) => ws.threads)
-        const loaded = await Promise.all(
-          threads.map(async (thread) => {
-            try {
-              return [thread.id, proseEntries(await store.read(thread.id))] as const
-            } catch (err) {
-              console.error(
-                `[vibe-mistro:search] transcript read failed (${thread.id}): ${String(err)}`,
-              )
-              return [thread.id, [] as ProseEntry[]] as const
-            }
-          }),
-        )
-        prose = new Map(loaded)
+      const tokens = tokenizeQuery(args.query)
+      if (tokens.length > 0) {
+        if (deps.stateDb && !deps.stateDb.locked) {
+          // SQLite engine (#296): ONE indexed FTS query feeds the same pure
+          // ranking `searchThreads` always ran — the scan-per-query is gone.
+          prose = ftsProseByThread(deps.stateDb.db, tokens)
+        } else if (deps.transcript) {
+          // Legacy JSON engine only (removed with it in #298): the original
+          // read-every-transcript scan, best-effort per thread — a failed read
+          // degrades that thread to title-only matching, never the query.
+          const store = deps.transcript
+          const threads = snapshot.flatMap((ws) => ws.threads)
+          const loaded = await Promise.all(
+            threads.map(async (thread) => {
+              try {
+                return [thread.id, proseEntries(await store.read(thread.id))] as const
+              } catch (err) {
+                console.error(
+                  `[vibe-mistro:search] transcript read failed (${thread.id}): ${String(err)}`,
+                )
+                return [thread.id, [] as ProseEntry[]] as const
+              }
+            }),
+          )
+          prose = new Map(loaded)
+        }
       }
       return searchThreads(snapshot, args.query, args.limit, prose)
     },
@@ -1323,6 +1335,7 @@ app.whenReady().then(async () => {
   const transcriptsDir = join(app.getPath('userData'), 'transcripts')
   const { transcript } = await createTranscriptStore({ stateDb, transcriptsDir })
 
+
   // The per-Thread prompt-image attachments dir (sibling of the transcripts —
   // the store mkdirs each Thread's subdir itself, but probe the root once here
   // so a broken `userData` degrades to null exactly like the transcript store).
@@ -1341,7 +1354,7 @@ app.whenReady().then(async () => {
     sink: transcript,
     resolveBySession: (sessionId) => store.findThreadIdBySessionId(sessionId),
   })
-  const deps: MainDeps = { store, transcript, bridge, attachments }
+  const deps: MainDeps = { store, transcript, bridge, attachments, stateDb }
 
   // Replace Electron's default Dock icon with the brand mark (dev-run parity with
   // a packaged bundle's icon.icns; t3code does the same). Dev-only: a packaged

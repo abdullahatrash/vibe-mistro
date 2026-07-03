@@ -1,4 +1,5 @@
 import type { TranscriptEntry } from '../../shared/ipc'
+import { projectEntryProse } from './prose-projection'
 import { isTranscriptEntry } from './transcript'
 import type { TranscriptStoreApi } from './transcript-store-api'
 import type { StateDb } from './sqlite-db'
@@ -42,12 +43,22 @@ export class SqliteTranscriptStore implements TranscriptStoreApi {
 
   async append(threadId: string, entry: TranscriptEntry): Promise<void> {
     if (this.stateDb.locked) return
+    // Entry + its prose projection land in ONE transaction (ADR-0019, #296) so
+    // the search index can never drift from the event log.
+    this.db.exec('BEGIN')
     try {
-      this.db
+      const inserted = this.db
         .prepare('INSERT INTO transcript_entries (thread_id, kind, payload, created_at) VALUES (?, ?, ?, ?)')
         .run(threadId, entry.t, JSON.stringify(entry), this.now())
+      projectEntryProse(this.db, threadId, inserted.lastInsertRowid, entry)
+      this.db.exec('COMMIT')
     } catch (err) {
       // Non-fatal by design — the conversation proceeds; the entry is lost.
+      try {
+        this.db.exec('ROLLBACK')
+      } catch {
+        // BEGIN itself failed — nothing to roll back
+      }
       console.error(`[SqliteTranscriptStore] append failed for Thread ${threadId}:`, err)
     }
   }
@@ -75,9 +86,11 @@ export class SqliteTranscriptStore implements TranscriptStoreApi {
   async delete(threadId: string): Promise<void> {
     if (this.stateDb.locked) return
     try {
-      // Usually already gone: the metadata delete cascades the entries. This
-      // covers the orchestrators' explicit call and any cascade-less path.
+      // Usually already gone: the metadata delete cascades entries AND prose.
+      // This covers the orchestrators' explicit call and any cascade-less path
+      // (the prose delete fires the FTS trigger, so the index stays clean).
       this.db.prepare('DELETE FROM transcript_entries WHERE thread_id = ?').run(threadId)
+      this.db.prepare('DELETE FROM prose_items WHERE thread_id = ?').run(threadId)
     } catch (err) {
       console.error(`[SqliteTranscriptStore] delete failed for Thread ${threadId}:`, err)
     }
@@ -115,7 +128,8 @@ export class SqliteTranscriptStore implements TranscriptStoreApi {
       )
       const ts = this.now()
       for (const entry of entries) {
-        insert.run(threadId, entry.t, JSON.stringify(entry), ts)
+        const inserted = insert.run(threadId, entry.t, JSON.stringify(entry), ts)
+        projectEntryProse(this.db, threadId, inserted.lastInsertRowid, entry)
       }
       this.db.exec('COMMIT')
     } catch (err) {
