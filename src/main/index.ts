@@ -41,7 +41,8 @@ import {
 import { detectVibe } from './vibe-detect'
 import { getShellEnv } from './shell-env'
 import { getAccountWhoami, readKeychainApiKey, readVibeEnvFile } from './auth/whoami'
-import { searchThreads } from './search/search-threads'
+import { searchThreads, tokenizeQuery } from './search/search-threads'
+import { proseEntries, type ProseEntry } from './search/transcript-prose'
 import { groupThreadsByWorkspace, MetadataStore } from './persistence/metadata-store'
 import {
   acpEventEntry,
@@ -1099,12 +1100,38 @@ function registerIpc(deps: MainDeps): void {
     return groupThreadsByWorkspace(deps.store.snapshot())
   })
 
-  ipcMain.handle(IPC.searchQuery, (_event, args: SearchQueryArgs): SearchQueryResult => {
-    // The Search palette's ranked hits (#174 slice 1): a pure scan over the same
-    // cold metadata snapshot listMetadata serves — no agent, no transcript I/O yet
-    // (slice 2 widens the corpus to transcript prose behind this same channel).
-    return searchThreads(groupThreadsByWorkspace(deps.store.snapshot()), args.query, args.limit)
-  })
+  ipcMain.handle(
+    IPC.searchQuery,
+    async (_event, args: SearchQueryArgs): Promise<SearchQueryResult> => {
+      // The Search palette's ranked hits (#174): a pure scan over the same cold
+      // metadata snapshot listMetadata serves — no agent involved. A NON-empty
+      // query also scans transcript prose (slice 2): read every Thread's JSONL
+      // through the TranscriptStore seam (its only reader, ADR-0005) and extract
+      // the conversation proper; scan-on-query per the epic decision (no index
+      // until measured slow). Best-effort per thread — a failed read degrades
+      // that thread to title-only matching, never the query.
+      const snapshot = groupThreadsByWorkspace(deps.store.snapshot())
+      let prose: Map<string, ProseEntry[]> | undefined
+      if (deps.transcript && tokenizeQuery(args.query).length > 0) {
+        const store = deps.transcript
+        const threads = snapshot.flatMap((ws) => ws.threads)
+        const loaded = await Promise.all(
+          threads.map(async (thread) => {
+            try {
+              return [thread.id, proseEntries(await store.read(thread.id))] as const
+            } catch (err) {
+              console.error(
+                `[vibe-mistro:search] transcript read failed (${thread.id}): ${String(err)}`,
+              )
+              return [thread.id, [] as ProseEntry[]] as const
+            }
+          }),
+        )
+        prose = new Map(loaded)
+      }
+      return searchThreads(snapshot, args.query, args.limit, prose)
+    },
+  )
 
   ipcMain.handle(IPC.readTranscript, (_event, threadId: string): Promise<ReadTranscriptResult> => {
     // The process-free reopen source (ADR-0005, TB3): hand the renderer the

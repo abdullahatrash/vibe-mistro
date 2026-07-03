@@ -20,8 +20,9 @@ export interface SearchQueryArgs {
 
 /**
  * One ranked Search hit. A hit is a THREAD, never an individual message
- * (CONTEXT.md "Search") — slice 2 enriches rows with `snippet`/`hitCount`/
- * `entryIndex` additively; slice 1 carries the metadata-only fields.
+ * (CONTEXT.md "Search"). The three optional fields are present iff at least one
+ * transcript prose entry contains ALL query tokens (a "strong" message match,
+ * slice 2) — a title/Workspace-only match carries just the metadata fields.
  */
 export interface SearchHit {
   threadId: string
@@ -34,6 +35,12 @@ export interface SearchHit {
   archived: boolean
   /** Epoch-ms recency — the ranking tiebreak and the row's relative timestamp. */
   lastActiveAt: number
+  /** One display line from the best-matching message (whitespace-collapsed, windowed). */
+  snippet?: string
+  /** How many prose entries contain all tokens — the within-tier rank signal. */
+  hitCount?: number
+  /** Transcript line index of the best match — the slice-3 jump-to-message pointer. */
+  entryIndex?: number
 }
 
 /** The `search:query` reply: ranked hits, best first, capped at the limit. */
