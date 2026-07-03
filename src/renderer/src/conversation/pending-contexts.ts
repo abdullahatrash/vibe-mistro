@@ -35,8 +35,26 @@ export interface ElementContext {
   imageId: string | null
 }
 
+/**
+ * A Review Surface diff comment staged as a chip (#239, PRD #233): the user selected
+ * lines in a diff and wrote a note. `excerpt` is the selected diff lines VERBATIM
+ * (with their +/-/space prefixes) so the agent sees exactly which code the note points
+ * at; `startLine`/`endLine` are new-file line numbers (null when the selection
+ * couldn't be located — the excerpt still pins the code). `id` is composer-minted —
+ * each comment is its own chip, several accumulate into one prompt.
+ */
+export interface ReviewCommentContext {
+  kind: 'review'
+  id: string
+  filePath: string
+  startLine: number | null
+  endLine: number | null
+  note: string
+  excerpt: string
+}
+
 /** A context chip staged in the composer awaiting send. */
-export type PendingContext = SkillContext | FileContext | ElementContext
+export type PendingContext = SkillContext | FileContext | ElementContext | ReviewCommentContext
 
 /** The stable identity of a chip — the React key, the remove handle, and the dedupe key. */
 export function contextKey(context: PendingContext): string {
@@ -47,6 +65,8 @@ export function contextKey(context: PendingContext): string {
       return `file:${context.path}`
     case 'element':
       return `element:${context.id}`
+    case 'review':
+      return `review:${context.id}`
   }
 }
 
@@ -84,6 +104,63 @@ const ATTACHED_FILES_CLOSE = '</attached_files>'
  *  prose the agent reads naturally (the former #224 draft-text annotation, relocated). */
 const ELEMENT_CONTEXT_OPEN = '<element_context>'
 const ELEMENT_CONTEXT_CLOSE = '</element_context>'
+
+/** The marker element fencing review comments in the wire text (#239). */
+const REVIEW_COMMENTS_OPEN = '<review_comments>'
+const REVIEW_COMMENTS_CLOSE = '</review_comments>'
+
+/** One review comment's lines inside the block (#239): a head line naming the file +
+ *  line range, a single-line `note:` (whitespace-normalized, like element text), then
+ *  the selected diff lines verbatim inside a ```diff fence. Line-parseable — the
+ *  extraction inverse is {@link parseReviewEntries}. */
+function formatReviewEntry(comment: ReviewCommentContext): string[] {
+  const range =
+    comment.startLine !== null && comment.endLine !== null
+      ? comment.startLine === comment.endLine
+        ? ` (line ${comment.startLine})`
+        : ` (lines ${comment.startLine}-${comment.endLine})`
+      : ''
+  return [
+    `Review comment on ${comment.filePath}${range}`,
+    `note: ${comment.note.replace(/\s+/g, ' ').trim()}`,
+    '```diff',
+    ...comment.excerpt.split('\n'),
+    '```',
+  ]
+}
+
+/** Parse a `<review_comments>` block's inner lines back into comments (#239) — a
+ *  line-by-line state machine (NOT a head-line split: excerpt lines inside the ```diff
+ *  fences may contain anything, including our own head shape). Null on any shape we
+ *  didn't write, so hand-typed text is never mangled. */
+function parseReviewEntries(lines: string[]): ReviewCommentContext[] | null {
+  const comments: ReviewCommentContext[] = []
+  let i = 0
+  while (i < lines.length) {
+    if (lines[i].trim().length === 0) {
+      i++
+      continue
+    }
+    const head = /^Review comment on (.+?)(?: \((?:line (\d+)|lines (\d+)-(\d+))\))?$/.exec(lines[i])
+    if (!head) return null
+    const note = lines[i + 1]
+    if (note === undefined || !note.startsWith('note: ') || lines[i + 2] !== '```diff') return null
+    const close = lines.indexOf('```', i + 3)
+    if (close === -1) return null
+    const single = head[2] ? Number(head[2]) : null
+    comments.push({
+      kind: 'review',
+      id: `rc-extract:${comments.length}`,
+      filePath: head[1],
+      startLine: single ?? (head[3] ? Number(head[3]) : null),
+      endLine: single ?? (head[4] ? Number(head[4]) : null),
+      note: note.slice('note: '.length),
+      excerpt: lines.slice(i + 3, close).join('\n'),
+    })
+    i = close + 1
+  }
+  return comments.length > 0 ? comments : null
+}
 
 /** One element's lines inside the block — `Picked element <tag>` (the entry delimiter),
  *  optional `selector:`/`text:` lines (text whitespace-normalized so entries stay line-
@@ -148,6 +225,7 @@ export interface ExtractedPromptContexts {
   cleanText: string
   files: FileContext[]
   elements: ElementContext[]
+  reviews: ReviewCommentContext[]
 }
 
 /**
@@ -161,6 +239,23 @@ export interface ExtractedPromptContexts {
 export function extractPromptContexts(text: string): ExtractedPromptContexts {
   let working = text
   let elements: ElementContext[] = []
+  let reviews: ReviewCommentContext[] = []
+  // Reviews serialize LAST (#239), so they strip FIRST.
+  const reviewTrimmed = working.trimEnd()
+  if (reviewTrimmed.endsWith(REVIEW_COMMENTS_CLOSE)) {
+    const open = reviewTrimmed.lastIndexOf(REVIEW_COMMENTS_OPEN)
+    if (open !== -1) {
+      const inner = reviewTrimmed.slice(
+        open + REVIEW_COMMENTS_OPEN.length,
+        reviewTrimmed.length - REVIEW_COMMENTS_CLOSE.length,
+      )
+      const parsed = parseReviewEntries(inner.split('\n'))
+      if (parsed) {
+        reviews = parsed
+        working = reviewTrimmed.slice(0, open).replace(/\n+$/, '')
+      }
+    }
+  }
   const trimmed = working.trimEnd()
   if (trimmed.endsWith(ELEMENT_CONTEXT_CLOSE)) {
     const open = trimmed.lastIndexOf(ELEMENT_CONTEXT_OPEN)
@@ -181,7 +276,7 @@ export function extractPromptContexts(text: string): ExtractedPromptContexts {
     }
   }
   const { cleanText, files } = extractAttachedFiles(working)
-  return { cleanText, files, elements }
+  return { cleanText, files, elements, reviews }
 }
 
 /**
@@ -205,6 +300,12 @@ export function serializeForSend(text: string, contexts: readonly PendingContext
   if (elements.length > 0) {
     parts.push(
       [ELEMENT_CONTEXT_OPEN, ...elements.flatMap(formatElementEntry), ELEMENT_CONTEXT_CLOSE].join('\n'),
+    )
+  }
+  const reviews = contexts.filter((c) => c.kind === 'review')
+  if (reviews.length > 0) {
+    parts.push(
+      [REVIEW_COMMENTS_OPEN, ...reviews.flatMap(formatReviewEntry), REVIEW_COMMENTS_CLOSE].join('\n'),
     )
   }
   return parts.filter((p) => p.length > 0).join('\n\n')

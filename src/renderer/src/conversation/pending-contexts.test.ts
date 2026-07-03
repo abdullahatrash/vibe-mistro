@@ -110,6 +110,7 @@ describe('extractPromptContexts — display mirror for the full payload', () => 
     expect(extractPromptContexts(wire)).toEqual({
       cleanText: '/teach style this',
       files: [reducerFile],
+      reviews: [],
       elements: [
         {
           kind: 'element',
@@ -146,6 +147,7 @@ describe('extractPromptContexts — display mirror for the full payload', () => 
       cleanText: 'just prose with @src/typed.ts',
       files: [],
       elements: [],
+      reviews: [],
     })
   })
 })
@@ -172,5 +174,80 @@ describe('removeContext', () => {
     const staged = addContext([], teach)
     expect(removeContext(staged, contextKey(teach))).toEqual([])
     expect(removeContext(staged, contextKey(review))).toEqual(staged)
+  })
+})
+
+describe('review-comment chips (#239)', () => {
+  const comment1 = {
+    kind: 'review',
+    id: 'rc:1',
+    filePath: 'src/git/diff.ts',
+    startLine: 10,
+    endLine: 12,
+    note: 'this cap looks wrong',
+    excerpt: ' const CAP = 120\n-const OLD = 1\n+const NEW = 2',
+  } as const
+
+  const comment2 = {
+    kind: 'review',
+    id: 'rc:2',
+    filePath: 'src/other.ts',
+    startLine: 3,
+    endLine: 3,
+    note: 'rename this',
+    excerpt: '+const x = 1',
+  } as const
+
+  it('accumulates comments (each id its own chip) and removes by key', () => {
+    const staged = addContext(addContext([], comment1), comment2)
+    expect(staged).toEqual([comment1, comment2])
+    expect(removeContext(staged, contextKey(comment1))).toEqual([comment2])
+  })
+
+  it('serializes as a trailing <review_comments> block: path + line range + note + fenced diff excerpt', () => {
+    const wire = serializeForSend('please address these', [comment1])
+    expect(wire).toBe(
+      'please address these\n\n' +
+        '<review_comments>\n' +
+        'Review comment on src/git/diff.ts (lines 10-12)\n' +
+        'note: this cap looks wrong\n' +
+        '```diff\n' +
+        ' const CAP = 120\n-const OLD = 1\n+const NEW = 2\n' +
+        '```\n' +
+        '</review_comments>',
+    )
+  })
+
+  it('several comments across files ride ONE block in staged order', () => {
+    const wire = serializeForSend('', [comment1, comment2])
+    expect(wire).toContain('Review comment on src/git/diff.ts (lines 10-12)')
+    expect(wire).toContain('Review comment on src/other.ts (line 3)')
+    expect(wire.indexOf('src/git/diff.ts')).toBeLessThan(wire.indexOf('src/other.ts'))
+  })
+
+  it('round-trips through the display mirror: prose recovered, comments recovered', () => {
+    const wire = serializeForSend('please address these', [comment1, comment2])
+    const extracted = extractPromptContexts(wire)
+    expect(extracted.cleanText).toBe('please address these')
+    expect(extracted.reviews.map((r) => ({ path: r.filePath, note: r.note, excerpt: r.excerpt }))).toEqual([
+      { path: 'src/git/diff.ts', note: 'this cap looks wrong', excerpt: ' const CAP = 120\n-const OLD = 1\n+const NEW = 2' },
+      { path: 'src/other.ts', note: 'rename this', excerpt: '+const x = 1' },
+    ])
+    expect(extracted.reviews[0]).toMatchObject({ startLine: 10, endLine: 12 })
+  })
+
+  it('coexists with the other chip kinds — reviews serialize LAST and extract first', () => {
+    const wire = serializeForSend('style this', [reducerFile, button, comment1])
+    const extracted = extractPromptContexts(wire)
+    expect(extracted.cleanText).toBe('style this')
+    expect(extracted.files).toEqual([reducerFile])
+    expect(extracted.elements.length).toBe(1)
+    expect(extracted.reviews.length).toBe(1)
+  })
+
+  it('hand-typed text mentioning <review_comments> mid-prose passes through untouched', () => {
+    const text = 'what does <review_comments> mean here?\nnothing.'
+    expect(extractPromptContexts(text).cleanText).toBe(text)
+    expect(extractPromptContexts(text).reviews).toEqual([])
   })
 })
