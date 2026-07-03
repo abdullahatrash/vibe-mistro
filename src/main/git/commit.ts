@@ -72,8 +72,10 @@ export async function gitCommit(
  * whose NEW path is in the selection, returns its `<orig>` so both halves get staged.
  * Best-effort: a non-zero status read returns `[]` (the commit proceeds without it,
  * degrading to the original add-the-new-only behaviour — never throws/blocks).
+ * Exported for `gitRevert` (#250), which needs the same origin lookup to restore a
+ * selected rename's source while cleaning its new name.
  */
-async function collectRenameOrigins(cwd: string, paths: string[], run: GitRun): Promise<string[]> {
+export async function collectRenameOrigins(cwd: string, paths: string[], run: GitRun): Promise<string[]> {
   const selected = new Set(paths)
   const res = await run(['-c', 'core.quotePath=false', 'status', '--porcelain=2'], cwd)
   if (res.code !== 0) return []

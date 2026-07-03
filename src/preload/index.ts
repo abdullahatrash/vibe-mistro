@@ -17,6 +17,7 @@ import {
   type GitOpResult,
   type GitRangeDiffArgs,
   type GitRangeDiffResult,
+  type GitRevertArgs,
   type GitStackedActionArgs,
   type GitStackedActionResult,
   type GhCreatePrArgs,
@@ -127,6 +128,7 @@ const api = {
   gitRangeDiff: (args: GitRangeDiffArgs): Promise<GitRangeDiffResult> =>
     ipcRenderer.invoke(IPC.gitRangeDiff, args),
   gitCommit: (args: GitCommitArgs): Promise<GitCommitResult> => ipcRenderer.invoke(IPC.gitCommit, args),
+  gitRevert: (args: GitRevertArgs): Promise<GitOpResult> => ipcRenderer.invoke(IPC.gitRevert, args),
   gitBranches: (args: GitBranchesArgs): Promise<GitBranchesResult> =>
     ipcRenderer.invoke(IPC.gitBranches, args),
   gitCheckout: (args: GitBranchOpArgs): Promise<GitOpResult> =>

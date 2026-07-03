@@ -29,6 +29,8 @@ export const gitChannels = {
   gitRangeDiff: 'git:range-diff',
   /** Renderer -> main: COMMIT working-tree changes from the Changes panel (#86) — see {@link GitCommitArgs}. */
   gitCommit: 'git:commit',
+  /** Renderer -> main: REVERT working-tree changes — DESTRUCTIVE, dialog-gated (#250) — see {@link GitRevertArgs}. */
+  gitRevert: 'git:revert',
   /** Renderer -> main: list the active Workspace's branches (#87) — see {@link GitBranchesArgs}. */
   gitBranches: 'git:branches',
   /** Renderer -> main: CHECK OUT a branch on the active Workspace (#87) — see {@link GitBranchOpArgs}. */
@@ -180,6 +182,21 @@ export interface GitCommitArgs {
   workspaceDir: string
   message: string
   paths: string[]
+}
+
+/**
+ * Args for `gitRevert` (#250) — the app's one deliberately DESTRUCTIVE git write,
+ * always behind the renderer's warning dialog. `all: true` reverts the WHOLE tree
+ * (tracked restored to HEAD, untracked files AND directories deleted); otherwise
+ * `files` is the exact selection — each entry carries its porcelain `status` +
+ * `untracked` flag so main buckets it correctly (an index-only add can't `restore`
+ * from HEAD; an untracked file is DELETED, not restored; a rename restores its origin
+ * and deletes the new name). On success main re-reads status so the rows drop off.
+ */
+export interface GitRevertArgs {
+  workspaceDir: string
+  files: { path: string; status: string; untracked: boolean }[]
+  all: boolean
 }
 
 /**
