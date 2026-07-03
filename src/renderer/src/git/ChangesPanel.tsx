@@ -1,6 +1,6 @@
-import { useEffect, useState, type JSX } from 'react'
-import { Boxes, GitCommitHorizontal, Monitor, PanelRightClose, RefreshCw } from 'lucide-react'
-import type { GitStatus } from '../../../shared/ipc'
+import { useEffect, useRef, useState, type JSX } from 'react'
+import { Boxes, Monitor, PanelRightClose, RefreshCw } from 'lucide-react'
+import type { GhPr, GitActionPhase, GitStackedActionKind, GitStatus } from '../../../shared/ipc'
 import {
   Badge,
   Button,
@@ -16,11 +16,12 @@ import {
   Textarea,
 } from '../ui'
 import { getCommitDraft, setCommitDraft } from './commit-draft-store'
-import { buildChangesView, buildSyncView, reconcileUnchecked } from './status-view'
+import { buildChangesView, reconcileUnchecked } from './status-view'
 import { autoCommitMessage, isDefaultBranch, suggestBranchName } from './commit-guard'
+import { deriveQuickAction, type QuickActionKind } from './quick-action'
+import { QuickActions } from './QuickActions'
 import { BranchMenu } from './BranchMenu'
 import { PrSection } from './PrSection'
-import { SyncSection } from './SyncSection'
 import { FileRow } from './FileRow'
 import { DiffWorkerProvider } from './DiffWorkerProvider'
 import { AllFilesDiffView } from './AllFilesDiffView'
@@ -97,10 +98,22 @@ export function ChangesPanel({
   const [prRefreshKey, setPrRefreshKey] = useState(0)
   // The default-branch guard dialog (#238): open flag, the escape hatch's editable
   // branch name (prefilled from the effective message), its in-flight + error state.
+  // `guardPendingKind` (#236) is WHICH commit-family action the guard interposed on —
+  // Continue / create-branch resume exactly that action, not always a plain commit.
   const [guardOpen, setGuardOpen] = useState(false)
   const [guardBranchName, setGuardBranchName] = useState('')
   const [guardWorking, setGuardWorking] = useState(false)
   const [guardError, setGuardError] = useState<string | null>(null)
+  const [guardPendingKind, setGuardPendingKind] = useState<QuickActionKind>('commit')
+  // The current branch's PR, reported up by PrSection (#236) — feeds the quick-action
+  // derivation (an OPEN PR flips the dirty-tree primary to "Commit & push").
+  const [pr, setPr] = useState<GhPr | null>(null)
+  // The in-flight stacked action (#236): its kind, the streamed phase line, its error,
+  // and the renderer-minted id the progress events are filtered by.
+  const [acting, setActing] = useState<GitStackedActionKind | null>(null)
+  const [actionProgress, setActionProgress] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const actionIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!isActive) return
@@ -127,6 +140,16 @@ export function ChangesPanel({
   useEffect(() => {
     setCommitDraft(workspaceDir, { message, unchecked })
   }, [workspaceDir, message, unchecked])
+
+  // One progress subscription for the panel's lifetime (#236): streamed phase events
+  // are dropped unless they carry the CURRENT action's id, then mapped to the inline
+  // phase line ("Committing…" → "Pushing…" → "Creating PR…").
+  useEffect(() => {
+    return window.api.onGitActionProgress((event) => {
+      if (event.workspaceDir !== workspaceDir || event.actionId !== actionIdRef.current) return
+      if (event.kind === 'phaseStarted') setActionProgress(PHASE_LABELS[event.phase])
+    })
+  }, [workspaceDir])
 
   // Manual refresh: a subscribe/unsubscribe pair re-emits a fresh snapshot without
   // changing the net ref-count (the panel keeps its own hold across this).
@@ -165,19 +188,45 @@ export function ChangesPanel({
   const effectiveMessage = message.trim() || generatedMessage
   const canCommit = effectiveMessage.length > 0 && selectedPaths.length > 0 && !busy && !committing
 
-  async function commit(): Promise<void> {
-    if (!canCommit) return
-    // Default-branch guard (#238): interpose BEFORE a commit that would land straight
-    // on the default branch. Strictly best-effort — a failed branches read (or an
-    // unresolved default) skips the guard rather than blocking the commit.
-    const branches = await window.api.gitBranches({ workspaceDir })
-    if (branches.ok && isDefaultBranch(status?.branch ?? null, branches.branches)) {
-      setGuardBranchName(suggestBranchName(effectiveMessage))
-      setGuardError(null)
-      setGuardOpen(true)
+  // The smart quick action (#236): pure derivation from the streamed status + the PR
+  // reported up by PrSection. Only an OPEN PR counts — a merged/closed one should lead
+  // back to "Commit, push & PR".
+  const quickAction = deriveQuickAction(status, pr !== null && pr.state.toUpperCase() === 'OPEN')
+
+  const actionsDisabled =
+    busy || committing || acting !== null || (view.files.length > 0 && selectedPaths.length === 0)
+
+  /** The quick-action dispatch (#236): guard the commit family (#238), run the rest. */
+  async function runQuickAction(kind: QuickActionKind): Promise<void> {
+    if (actionsDisabled) return
+    if (kind === 'view_pr') {
+      // The anchor path: routed through main's setWindowOpenHandler -> openExternal.
+      if (pr) window.open(pr.url, '_blank', 'noreferrer')
       return
     }
-    await doCommit()
+    if (kind === 'commit' || kind === 'commit_push' || kind === 'commit_push_pr') {
+      if (!canCommit) return
+      // Default-branch guard (#238): interpose BEFORE any commit-family action that
+      // would land straight on the default branch. Strictly best-effort — a failed
+      // branches read (or an unresolved default) skips the guard rather than blocking.
+      const branches = await window.api.gitBranches({ workspaceDir })
+      if (branches.ok && isDefaultBranch(status?.branch ?? null, branches.branches)) {
+        setGuardPendingKind(kind)
+        setGuardBranchName(suggestBranchName(effectiveMessage))
+        setGuardError(null)
+        setGuardOpen(true)
+        return
+      }
+    }
+    await executeAction(kind)
+  }
+
+  /** Run the (possibly guard-approved) action: plain commit via `gitCommit`, everything
+   *  else as a stacked action. */
+  async function executeAction(kind: QuickActionKind): Promise<void> {
+    if (kind === 'view_pr') return
+    if (kind === 'commit') return doCommit()
+    await runStacked(kind)
   }
 
   async function doCommit(): Promise<void> {
@@ -201,9 +250,44 @@ export function ChangesPanel({
     }
   }
 
-  /** The guard's escape hatch (#238): create + switch to the named branch, then run the
-   *  original commit on it. A create failure (name collision) stays IN the dialog. */
-  async function createBranchAndCommit(): Promise<void> {
+  /** Run a stacked action (#234/#236) with a renderer-minted id; progress streams into
+   *  the inline phase line, the resolve is the final word. */
+  async function runStacked(kind: GitStackedActionKind): Promise<void> {
+    const actionId = crypto.randomUUID()
+    actionIdRef.current = actionId
+    setActing(kind)
+    setActionProgress(null)
+    setActionError(null)
+    setCommitError(null)
+    const commitFamily = kind === 'commit_push' || kind === 'commit_push_pr'
+    try {
+      const result = await window.api.gitRunStackedAction({
+        workspaceDir,
+        actionId,
+        action: kind,
+        ...(commitFamily ? { commitMessage: effectiveMessage, paths: selectedPaths } : {}),
+      })
+      if (result.ok) {
+        if (commitFamily) setMessage('')
+        // Anything that pushed changed the PR surface (a new upstream, a new PR):
+        // re-fetch it so the chip appears without a manual refresh (#236).
+        if (kind !== 'pull') setPrRefreshKey((k) => k + 1)
+      } else {
+        // The FAILED PHASE is named — a rejected push after a successful commit must
+        // not read as "commit failed" (#236). Earlier phases have already landed.
+        setActionError(`${PHASE_LABELS[result.phase].replace('…', '')} failed: ${result.error}`)
+      }
+    } finally {
+      actionIdRef.current = null
+      setActing(null)
+      setActionProgress(null)
+    }
+  }
+
+  /** The guard's escape hatch (#238/#236): create + switch to the named branch, then
+   *  resume the ORIGINAL action on it. A create failure (name collision) stays IN the
+   *  dialog. */
+  async function createBranchAndContinue(): Promise<void> {
     const name = guardBranchName.trim()
     if (!name) return
     setGuardWorking(true)
@@ -215,7 +299,7 @@ export function ChangesPanel({
         return
       }
       setGuardOpen(false)
-      await doCommit()
+      await executeAction(guardPendingKind)
     } finally {
       setGuardWorking(false)
     }
@@ -275,127 +359,133 @@ export function ChangesPanel({
         hasUpstream={status.upstream !== null}
         busy={busy}
         refreshKey={prRefreshKey}
+        onPrChange={setPr}
       />
 
       {view.files.length === 0 ? (
-        <>
-          <p className="px-3 py-3 text-[13px] text-muted">No changes — working tree clean.</p>
-          {/* Clean-tree sync actions (#234): Push when ahead / upstream-less, Pull when
-              behind — driven by the pure `buildSyncView`. This un-dead-ends the PR
-              section's "Push your branch first" gate. */}
-          <SyncSection workspaceDir={workspaceDir} sync={buildSyncView(status)} busy={busy} />
-        </>
+        <p className="px-3 py-3 text-[13px] text-muted">No changes — working tree clean.</p>
       ) : (
-        <>
-          <ul className="flex flex-col gap-0.5 py-1.5">
-            {view.files.map((file) => (
-              <FileRow
-                key={file.path}
-                file={file}
-                checked={!unchecked.has(file.path)}
-                onToggle={() =>
-                  setUnchecked((prev) => {
-                    const next = new Set(prev)
-                    if (next.has(file.path)) next.delete(file.path)
-                    else next.add(file.path)
-                    return next
-                  })
-                }
-                onSelect={() => setSelectedPath(file.path)}
-              />
-            ))}
-          </ul>
+        <ul className="flex flex-col gap-0.5 py-1.5">
+          {view.files.map((file) => (
+            <FileRow
+              key={file.path}
+              file={file}
+              checked={!unchecked.has(file.path)}
+              onToggle={() =>
+                setUnchecked((prev) => {
+                  const next = new Set(prev)
+                  if (next.has(file.path)) next.delete(file.path)
+                  else next.add(file.path)
+                  return next
+                })
+              }
+              onSelect={() => setSelectedPath(file.path)}
+            />
+          ))}
+        </ul>
+      )}
 
-          {/* Commit area (#86, #238): message + "Commit N". A BLANK message commits
-              with the heuristic shown as the placeholder; disabled only with no
-              selection or `busy` (the v1 concurrency guard — no concurrent user+agent
-              commit). git's reason surfaces inline + recoverable. */}
-          <div className="flex flex-col gap-2 border-t border-border-muted px-3 py-2.5">
+      {/* Action area (#86/#234/#236/#238): the message box (dirty tree only — a BLANK
+          message commits with the heuristic shown as the placeholder, #238) + the smart
+          quick-action control (primary follows repo state: Commit, push & PR / Commit &
+          push / Push / Pull / View PR; the rest in the attached menu). Disabled while a
+          turn streams (`busy`) or an action runs. git's reason surfaces inline. */}
+      {(view.files.length > 0 || quickAction.primary !== null) && (
+        <div className="flex flex-col gap-2 border-t border-border-muted px-3 py-2.5">
+          {view.files.length > 0 && (
             <Textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               placeholder={generatedMessage || 'Commit message'}
               rows={2}
               className="min-h-16 resize-y text-[13px]"
-              // Ctrl/Cmd+Enter commits, matching the prompt composer's submit chord.
+              // Ctrl/Cmd+Enter runs the primary action, matching the composer's chord.
               onKeyDown={(e) => {
                 if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
                   e.preventDefault()
-                  void commit()
+                  if (quickAction.primary) void runQuickAction(quickAction.primary.kind)
                 }
               }}
             />
-            {commitError && (
+          )}
+          {busy && <p className="text-[11px] text-muted">Agent is working…</p>}
+          <QuickActions
+            view={quickAction}
+            commitCount={selectedPaths.length}
+            disabled={actionsDisabled}
+            actingLabel={acting !== null ? (actionProgress ?? '…') : committing ? 'Committing…' : null}
+            error={actionError ?? commitError}
+            onRun={(kind) => void runQuickAction(kind)}
+          />
+        </div>
+      )}
+
+      {/* Default-branch guard (#238, generalized by #236): interposed by
+          `runQuickAction` on ANY commit-family action when HEAD is the repository's
+          default branch — Cancel / Continue on default / Create feature branch
+          (prefilled, editable) & continue. Continue and the escape hatch resume the
+          ORIGINAL action; a create failure stays in the dialog with git's reason. */}
+      <Dialog open={guardOpen} onOpenChange={(open) => !guardWorking && setGuardOpen(open)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Commit on {view.branch}?</DialogTitle>
+            <DialogDescription>
+              {view.branch} is this repository’s default branch. You can continue here, or move the
+              commit onto a new feature branch.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="guard-branch-name" className="text-[11px] font-medium text-muted">
+              New branch name
+            </label>
+            <Input
+              id="guard-branch-name"
+              value={guardBranchName}
+              onChange={(e) => setGuardBranchName(e.target.value)}
+              disabled={guardWorking}
+              className="text-[13px]"
+            />
+            {guardError && (
               <p className="text-[11px] text-bad" role="alert">
-                {commitError}
+                {guardError}
               </p>
             )}
-            {busy && <p className="text-[11px] text-muted">Agent is working…</p>}
-            <Button type="button" size="sm" className="w-full" onClick={() => void commit()} disabled={!canCommit}>
-              <GitCommitHorizontal className="size-4" aria-hidden />
-              {committing ? 'Committing…' : `Commit ${selectedPaths.length}`}
-            </Button>
           </div>
-
-          {/* Default-branch guard (#238): interposed by `commit()` when HEAD is the
-              repository's default branch — Abort / Continue on default / Create feature
-              branch (prefilled, editable) & continue. A create failure stays in the
-              dialog with git's reason; Continue behaves exactly like today's commit. */}
-          <Dialog open={guardOpen} onOpenChange={(open) => !guardWorking && setGuardOpen(open)}>
-            <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle>Commit on {view.branch}?</DialogTitle>
-                <DialogDescription>
-                  {view.branch} is this repository’s default branch. You can commit here, or move the
-                  commit onto a new feature branch.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="guard-branch-name" className="text-[11px] font-medium text-muted">
-                  New branch name
-                </label>
-                <Input
-                  id="guard-branch-name"
-                  value={guardBranchName}
-                  onChange={(e) => setGuardBranchName(e.target.value)}
-                  disabled={guardWorking}
-                  className="text-[13px]"
-                />
-                {guardError && (
-                  <p className="text-[11px] text-bad" role="alert">
-                    {guardError}
-                  </p>
-                )}
-              </div>
-              <DialogFooter>
-                <DialogClose render={<Button variant="secondary" size="sm" disabled={guardWorking} />}>
-                  Cancel
-                </DialogClose>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={guardWorking}
-                  onClick={() => {
-                    setGuardOpen(false)
-                    void doCommit()
-                  }}
-                >
-                  Commit on {view.branch}
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={guardWorking || guardBranchName.trim().length === 0}
-                  onClick={() => void createBranchAndCommit()}
-                >
-                  {guardWorking ? 'Creating…' : 'Create branch & commit'}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </>
-      )}
+          <DialogFooter>
+            <DialogClose render={<Button variant="secondary" size="sm" disabled={guardWorking} />}>
+              Cancel
+            </DialogClose>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={guardWorking}
+              onClick={() => {
+                setGuardOpen(false)
+                void executeAction(guardPendingKind)
+              }}
+            >
+              Continue on {view.branch}
+            </Button>
+            <Button
+              size="sm"
+              disabled={guardWorking || guardBranchName.trim().length === 0}
+              onClick={() => void createBranchAndContinue()}
+            >
+              {guardWorking ? 'Creating…' : 'Create branch & continue'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </aside>
   )
+}
+
+/** The inline phase line per streamed phase (#236). */
+const PHASE_LABELS: Record<GitActionPhase, string> = {
+  commit: 'Committing…',
+  push: 'Pushing…',
+  pull: 'Pulling…',
+  create_pr: 'Creating PR…',
 }
 
 /**

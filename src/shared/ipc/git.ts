@@ -203,25 +203,31 @@ export interface GitBranchesArgs {
 }
 
 /**
- * Which stacked git action to run (#234, PRD #233). Slice 1 ships the two single-phase
- * actions — `push` / `pull`; the commit-composing chains (`commit_push`,
- * `commit_push_pr`) arrive with the quick-action slice (#236) on the same engine.
+ * Which stacked git action to run (#234/#236, PRD #233): the single-phase `push` /
+ * `pull` plus the composed chains — `commit_push` (commit the selection, then push)
+ * and `commit_push_pr` (… then create the PR via gh). Commit/push/PR is ONE
+ * composable call, not three buttons (t3code's `runStackedAction` shape).
  */
-export type GitStackedActionKind = 'push' | 'pull'
+export type GitStackedActionKind = 'push' | 'pull' | 'commit_push' | 'commit_push_pr'
 
-/** One phase of a stacked action (#234). Single-phase in slice 1; `commit`/`create_pr` join in #236. */
-export type GitActionPhase = 'push' | 'pull'
+/** One phase of a stacked action (#234/#236), in chain order: commit → push → create_pr; pull is alone. */
+export type GitActionPhase = 'commit' | 'push' | 'pull' | 'create_pr'
 
 /**
  * Args for `gitRunStackedAction` (#234). `actionId` is CALLER-minted (the renderer
  * generates it before invoking) so the caller can correlate `gitActionProgress` pushes
  * with its own invocation — the invoke itself resolves with the final
- * {@link GitStackedActionResult}; the stream is advisory UI.
+ * {@link GitStackedActionResult}; the stream is advisory UI. The commit-family chains
+ * (#236) carry `commitMessage` (the EFFECTIVE message — the renderer has already
+ * substituted the #238 heuristic for a blank one) and `paths` (the commit-time
+ * selection, #86 semantics: empty = all). The PR title is the message's first line.
  */
 export interface GitStackedActionArgs {
   workspaceDir: string
   actionId: string
   action: GitStackedActionKind
+  commitMessage?: string
+  paths?: string[]
 }
 
 /**
@@ -242,11 +248,16 @@ export type GitActionProgressEvent = { workspaceDir: string; actionId: string } 
 )
 
 /**
- * The `gitRunStackedAction` reply (#234). `{ok:false}` names the phase that failed and
- * carries git's ACTUAL reason (a rejected push, a non-fast-forward pull, a failed hook)
- * — never a collapsed message (#86 style). Surfaced inline + recoverable.
+ * The `gitRunStackedAction` reply (#234/#236). `{ok:false}` names the phase that
+ * failed and carries git/gh's ACTUAL reason (a rejected push, a non-fast-forward
+ * pull, a failed hook, a gh auth error) — never a collapsed message (#86 style); a
+ * mid-chain failure means the EARLIER phases already landed (the stream shows their
+ * `phaseFinished`). `prUrl` is set when a `commit_push_pr` chain created the PR —
+ * the renderer swaps the chip in from it without a re-fetch.
  */
-export type GitStackedActionResult = { ok: true } | { ok: false; phase: GitActionPhase; error: string }
+export type GitStackedActionResult =
+  | { ok: true; prUrl?: string }
+  | { ok: false; phase: GitActionPhase; error: string }
 
 /**
  * Args for `gitCheckout` / `gitCreateBranch` (#87). For a CHECKOUT `name` is the branch's

@@ -171,3 +171,132 @@ describe('runStackedAction: pull', () => {
     expect(events.at(-1)).toMatchObject({ kind: 'actionFailed', error: 'spawn EACCES' })
   })
 })
+
+describe('runStackedAction: composed chains (#236)', () => {
+  /** A createPr seam fake recording its input. */
+  function fakeCreatePr(
+    result: { ok: true; url: string } | { ok: false; error: string },
+    seen?: { cwd: string; title: string; body: string }[],
+  ) {
+    return (cwd: string, fields: { title: string; body: string }) => {
+      seen?.push({ cwd, ...fields })
+      return Promise.resolve(result)
+    }
+  }
+
+  it('commit_push: commits the selection (via the #86 staging sequence) then pushes, phases in order', async () => {
+    const seen: string[][] = []
+    const { events, emit } = collect()
+    const result = await runStackedAction(
+      { workspaceDir: '/repo', actionId: 'a3', action: 'commit_push', commitMessage: 'msg', paths: ['a.txt'] },
+      emit,
+      fakeRun(seen, [
+        { code: 0 }, // status (rename scan)
+        { code: 0 }, // reset -q
+        { code: 0 }, // add -- a.txt
+        { code: 0 }, // commit -m msg
+        { stdout: 'origin/main\n', code: 0 }, // upstream exists
+        { code: 0 }, // push
+      ]),
+    )
+    expect(result).toEqual({ ok: true })
+    expect(seen.map((a) => a[0] === '-c' ? a[2] : a[0])).toEqual([
+      'status',
+      'reset',
+      'add',
+      'commit',
+      'rev-parse',
+      'push',
+    ])
+    expect(events.map((e) => e.kind)).toEqual([
+      'actionStarted',
+      'phaseStarted', // commit
+      'phaseFinished',
+      'phaseStarted', // push
+      'phaseFinished',
+      'actionFinished',
+    ])
+  })
+
+  it('commit_push_pr: adds the create_pr phase — PR title from the message, prUrl in the result', async () => {
+    const prSeen: { cwd: string; title: string; body: string }[] = []
+    const { events, emit } = collect()
+    const result = await runStackedAction(
+      {
+        workspaceDir: '/repo',
+        actionId: 'a3',
+        action: 'commit_push_pr',
+        commitMessage: 'Add feature\n\nlong body here',
+        paths: [],
+      },
+      emit,
+      fakeRun([], [
+        { code: 0 }, // add -A
+        { code: 0 }, // commit
+        { stdout: 'origin/feat\n', code: 0 }, // upstream
+        { code: 0 }, // push
+      ]),
+      fakeCreatePr({ ok: true, url: 'https://github.com/o/r/pull/9' }, prSeen),
+    )
+    expect(result).toEqual({ ok: true, prUrl: 'https://github.com/o/r/pull/9' })
+    // Title = FIRST LINE of the commit message; body empty (gh accepts it).
+    expect(prSeen).toEqual([{ cwd: '/repo', title: 'Add feature', body: '' }])
+    expect(events.filter((e) => e.kind === 'phaseStarted').map((e) => e.kind === 'phaseStarted' && e.phase)).toEqual([
+      'commit',
+      'push',
+      'create_pr',
+    ])
+  })
+
+  it('a REJECTED push stops the chain: commit already done, create_pr NEVER runs, failed phase named', async () => {
+    const prSeen: { cwd: string; title: string; body: string }[] = []
+    const { events, emit } = collect()
+    const result = await runStackedAction(
+      { workspaceDir: '/repo', actionId: 'a3', action: 'commit_push_pr', commitMessage: 'msg', paths: [] },
+      emit,
+      fakeRun([], [
+        { code: 0 }, // add -A
+        { code: 0 }, // commit
+        { stdout: 'origin/main\n', code: 0 }, // upstream
+        { stderr: '! [rejected] non-fast-forward', code: 1 }, // push fails
+      ]),
+      fakeCreatePr({ ok: true, url: 'unused' }, prSeen),
+    )
+    expect(result).toEqual({ ok: false, phase: 'push', error: '! [rejected] non-fast-forward' })
+    expect(prSeen).toEqual([]) // chain stopped — no PR attempted
+    // The commit phase COMPLETED before the failure (its finish is on the stream).
+    expect(events.some((e) => e.kind === 'phaseFinished' && e.phase === 'commit')).toBe(true)
+    expect(events.at(-1)).toMatchObject({ kind: 'actionFailed', phase: 'push' })
+  })
+
+  it('a FAILED commit stops the chain before any push', async () => {
+    const seen: string[][] = []
+    const { emit } = collect()
+    const result = await runStackedAction(
+      { workspaceDir: '/repo', actionId: 'a3', action: 'commit_push', commitMessage: 'msg', paths: [] },
+      emit,
+      fakeRun(seen, [
+        { code: 0 }, // add -A
+        { stdout: 'nothing to commit, working tree clean', code: 1 }, // commit fails
+      ]),
+    )
+    expect(result).toEqual({ ok: false, phase: 'commit', error: 'nothing to commit, working tree clean' })
+    expect(seen.some((a) => a[0] === 'push')).toBe(false)
+  })
+
+  it('a FAILED create_pr names its phase — commit+push already landed', async () => {
+    const { emit } = collect()
+    const result = await runStackedAction(
+      { workspaceDir: '/repo', actionId: 'a3', action: 'commit_push_pr', commitMessage: 'msg', paths: [] },
+      emit,
+      fakeRun([], [
+        { code: 0 },
+        { code: 0 },
+        { stdout: 'origin/main\n', code: 0 },
+        { code: 0 },
+      ]),
+      fakeCreatePr({ ok: false, error: 'gh: Not authenticated' }),
+    )
+    expect(result).toEqual({ ok: false, phase: 'create_pr', error: 'gh: Not authenticated' })
+  })
+})
