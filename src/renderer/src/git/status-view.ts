@@ -73,33 +73,6 @@ export function reconcileUnchecked(unchecked: ReadonlySet<string>, paths: readon
   return changed ? next : (unchecked as Set<string>)
 }
 
-/** Whether the CLEAN-tree commit area offers Push / Pull (#234) — see `buildSyncView`. */
-export interface SyncView {
-  showPush: boolean
-  showPull: boolean
-  /** True when the push is a FIRST push (no upstream) that will set one — label it so. */
-  pushSetsUpstream: boolean
-}
-
-/**
- * Derive the Push/Pull affordances from a repo `GitStatus` (#234, PRD #233). Slice-1
- * scope: sync actions show only on a CLEAN tree (a dirty tree's commit area owns the
- * panel; #236's quick action generalizes this). Push shows when the branch is ahead OR
- * has no upstream yet (the "Push your branch first" dead-end this un-dead-ends); Pull
- * when behind. Detached HEAD (branch null) offers neither — there is no branch to sync.
- */
-export function buildSyncView(status: GitStatus): SyncView {
-  const clean = status.files.length === 0
-  const onBranch = status.branch !== null
-  if (!clean || !onBranch) return { showPush: false, showPull: false, pushSetsUpstream: false }
-  const pushSetsUpstream = status.upstream === null
-  return {
-    showPush: status.ahead > 0 || pushSetsUpstream,
-    showPull: status.behind > 0,
-    pushSetsUpstream,
-  }
-}
-
 /**
  * A stable fingerprint of the changed set for the all-files diff view (#235): the
  * refetch key. It covers exactly what makes a re-read necessary — the paths, each

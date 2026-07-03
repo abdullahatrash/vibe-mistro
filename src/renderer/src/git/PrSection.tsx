@@ -27,6 +27,7 @@ export function PrSection({
   hasUpstream,
   busy,
   refreshKey,
+  onPrChange,
 }: {
   workspaceDir: string
   branch: string
@@ -34,6 +35,12 @@ export function PrSection({
   hasUpstream: boolean
   busy: boolean
   refreshKey: number
+  /**
+   * Report the fetched PR (or null) up to the panel (#236): the quick-action
+   * derivation needs PR presence. Pass a STABLE function (a setState) — it sits in
+   * the fetch effect's deps.
+   */
+  onPrChange?: (pr: GhPr | null) => void
 }): JSX.Element | null {
   // `'loading'` before the first fetch resolves; then the `GhPrResult`. Null only while
   // detached (no PR surface). The created-PR chip lands via a re-fetch after a create.
@@ -48,6 +55,7 @@ export function PrSection({
   useEffect(() => {
     if (detached) {
       setResult(null)
+      onPrChange?.(null)
       return
     }
     let cancelled = false
@@ -55,7 +63,9 @@ export function PrSection({
     setCreating(false)
     setCreateError(null)
     void window.api.ghCurrentPr({ workspaceDir }).then((res) => {
-      if (!cancelled) setResult(res)
+      if (cancelled) return
+      setResult(res)
+      onPrChange?.(res.ok ? res.pr : null)
     })
     // Best-effort default-branch probe (local git, no network): suppress Create-PR on the
     // repo's default branch. A failed/unresolved probe leaves `isDefault:false` (allow).
@@ -66,7 +76,7 @@ export function PrSection({
     return () => {
       cancelled = true
     }
-  }, [workspaceDir, branch, detached, refreshKey])
+  }, [workspaceDir, branch, detached, refreshKey, onPrChange])
 
   async function createPr(): Promise<void> {
     const t = title.trim()
@@ -80,7 +90,10 @@ export function PrSection({
         // the form closes. gh already printed the URL — the chip's anchor opens it.
         setCreating(false)
         setResult('loading')
-        void window.api.ghCurrentPr({ workspaceDir }).then(setResult)
+        void window.api.ghCurrentPr({ workspaceDir }).then((refetched) => {
+          setResult(refetched)
+          onPrChange?.(refetched.ok ? refetched.pr : null)
+        })
       } else {
         setCreateError(res.error)
       }
