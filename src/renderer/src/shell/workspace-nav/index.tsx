@@ -5,6 +5,7 @@ import {
   ChevronDown,
   Ellipsis,
   Folder,
+  FolderPlus,
   MoreVertical,
   Pencil,
   Pin,
@@ -180,7 +181,7 @@ export function WorkspaceNav({
             {opening ? (
               <Spinner className="size-3.5" aria-label="Opening project" />
             ) : (
-              <Plus className="size-4" aria-hidden />
+              <FolderPlus className="size-4" aria-hidden />
             )}
           </IconButton>
           <Menu>
