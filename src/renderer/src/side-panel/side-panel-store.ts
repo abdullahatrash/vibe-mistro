@@ -161,6 +161,20 @@ export function terminalSurfaceCount(state: WorkspacePanelState): number {
 }
 
 /**
+ * The header Terminal button / ⌘J semantics: hide the panel when a terminal is the
+ * active tab; otherwise REVEAL a terminal — re-activate the first existing terminal
+ * tab if any, else spawn a fresh one ({@link openTerminalSurface}). Unlike the
+ * launcher card (always-spawn), the toggle never adds a second terminal.
+ */
+export function toggleTerminalSurface(state: WorkspacePanelState): WorkspacePanelState {
+  const active = state.surfaces.find((surface) => surface.id === state.activeSurfaceId)
+  if (state.isOpen && active?.kind === 'terminal') return { ...state, isOpen: false }
+  const existing = state.surfaces.find((surface) => surface.kind === 'terminal')
+  if (existing) return { ...state, isOpen: true, activeSurfaceId: existing.id }
+  return openTerminalSurface(state)
+}
+
+/**
  * The Browser Surface's fixed resource id (#216): a per-Workspace SINGLETON this slice,
  * so the descriptor is constant — the reserved `browser:${resourceId}` id shape stays
  * ready for a future multi-tab browser without a coercion break.
@@ -494,6 +508,7 @@ function bindWorkspaceOp<A extends unknown[]>(
 export const openWorkspaceSurface = bindWorkspaceOp(openSurface)
 export const openWorkspaceFileSurface = bindWorkspaceOp(openFileSurface)
 export const openWorkspaceTerminalSurface = bindWorkspaceOp(openTerminalSurface)
+export const toggleWorkspaceTerminalSurface = bindWorkspaceOp(toggleTerminalSurface)
 export const openWorkspaceBrowserSurface = bindWorkspaceOp(openBrowserSurface)
 export const toggleWorkspaceBrowserSurface = bindWorkspaceOp(toggleBrowserSurface)
 export const setWorkspaceBrowserSurfaceUrl = bindWorkspaceOp(setBrowserSurfaceUrl)

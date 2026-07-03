@@ -27,24 +27,30 @@ export interface EditorsListResult {
 
 /**
  * Args for `editorsOpen`: open the Workspace directory in one detected editor.
- * Addressed by `agentId` — main resolves the directory from the warm agent's OWN
- * `workspaceDir` (`pool.get`), NOT a renderer-supplied path (the `filesList`/
- * `revealPath` model). `editorId` must come from the curated table; launching is a
- * detached spawn of a curated CLI on the Workspace dir — user-trusted (parity with
- * reveal-in-Finder), no user-supplied command strings. NOT agent activity: no
- * `pool.touch`, so opening your editor never keeps a warm agent alive.
+ * Addressed by `workspaceId` — main resolves the directory from its OWN
+ * `MetadataStore` record, NOT a renderer-supplied path (the `filesList`/
+ * `revealPath` model). Workspace-keyed rather than agent-keyed so the affordance
+ * works whenever a project is selected — no warm agent required. `editorId` must
+ * come from the curated table; launching is a detached spawn of a curated CLI on
+ * the Workspace dir — user-trusted (parity with reveal-in-Finder), no
+ * user-supplied command strings. NOT agent activity: no `pool.touch`, so opening
+ * your editor never keeps a warm agent alive.
  */
 export interface EditorsOpenArgs {
-  agentId: string
+  workspaceId: string
   editorId: EditorId
 }
 
 /**
- * The `editorsOpen` reply — a typed result, never a silent no-op: `unknown-agent`
- * (stale/evicted `agentId`), `unknown-editor` (id not in the table), `command-not-found`
- * (no CLI alias resolves on the shell-env PATH anymore), `spawn-failed` (the launch
- * itself errored). Every failure is also logged in main; the renderer surfaces it.
+ * The `editorsOpen` reply — a typed result, never a silent no-op: `unknown-workspace`
+ * (`workspaceId` not in the metadata index), `unknown-editor` (id not in the table),
+ * `command-not-found` (no CLI alias resolves on the shell-env PATH anymore),
+ * `spawn-failed` (the launch itself errored). Every failure is also logged in main;
+ * the renderer surfaces it.
  */
 export type EditorsOpenResult =
   | { ok: true }
-  | { ok: false; reason: 'unknown-agent' | 'unknown-editor' | 'command-not-found' | 'spawn-failed' }
+  | {
+      ok: false
+      reason: 'unknown-workspace' | 'unknown-editor' | 'command-not-found' | 'spawn-failed'
+    }

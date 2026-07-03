@@ -37,6 +37,7 @@ import {
   toggleWorkspaceBrowserSurface,
   terminalSurfaceCount,
   toggleWorkspaceSurface,
+  toggleWorkspaceTerminalSurface,
   useWorkspacePanel,
   type SingletonKind,
   type Surface,
@@ -103,9 +104,11 @@ export function SurfacePanel({
       const kind = surfaceForChord(e)
       if (!kind) return
       e.preventDefault()
-      // Browser is a singleton but not a `SingletonKind` (its descriptor carries a
-      // resourceId + url), so it has its own toggle op; the rest share `toggleSurface`.
+      // Browser and terminal are singleton-ish but not `SingletonKind`s (their
+      // descriptors carry a resourceId), so each has its own toggle op; the rest
+      // share `toggleSurface`.
       if (kind === 'browser') toggleWorkspaceBrowserSurface(workspaceId)
+      else if (kind === 'terminal') toggleWorkspaceTerminalSurface(workspaceId)
       else toggleWorkspaceSurface(workspaceId, kind)
     }
     window.addEventListener('keydown', onKeyDown)

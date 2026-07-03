@@ -30,7 +30,7 @@ import { resolveActiveControls } from './connection/resolve-controls'
 import { setThreadStatus, type ThreadStatusMap } from './conversation/thread-status'
 import { replayCache, wireReplayCacheInvalidation } from './conversation/replay-cache'
 import { setWorkspaceControls, workspaceControlsKey } from './connection/workspace-controls-store'
-import { ArrowLeft, ArrowRight, Maximize2, PanelLeft, PanelRight, Terminal } from 'lucide-react'
+import { ArrowLeft, ArrowRight, PanelLeft, PanelRight, Terminal } from 'lucide-react'
 import { IconButton } from './ui/icon-button'
 import { OpenInEditorButton } from './editors/OpenInEditorButton'
 import { SearchPalette } from './search/SearchPalette'
@@ -45,7 +45,11 @@ import {
   getSidebarCollapsed,
   setSidebarCollapsed as setSidebarCollapsedStore,
 } from './shell/sidebar-collapsed-store'
-import { toggleWorkspacePanelVisibility, useWorkspacePanel } from './side-panel/side-panel-store'
+import {
+  toggleWorkspacePanelVisibility,
+  toggleWorkspaceTerminalSurface,
+  useWorkspacePanel,
+} from './side-panel/side-panel-store'
 import { deriveUnifiedThreads, workspaceFlags, type UnifiedThreadRow } from './shell/unified-threads'
 import { EmptyState } from './shell/EmptyState'
 import { ColdOutlet, TransientOutlet } from './shell/Outlet'
@@ -471,9 +475,14 @@ export function App(): JSX.Element {
   // The selected Workspace's side-panel state (#193): the window-header PanelRight icon
   // reflects + toggles the ACTIVE Workspace's panel directly through the shared
   // side-panel-store (per-Workspace, replacing the old app-global open flag). An empty-
-  // string key when nothing's selected resolves to the frozen closed state; the toggle
-  // then no-ops (no panel is mounted to show anyway — the panel lives in a connected view).
+  // string key when nothing's selected resolves to the frozen closed state; the header's
+  // workspace-scoped controls DISABLE in that case rather than silently no-op.
   const activePanel = useWorkspacePanel(selectedWs ?? '')
+  // Whether the panel is showing a terminal RIGHT NOW — the header Terminal toggle's
+  // pressed state (the side-panel toggle's pressed state is just `isOpen`).
+  const terminalRevealed =
+    activePanel.isOpen &&
+    activePanel.surfaces.find((s) => s.id === activePanel.activeSurfaceId)?.kind === 'terminal'
   // The selected Workspace's display name, for the empty-state hero headline (#113).
   const selectedWorkspaceName = recents.find((w) => w.id === selectedWs)?.displayName ?? null
 
@@ -710,8 +719,8 @@ export function App(): JSX.Element {
 
   return (
     <div className="flex h-screen flex-col bg-bg text-text">
-      {/* Window chrome (#113): a draggable top bar. Back/forward and the top-right
-          layout-mode icons are STATIC placeholders (#future) — styled but non-functional.
+      {/* Window chrome (#113): a draggable top bar. Back/forward are STATIC placeholders
+          (#future) — styled but non-functional; the top-right layout controls are live.
           The bar stays `-webkit-app-region: drag` so the window moves; every interactive
           control opts back out with `[-webkit-app-region:no-drag]`. On macOS we pad the
           left edge so the OS traffic lights don't collide with our controls. */}
@@ -751,30 +760,53 @@ export function App(): JSX.Element {
           </span>
         </div>
         <div className="flex-1" />
-        {/* Right-region layout controls: the side-panel toggle is LIVE (#193, the design's
-            header affordance — toggles the ACTIVE Workspace's panel visibility via the
-            store); Terminal/Expand stay placeholders (#future). */}
+        {/* Right-region layout controls — ONE scoping rule for the group: enabled when
+            a Workspace is selected, disabled otherwise (never a silent no-op). Both
+            toggles carry aria-pressed + the kit's active tint so their current state
+            reads before the click. */}
         <div className="flex items-center gap-0.5 [-webkit-app-region:no-drag]">
-          {/* Open the ACTIVE Workspace's dir in the first detected external editor
-              (#252, epic #178) — grows into the OpenInPicker split button in #253. */}
-          <OpenInEditorButton
-            agentId={selected.status === 'connected' ? selected.thread.agentId : null}
-          />
+          {/* Open the SELECTED Workspace's dir in the first detected external editor
+              (#252, epic #178). */}
+          <OpenInEditorButton workspaceId={selectedWs} />
           <IconButton
             size="icon-sm"
             aria-label={activePanel.isOpen ? 'Close side panel' : 'Open side panel'}
-            title={activePanel.isOpen ? 'Close side panel' : 'Open side panel'}
+            title={
+              selectedWs
+                ? activePanel.isOpen
+                  ? 'Close side panel'
+                  : 'Open side panel'
+                : 'Side panel — select a project first'
+            }
+            aria-pressed={activePanel.isOpen}
+            disabled={!selectedWs}
+            className={activePanel.isOpen ? 'bg-accent/15 text-accent-text' : undefined}
             onClick={() => {
               if (selectedWs) toggleWorkspacePanelVisibility(selectedWs)
             }}
           >
             <PanelRight className="size-4" aria-hidden />
           </IconButton>
-          <IconButton size="icon-sm" aria-label="Toggle terminal" title="Toggle terminal">
+          {/* Reveal/hide the Workspace terminal (ADR-0014): re-activates an existing
+              terminal tab or spawns the first — the same op as the ⌘J chord. */}
+          <IconButton
+            size="icon-sm"
+            aria-label={terminalRevealed ? 'Hide terminal' : 'Show terminal'}
+            title={
+              selectedWs
+                ? terminalRevealed
+                  ? 'Hide terminal (⌘J)'
+                  : 'Terminal (⌘J)'
+                : 'Terminal — select a project first'
+            }
+            aria-pressed={terminalRevealed}
+            disabled={!selectedWs}
+            className={terminalRevealed ? 'bg-accent/15 text-accent-text' : undefined}
+            onClick={() => {
+              if (selectedWs) toggleWorkspaceTerminalSurface(selectedWs)
+            }}
+          >
             <Terminal className="size-4" aria-hidden />
-          </IconButton>
-          <IconButton size="icon-sm" aria-label="Expand" title="Expand">
-            <Maximize2 className="size-4" aria-hidden />
           </IconButton>
         </div>
       </header>

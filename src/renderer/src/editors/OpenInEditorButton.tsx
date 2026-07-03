@@ -6,19 +6,19 @@ import { firstAvailableEditor, openFailureMessage } from './open-in-editor'
 
 /**
  * The window-header Open-in-editor affordance (#252, epic #178): one click opens
- * the ACTIVE Workspace's directory in the first detected external editor. Slice 1
- * of the t3code OpenInPicker — #253 grows this into the split button (preferred-
- * editor icon + dropdown that switches the stored preference).
+ * the SELECTED Workspace's directory in the first detected external editor.
+ * Workspace-keyed (not agent-keyed), so it's live whenever a project is selected —
+ * no warm agent required.
  *
  * Detection (`editorsList`) is fetched once on mount — main caches the probe for
  * the whole session, so remounts are cheap. A launch failure (typed, never a
  * silent no-op) surfaces as a transient status line beside the button.
  */
 export function OpenInEditorButton({
-  agentId,
+  workspaceId,
 }: {
-  /** The ACTIVE Workspace's agent, or null when nothing connected is selected. */
-  agentId: string | null
+  /** The SELECTED Workspace, or null when none is selected. */
+  workspaceId: string | null
 }): JSX.Element {
   const [available, setAvailable] = useState<readonly EditorId[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -44,14 +44,14 @@ export function OpenInEditorButton({
   const editor = firstAvailableEditor(available)
 
   const open = useCallback(async () => {
-    if (!agentId || !editor) return
-    const result = await window.api.editorsOpen({ agentId, editorId: editor.id })
+    if (!workspaceId || !editor) return
+    const result = await window.api.editorsOpen({ workspaceId, editorId: editor.id })
     if (!result.ok) {
       setError(openFailureMessage(result.reason, editor.label))
       if (clearTimer.current !== null) window.clearTimeout(clearTimer.current)
       clearTimer.current = window.setTimeout(() => setError(null), 5000)
     }
-  }, [agentId, editor])
+  }, [workspaceId, editor])
 
   const label = editor ? `Open in ${editor.label}` : 'No installed editors found'
   return (
@@ -68,7 +68,7 @@ export function OpenInEditorButton({
         size="sm"
         aria-label={label}
         title={label}
-        disabled={!agentId || !editor}
+        disabled={!workspaceId || !editor}
         onClick={() => void open()}
       >
         <SquareArrowOutUpRight className="size-4" aria-hidden />

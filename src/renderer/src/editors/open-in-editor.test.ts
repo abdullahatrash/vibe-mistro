@@ -24,8 +24,8 @@ describe('openFailureMessage', () => {
     expect(openFailureMessage('spawn-failed', 'Zed')).toBe("Couldn't launch Zed")
   })
 
-  it('covers the agent/editor identity failures', () => {
-    expect(openFailureMessage('unknown-agent', 'Zed')).toBe('Workspace agent is not connected')
+  it('covers the workspace/editor identity failures', () => {
+    expect(openFailureMessage('unknown-workspace', 'Zed')).toBe('Project not found')
     expect(openFailureMessage('unknown-editor', 'Zed')).toBe('Unknown editor')
   })
 })

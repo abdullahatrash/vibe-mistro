@@ -676,7 +676,7 @@ function registerIpc(deps: MainDeps): void {
   })
   registerFilesIpc({ pool, cache: filesListCache })
   registerSkillsIpc()
-  registerEditorsIpc({ pool })
+  registerEditorsIpc({ store: deps.store })
   terminalManager = createTerminalManager()
   registerTerminalIpc({ pool, manager: terminalManager })
   registerBrowserIpc()
