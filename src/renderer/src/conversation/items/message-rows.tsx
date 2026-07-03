@@ -147,24 +147,33 @@ const COPY_FEEDBACK_MS = 1000
 
 /**
  * The copy control on the assistant actions bar (#116, mirrors t3code `MessageCopyButton`):
- * a hover tooltip ("Copy to clipboard"), and on click an ANCHORED tooltip-style label —
- * "Copied!" with the icon flipped to a check (button disabled for the beat), or
- * "Failed to copy" when the clipboard write rejects (never silent). The hover tooltip
- * yields while the click feedback shows so the two chips don't stack. Self-contained:
- * no toast manager, just local state + a positioned span; the timer is cleared on
- * unmount so a fast switch-away can't set state on a dead component.
+ * a hover tooltip ("Copy to clipboard") that, on click, swaps to "Copied!" with the icon
+ * flipped to a check (button disabled for the beat) — or "Failed to copy" when the
+ * clipboard write rejects (never silent). ONE controlled tooltip carries all three
+ * states: it portals to the body with collision-aware positioning, so the feedback
+ * never clips against the transcript's scroll container (an anchored inline span did —
+ * the button sits at the column's left edge, and a centered chip wider than the button
+ * overhung the clipped ancestor). Feedback forces the tooltip open even mid-click,
+ * when Base UI's hover state alone would close it. The timer is cleared on unmount so
+ * a fast switch-away can't set state on a dead component.
  */
 function MessageCopyButton({ text }: { text: string }): JSX.Element {
   const [feedback, setFeedback] = useState<'copied' | 'failed' | null>(null)
+  // Base UI's own hover/focus intent, mirrored via onOpenChange so forcing the
+  // tooltip open for feedback composes with (instead of replacing) hover behavior.
+  const [hoverOpen, setHoverOpen] = useState(false)
   const timeoutRef = useRef<number | null>(null)
+  // Set true in SETUP, not just the initializer — StrictMode's dev-only
+  // mount→cleanup→remount rehearsal otherwise leaves this false forever and every
+  // click silently bails (no feedback in dev, fine in prod — the worst kind of bug).
   const mountedRef = useRef(true)
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
       mountedRef.current = false
       if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current)
-    },
-    [],
-  )
+    }
+  }, [])
   function showFeedback(next: 'copied' | 'failed'): void {
     // The clipboard write is async — bail if we unmounted between click and settle.
     if (!mountedRef.current) return
@@ -179,37 +188,33 @@ function MessageCopyButton({ text }: { text: string }): JSX.Element {
     )
   }
   return (
-    <span className="relative inline-flex">
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <IconButton
-                size="icon-xs"
-                className="text-muted hover:text-text"
-                aria-label="Copy message"
-                disabled={feedback === 'copied'}
-                onClick={onCopy}
-              />
-            }
-          >
-            {feedback === 'copied' ? (
-              <Check className="size-3.5 text-accent-text" aria-hidden />
-            ) : (
-              <Copy className="size-3.5" aria-hidden />
-            )}
-          </TooltipTrigger>
-          {feedback === null && <TooltipContent>Copy to clipboard</TooltipContent>}
-        </Tooltip>
-      </TooltipProvider>
-      {feedback && (
-        <span
-          role="status"
-          className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1 -translate-x-1/2 rounded-sm bg-text px-2 py-1 text-xs whitespace-nowrap text-bg shadow-md"
+    <TooltipProvider>
+      <Tooltip open={hoverOpen || feedback !== null} onOpenChange={(open) => setHoverOpen(open)}>
+        <TooltipTrigger
+          render={
+            <IconButton
+              size="icon-xs"
+              className="text-muted hover:text-text"
+              aria-label="Copy message"
+              disabled={feedback === 'copied'}
+              onClick={onCopy}
+            />
+          }
         >
-          {feedback === 'copied' ? 'Copied!' : 'Failed to copy'}
-        </span>
-      )}
-    </span>
+          {feedback === 'copied' ? (
+            <Check className="size-3.5 text-accent-text" aria-hidden />
+          ) : (
+            <Copy className="size-3.5" aria-hidden />
+          )}
+        </TooltipTrigger>
+        <TooltipContent role={feedback ? 'status' : undefined}>
+          {feedback === 'copied'
+            ? 'Copied!'
+            : feedback === 'failed'
+              ? 'Failed to copy'
+              : 'Copy to clipboard'}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }
