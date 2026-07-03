@@ -411,7 +411,7 @@ export function Composer({
     // @container: the composer adapts to ITS OWN width (container queries), not the
     // viewport's — with the sidebar + side panel open the chat column narrows while
     // the window stays wide, so viewport breakpoints would never fire.
-    <div className="mx-auto w-full max-w-[830px] @container">
+    <div className="conv-measure @container">
       {/* shadow-xs: a lighter lift than the Card default — the composer sits over the
           transcript, so the full shadow-sm read as a heavy smudge under it. */}
       <Card className="gap-0 p-0 shadow-xs">

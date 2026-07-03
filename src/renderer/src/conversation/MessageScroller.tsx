@@ -37,7 +37,7 @@ export function MessageScroller({
     // `.conv` column leaves over, keeping the Composer sibling pinned below.
     <div className={cn('relative flex min-h-0 flex-1 flex-col', className)}>
       <div ref={scrollRef} className="messages">
-        <div ref={contentRef} className="flex flex-col gap-3">
+        <div ref={contentRef} className="conv-measure flex flex-col gap-3">
           {children}
         </div>
       </div>
