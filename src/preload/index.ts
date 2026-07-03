@@ -25,6 +25,9 @@ import {
   type GhCurrentPrArgs,
   type GhPrResult,
   type RevealPathArgs,
+  type EditorsListResult,
+  type EditorsOpenArgs,
+  type EditorsOpenResult,
   type FilesListArgs,
   type FilesListResult,
   type FilesReadArgs,
@@ -149,6 +152,9 @@ const api = {
   filesList: (args: FilesListArgs): Promise<FilesListResult> => ipcRenderer.invoke(IPC.filesList, args),
   filesRead: (args: FilesReadArgs): Promise<FilesReadResult> => ipcRenderer.invoke(IPC.filesRead, args),
   openExternal: (args: OpenExternalArgs): Promise<void> => ipcRenderer.invoke(IPC.openExternal, args),
+  editorsList: (): Promise<EditorsListResult> => ipcRenderer.invoke(IPC.editorsList),
+  editorsOpen: (args: EditorsOpenArgs): Promise<EditorsOpenResult> =>
+    ipcRenderer.invoke(IPC.editorsOpen, args),
   discoverDevServers: (): Promise<DiscoverDevServersResult> =>
     ipcRenderer.invoke(IPC.discoverDevServers),
   terminalOpen: (args: TerminalOpenArgs): Promise<TerminalOpenResult> =>

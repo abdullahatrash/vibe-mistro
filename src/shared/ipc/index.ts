@@ -15,6 +15,7 @@ import { authChannels } from './auth'
 import { gitChannels } from './git'
 import { ghChannels } from './gh'
 import { filesChannels } from './files'
+import { editorsChannels } from './editors'
 import { terminalChannels } from './terminal'
 import { browserChannels } from './browser'
 import { searchChannels } from './search'
@@ -31,6 +32,7 @@ export const IPC = {
   ...gitChannels,
   ...ghChannels,
   ...filesChannels,
+  ...editorsChannels,
   ...terminalChannels,
   ...browserChannels,
   ...searchChannels,
@@ -42,6 +44,7 @@ export * from './auth'
 export * from './git'
 export * from './gh'
 export * from './files'
+export * from './editors'
 export * from './terminal'
 export * from './browser'
 export * from './search'
