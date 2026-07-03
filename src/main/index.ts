@@ -68,6 +68,7 @@ import { GitStatusManager } from './git/status-stream'
 import { chokidarWatchFactory, realClock } from './git/runtime'
 import { registerGitIpc } from './git/register-ipc'
 import { registerFilesIpc } from './files/register-ipc'
+import { registerEditorsIpc } from './editors/register-ipc'
 import { createTerminalManager, registerTerminalIpc } from './terminal/register-ipc'
 import { registerBrowserIpc } from './browser/register-ipc'
 import type { TerminalManager } from './terminal/terminal-manager'
@@ -653,6 +654,7 @@ function registerIpc(deps: MainDeps): void {
     },
   })
   registerFilesIpc({ pool, cache: filesListCache })
+  registerEditorsIpc({ pool })
   terminalManager = createTerminalManager()
   registerTerminalIpc({ pool, manager: terminalManager })
   registerBrowserIpc()

@@ -32,6 +32,7 @@ import { replayCache, wireReplayCacheInvalidation } from './conversation/replay-
 import { setWorkspaceControls, workspaceControlsKey } from './connection/workspace-controls-store'
 import { ArrowLeft, ArrowRight, Maximize2, PanelLeft, PanelRight, Terminal } from 'lucide-react'
 import { IconButton } from './ui/icon-button'
+import { OpenInEditorButton } from './editors/OpenInEditorButton'
 import { SearchPalette } from './search/SearchPalette'
 import { Shell, type WorkspaceFlags } from './shell/Shell'
 import { firstRunState } from './shell/first-run'
@@ -719,6 +720,11 @@ export function App(): JSX.Element {
             header affordance — toggles the ACTIVE Workspace's panel visibility via the
             store); Terminal/Expand stay placeholders (#future). */}
         <div className="flex items-center gap-0.5 [-webkit-app-region:no-drag]">
+          {/* Open the ACTIVE Workspace's dir in the first detected external editor
+              (#252, epic #178) — grows into the OpenInPicker split button in #253. */}
+          <OpenInEditorButton
+            agentId={selected.status === 'connected' ? selected.thread.agentId : null}
+          />
           <IconButton
             size="icon-sm"
             aria-label={activePanel.isOpen ? 'Close side panel' : 'Open side panel'}
