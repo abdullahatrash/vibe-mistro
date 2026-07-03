@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type JSX } from 'react'
-import { ArrowLeft, ArrowRight, RotateCw } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Code, ExternalLink, Loader2, RotateCw, TriangleAlert } from 'lucide-react'
 import { cn } from '../lib/utils'
 import {
   buildWebviewPreferencesAttribute,
@@ -16,57 +16,72 @@ import {
   pushNav,
   type NavState,
 } from './browser-nav-history'
+import { INITIAL_LOAD, onFailLoad, onStartLoad, onStopLoad, type LoadState } from './browser-load-state'
 
 /**
- * The Browser Surface (#216, ADR-0015): an embedded dev-server preview on the Electron
- * `<webview>` tag — a real DOM node, so it lays out/clips/resizes inside the panel like
- * any other Surface (the t3code "Preview" decision, minus their root-mounted overlay:
- * our view is DISPOSABLE — unmounting discards the page; the URL survives in the store
- * for slice 2's persistence).
+ * The Browser Surface (#216 embed, #217 states/persistence; ADR-0015): an embedded
+ * dev-server preview on the Electron `<webview>` tag — a real DOM node, so it lays
+ * out/clips/resizes inside the panel like any other Surface. Navigation is
+ * RENDERER-DRIVEN (the component talks to the element directly); main's involvement is
+ * the `will-attach-webview` clamp and guest popup/nav guards. Every URL the webview is
+ * asked to load passes `normalizeBrowserUrl` first — http/https only.
  *
- * Navigation is RENDERER-DRIVEN: the component talks to the webview element directly
- * (loadURL/goBack/events); main's involvement is the `will-attach-webview` clamp and
- * guest popup routing. Every URL the webview is asked to load passes
- * `normalizeBrowserUrl` first — http/https only, schemes like `file:` refused.
+ * Slice 2 rounds it into a real browser: a loading indicator, a friendly unreachable
+ * state with Retry (built on the pure load-state machine that handles the
+ * did-stop-after-did-fail ordering gotcha), the page title in the chrome, open-in-system-
+ * browser + DevTools actions, and last-URL persistence via the store (`persistedUrl` in,
+ * `onUrlChange` out) so a reopen/restart reloads where the user left off.
  */
-export function BrowserSurface({ workspaceDir }: { workspaceDir: string }): JSX.Element {
+export function BrowserSurface({
+  workspaceDir,
+  persistedUrl,
+  onUrlChange,
+}: {
+  workspaceDir: string
+  /** The last-visited URL restored from the store (#217), or undefined for a fresh tab. */
+  persistedUrl?: string
+  /** Report a committed guest URL up to the store so it persists. */
+  onUrlChange: (url: string) => void
+}): JSX.Element {
   // The mounted webview as STATE (not a ref): the `setView` setter is identity-stable,
   // so React invokes the callback ref only on real mount/unmount — an inline-closure
   // ref would re-fire per render and leak one listener pair each time.
   const [view, setView] = useState<WebviewElement | null>(null)
   const addressInputRef = useRef<HTMLInputElement | null>(null)
   // The first blessed URL becomes the webview's `src`; later submissions go through
-  // `loadURL`. `null` = nothing loaded yet → the URL-entry empty state.
-  const [initialUrl, setInitialUrl] = useState<string | null>(null)
-  const [address, setAddress] = useState('')
+  // `loadURL`. Seeded from the persisted URL so a reopened tab auto-loads; `null` = a
+  // fresh tab showing the URL-entry empty state.
+  const [initialUrl, setInitialUrl] = useState<string | null>(persistedUrl ?? null)
+  const [address, setAddress] = useState(persistedUrl ?? '')
+  const [title, setTitle] = useState('')
+  const [load, setLoad] = useState<LoadState>(INITIAL_LOAD)
   // Back/forward availability is tracked from navigation EVENTS via the pure model —
-  // the webview element's own canGoBack()/canGoForward() are unreliable (they report
-  // false against a genuine multi-entry history). `pending` records that the NEXT
-  // did-navigate is the result of our own back/forward/reload, so the handler shifts
-  // (or ignores) the cursor instead of pushing a fresh entry.
+  // the webview element's own canGoBack()/canGoForward() are unreliable. `pending`
+  // records that the NEXT did-navigate is our own back/forward/reload, so the handler
+  // shifts (or ignores) the cursor instead of pushing a fresh entry.
   const [nav, setNav] = useState<NavState>(INITIAL_NAV)
   const pending = useRef<'back' | 'forward' | 'reload' | null>(null)
+
+  function load_(url: string): void {
+    void view?.loadURL(url).catch((err: unknown) => {
+      // A superseded load rejects benignly; a real failure surfaces via did-fail-load
+      // (the unreachable state). Nothing actionable here beyond a log.
+      console.error('[browser] loadURL failed', url, err)
+    })
+  }
 
   function submitAddress(e: FormEvent<HTMLFormElement>): void {
     e.preventDefault()
     const url = normalizeBrowserUrl(address)
     if (!url) return
     setAddress(url)
-    if (initialUrl === null) {
-      setInitialUrl(url)
-      return
-    }
-    void view?.loadURL(url).catch((err: unknown) => {
-      // A load superseded by a newer navigation rejects benignly, but so do real
-      // failures — log rather than swallow (#217 turns this into an unreachable state).
-      console.error('[browser] loadURL failed', url, err)
-    })
+    if (initialUrl === null) setInitialUrl(url)
+    else load_(url)
   }
 
-  // NB: navigate by OFFSET, not goBack()/goForward() — the webview tag's goBack/
-  // goForward (and canGoBack) are broken in Electron's <webview> (they no-op against
-  // a genuine multi-entry history), but goToOffset works. Our own nav model is the
-  // source of truth for whether an offset is available.
+  // NB: navigate by OFFSET, not goBack()/goForward() — the webview tag's goBack/goForward
+  // (and canGoBack) are broken in Electron's <webview>, but goToOffset works. Our nav
+  // model is the source of truth for whether an offset is available.
   function goBack(): void {
     pending.current = 'back'
     view?.goToOffset(-1)
@@ -79,15 +94,27 @@ export function BrowserSurface({ workspaceDir }: { workspaceDir: string }): JSX.
     pending.current = 'reload'
     view?.reload()
   }
+  function retry(): void {
+    if (load.status === 'failed') load_(load.url)
+  }
+  function openExternal(): void {
+    if (address) void window.api.openExternal({ url: address })
+  }
+  function openDevTools(): void {
+    view?.openDevTools()
+  }
 
-  // The webview only exposes its state through DOM events — wire them once per
-  // mounted element, unwiring on unmount/remount.
+  // The webview only exposes its state through DOM events — wire them once per mounted
+  // element, unwiring on unmount/remount.
   useEffect(() => {
     if (!view) return
     const onNavigate = (): void => {
+      const url = view.getURL()
       // Never clobber an address the user is mid-typing: the guest can navigate
-      // (redirects, SPA pushState) while the bar has focus.
-      if (document.activeElement !== addressInputRef.current) setAddress(view.getURL())
+      // (redirects, SPA pushState) while the bar has focus. Persistence is independent
+      // of the visible input — always report the committed URL.
+      if (document.activeElement !== addressInputRef.current) setAddress(url)
+      onUrlChange(url)
       // Advance the cursor per what caused this navigation. A reload adds no entry.
       const cause = pending.current
       pending.current = null
@@ -96,26 +123,34 @@ export function BrowserSurface({ workspaceDir }: { workspaceDir: string }): JSX.
         cause === 'back' ? goBackNav(s) : cause === 'forward' ? goForwardNav(s) : pushNav(s),
       )
     }
-    const logFailure = (event: Event): void => {
+    const onStart = (): void => setLoad(onStartLoad)
+    const onStop = (): void => setLoad(onStopLoad)
+    const onFail = (event: Event): void => {
       pending.current = null
-      const { errorCode, errorDescription, validatedURL } = event as unknown as {
+      const { errorCode, validatedURL } = event as unknown as {
         errorCode?: number
-        errorDescription?: string
         validatedURL?: string
       }
-      // -3 is Chromium's ERR_ABORTED — a superseded/cancelled load, not a failure.
-      if (errorCode === -3) return
-      console.error('[browser] load failed', validatedURL, errorCode, errorDescription)
+      setLoad((s) => onFailLoad(s, validatedURL ?? view.getURL(), errorCode ?? 0))
+    }
+    const onTitle = (event: Event): void => {
+      setTitle((event as unknown as { title?: string }).title ?? '')
     }
     view.addEventListener('did-navigate', onNavigate)
     view.addEventListener('did-navigate-in-page', onNavigate)
-    view.addEventListener('did-fail-load', logFailure)
+    view.addEventListener('did-start-loading', onStart)
+    view.addEventListener('did-stop-loading', onStop)
+    view.addEventListener('did-fail-load', onFail)
+    view.addEventListener('page-title-updated', onTitle)
     return () => {
       view.removeEventListener('did-navigate', onNavigate)
       view.removeEventListener('did-navigate-in-page', onNavigate)
-      view.removeEventListener('did-fail-load', logFailure)
+      view.removeEventListener('did-start-loading', onStart)
+      view.removeEventListener('did-stop-loading', onStop)
+      view.removeEventListener('did-fail-load', onFail)
+      view.removeEventListener('page-title-updated', onTitle)
     }
-  }, [view])
+  }, [view, onUrlChange])
 
   const canGoBack = canGoBackNav(nav)
   const canGoForward = canGoForwardNav(nav)
@@ -159,7 +194,7 @@ export function BrowserSurface({ workspaceDir }: { workspaceDir: string }): JSX.
         <BrowserAction label="Reload" onClick={reload}>
           <RotateCw aria-hidden />
         </BrowserAction>
-        <form onSubmit={submitAddress} className="min-w-0 flex-1">
+        <form onSubmit={submitAddress} className="relative min-w-0 flex-1">
           <input
             ref={addressInputRef}
             value={address}
@@ -169,22 +204,66 @@ export function BrowserSurface({ workspaceDir }: { workspaceDir: string }): JSX.
             autoCapitalize="off"
             autoCorrect="off"
             className={cn(
-              'w-full rounded-md border border-transparent bg-accent/5 px-2.5 py-1 text-xs text-text',
+              'w-full rounded-md border border-transparent bg-accent/5 px-2.5 py-1 pr-7 text-xs text-text',
               'placeholder:text-faint focus:outline-none focus-visible:border-accent/60 focus-visible:bg-surface',
             )}
           />
+          {load.status === 'loading' && (
+            <Loader2
+              aria-label="Loading"
+              className="pointer-events-none absolute right-2 top-1/2 size-3.5 -translate-y-1/2 animate-spin text-muted"
+            />
+          )}
         </form>
+        <BrowserAction label="Open in browser" onClick={openExternal}>
+          <ExternalLink aria-hidden />
+        </BrowserAction>
+        <BrowserAction label="Developer tools" onClick={openDevTools}>
+          <Code aria-hidden />
+        </BrowserAction>
       </div>
-      {/* The guest page. `partition`/`webpreferences`/`useragent` must be set before
-          attach and never change — main's clamp re-verifies them (webview-clamp.ts). */}
-      <webview
-        ref={setView as (el: HTMLElement | null) => void}
-        src={initialUrl}
-        partition={deriveBrowserPartition(workspaceDir)}
-        webpreferences={buildWebviewPreferencesAttribute()}
-        useragent={stripElectronUserAgent(navigator.userAgent)}
-        className="min-h-0 flex-1 bg-white"
-      />
+      {/* Page title strip (surface chrome) — only when the guest reports one. */}
+      {title && (
+        <div className="shrink-0 truncate border-b border-border px-3 py-1 text-[11px] text-muted" title={title}>
+          {title}
+        </div>
+      )}
+      <div className="relative min-h-0 flex-1">
+        {/* The guest page. `partition`/`webpreferences`/`useragent` must be set before
+            attach and never change — main's clamp re-verifies them (webview-clamp.ts). */}
+        <webview
+          ref={setView as (el: HTMLElement | null) => void}
+          src={initialUrl}
+          partition={deriveBrowserPartition(workspaceDir)}
+          webpreferences={buildWebviewPreferencesAttribute()}
+          useragent={stripElectronUserAgent(navigator.userAgent)}
+          className="size-full bg-white"
+        />
+        {load.status === 'failed' && <UnreachableOverlay url={load.url} onRetry={retry} />}
+      </div>
+    </div>
+  )
+}
+
+/** The "can't reach this page" state over a failed guest, with a one-click Retry. */
+function UnreachableOverlay({ url, onRetry }: { url: string; onRetry: () => void }): JSX.Element {
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-panel p-6 text-center">
+      <TriangleAlert aria-hidden className="size-6 text-muted" />
+      <div>
+        <p className="text-sm font-medium text-text-strong">Can’t reach this page</p>
+        <p className="mt-1 max-w-xs truncate text-xs text-muted" title={url}>
+          {url}
+        </p>
+        <p className="mt-1 text-xs text-muted">The dev server may be starting or stopped.</p>
+      </div>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="rounded-md border border-border bg-surface px-3 py-1 text-xs font-medium text-text outline-none transition-colors hover:bg-accent/10 focus-visible:border-accent/60"
+      >
+        Retry
+      </button>
     </div>
   )
 }
@@ -196,6 +275,7 @@ interface WebviewElement extends HTMLElement {
   /** Navigate by history offset — the working primitive (goBack/goForward are broken). */
   goToOffset(offset: number): void
   reload(): void
+  openDevTools(): void
 }
 
 /** A browser toolbar icon button — the TerminalAction idiom. */

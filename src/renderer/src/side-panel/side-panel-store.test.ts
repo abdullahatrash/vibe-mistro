@@ -13,6 +13,8 @@ import {
   getWorkspacePanel,
   MAX_TERMINALS_PER_WORKSPACE,
   openBrowserSurface,
+  setBrowserSurfaceUrl,
+  toggleBrowserSurface,
   openFileSurface,
   openSurface,
   openTerminalSurface,
@@ -161,6 +163,51 @@ describe('openBrowserSurface (#216, singleton dev-server preview)', () => {
     const again = openBrowserSurface(behindOther)
     expect(again.surfaces.filter((s) => s.kind === 'browser')).toHaveLength(1)
     expect(again.activeSurfaceId).toBe('browser:main')
+  })
+
+  it('preserves a previously-stored url when re-opened (does not wipe it)', () => {
+    const withUrl = setBrowserSurfaceUrl(openBrowserSurface(empty()), 'http://localhost:5173/')
+    const files = openSurface(withUrl, 'files')
+    const reopened = openBrowserSurface(files)
+    const browser = reopened.surfaces.find((s) => s.kind === 'browser')
+    expect(browser).toMatchObject({ kind: 'browser', url: 'http://localhost:5173/' })
+  })
+})
+
+describe('setBrowserSurfaceUrl (#217, per-Workspace URL persistence)', () => {
+  it('records the last visited url on the browser surface', () => {
+    const s = setBrowserSurfaceUrl(openBrowserSurface(empty()), 'http://localhost:3000/app')
+    expect(s.surfaces.find((x) => x.kind === 'browser')).toEqual({
+      id: 'browser:main',
+      kind: 'browser',
+      resourceId: 'main',
+      url: 'http://localhost:3000/app',
+    })
+  })
+
+  it('is a no-op (same ref) when no browser surface is open', () => {
+    const s = openSurface(empty(), 'files')
+    expect(setBrowserSurfaceUrl(s, 'http://x/')).toBe(s)
+  })
+})
+
+describe('toggleBrowserSurface (⌘T semantics, #217)', () => {
+  it('opens/activates the browser when it is not the active tab', () => {
+    const s = toggleBrowserSurface(empty())
+    expect(s.isOpen).toBe(true)
+    expect(s.activeSurfaceId).toBe('browser:main')
+  })
+
+  it('hides the panel when the browser is already the active tab', () => {
+    const open = toggleBrowserSurface(empty())
+    expect(toggleBrowserSurface(open)).toEqual({ ...open, isOpen: false })
+  })
+
+  it('activates the browser (not hide) when another tab is active', () => {
+    const withBoth = openSurface(openBrowserSurface(empty()), 'files') // files active
+    const s = toggleBrowserSurface(withBoth)
+    expect(s.isOpen).toBe(true)
+    expect(s.activeSurfaceId).toBe('browser:main')
   })
 })
 
@@ -440,6 +487,22 @@ describe('coerceSurface', () => {
     expect(coerceSurface({ kind: 'browser' })).toBeNull() // no id/resource
     expect(coerceSurface({ id: 'browser:evil', kind: 'browser', resourceId: 'evil' })).toBeNull() // not the singleton
     expect(coerceSurface({ id: 'browser:main', kind: 'browser', resourceId: 'other' })).toBeNull() // id≠resource
+  })
+
+  it('restores a persisted browser url when it is a valid http(s) URL (#217)', () => {
+    expect(
+      coerceSurface({ id: 'browser:main', kind: 'browser', resourceId: 'main', url: 'http://localhost:5173/' }),
+    ).toEqual({ id: 'browser:main', kind: 'browser', resourceId: 'main', url: 'http://localhost:5173/' })
+  })
+
+  it('drops a bad/unsafe persisted url but keeps the browser surface', () => {
+    for (const url of ['file:///etc/passwd', 'javascript:alert(1)', '', 42, null]) {
+      expect(coerceSurface({ id: 'browser:main', kind: 'browser', resourceId: 'main', url })).toEqual({
+        id: 'browser:main',
+        kind: 'browser',
+        resourceId: 'main',
+      })
+    }
   })
 
   it('drops not-yet-implemented / unknown / malformed descriptors', () => {

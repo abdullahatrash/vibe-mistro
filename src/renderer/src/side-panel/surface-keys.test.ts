@@ -36,11 +36,20 @@ describe('surfaceForChord — ⌃⇧G → Review', () => {
   })
 })
 
-describe('surfaceForChord — unbound chords', () => {
-  it('leaves ⌘T (Browser hint) unbound — the card is inert', () => {
-    expect(surfaceForChord(chord({ key: 't', metaKey: true }))).toBeNull()
+describe('surfaceForChord — ⌘T → Browser (#217)', () => {
+  it('matches meta+t (either case)', () => {
+    expect(surfaceForChord(chord({ key: 't', metaKey: true }))).toBe('browser')
+    expect(surfaceForChord(chord({ key: 'T', metaKey: true }))).toBe('browser')
   })
 
+  it('does not match ⌃T, ⇧T, ⌘⇧T, or bare t', () => {
+    expect(surfaceForChord(chord({ key: 't', ctrlKey: true }))).toBeNull()
+    expect(surfaceForChord(chord({ key: 't', metaKey: true, shiftKey: true }))).toBeNull()
+    expect(surfaceForChord(chord({ key: 't' }))).toBeNull()
+  })
+})
+
+describe('surfaceForChord — unbound chords', () => {
   it('ignores plain typing and unrelated keys', () => {
     expect(surfaceForChord(chord({ key: 'a' }))).toBeNull()
     expect(surfaceForChord(chord({ key: 'Enter' }))).toBeNull()
