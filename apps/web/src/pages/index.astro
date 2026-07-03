@@ -35,6 +35,23 @@ const VIBE_CLI_URL = 'https://docs.mistral.ai/vibe/code/cli/install-setup'
 
     <header class="site-header">
       <a class="brand" href="/">
+        <svg class="mark" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <defs>
+            <linearGradient id="vm-flame" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#f6c445"></stop>
+              <stop offset=".55" stop-color="#ef8a3c"></stop>
+              <stop offset="1" stop-color="#e2452a"></stop>
+            </linearGradient>
+          </defs>
+          <rect width="64" height="64" rx="14" fill="url(#vm-flame)"></rect>
+          <path
+            d="M19 19 L32 46 L45 19"
+            stroke="#241a12"
+            stroke-width="8.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            fill="none"></path>
+        </svg>
         <span class="wordmark">Vibe Mistro</span>
         <span class="beta-chip">Beta</span>
       </a>
@@ -181,6 +198,11 @@ const VIBE_CLI_URL = 'https://docs.mistral.ai/vibe/code/cli/install-setup'
         gap: 0.65rem;
         text-decoration: none;
         color: var(--text);
+      }
+
+      .mark {
+        height: 24px;
+        width: 24px;
       }
 
       .wordmark {
