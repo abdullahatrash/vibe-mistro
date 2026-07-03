@@ -18,7 +18,7 @@ import {
 import { getCommitDraft, setCommitDraft } from './commit-draft-store'
 import { readDiffScope, writeDiffScope, type DiffScopeState } from './diff-scope-store'
 import { BranchDiffView } from './BranchDiffView'
-import { buildChangesView, reconcileUnchecked } from './status-view'
+import { buildChangesView, reconcileUnchecked, type GitFileView } from './status-view'
 import { autoCommitMessage, isDefaultBranch, suggestBranchName } from './commit-guard'
 import { deriveQuickAction, type QuickActionKind } from './quick-action'
 import { QuickActions } from './QuickActions'
@@ -128,6 +128,12 @@ export function ChangesPanel({
   }
   // The in-flight stacked action (#236): its kind, the streamed phase line, its error,
   // and the renderer-minted id the progress events are filtered by.
+  // The revert dialog (#250): which target awaits confirmation — one file or 'all'.
+  // DESTRUCTIVE, so nothing runs until the dialog's confirm; a failure stays in the
+  // dialog with git's reason.
+  const [revertTarget, setRevertTarget] = useState<GitFileView | 'all' | null>(null)
+  const [reverting, setReverting] = useState(false)
+  const [revertError, setRevertError] = useState<string | null>(null)
   const [acting, setActing] = useState<GitStackedActionKind | null>(null)
   const [actionProgress, setActionProgress] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -323,6 +329,32 @@ export function ChangesPanel({
     }
   }
 
+  /** Run the CONFIRMED revert (#250): the dialog is the consent gate; a failure stays
+   *  IN the dialog with git's actual reason, success closes it (the streamed status
+   *  refresh main triggers drops the reverted rows off the panel). */
+  async function doRevert(): Promise<void> {
+    if (!revertTarget) return
+    setReverting(true)
+    setRevertError(null)
+    try {
+      const result = await window.api.gitRevert(
+        revertTarget === 'all'
+          ? { workspaceDir, files: [], all: true }
+          : {
+              workspaceDir,
+              files: [
+                { path: revertTarget.path, status: revertTarget.status, untracked: revertTarget.untracked },
+              ],
+              all: false,
+            },
+      )
+      if (result.ok) setRevertTarget(null)
+      else setRevertError(result.error)
+    } finally {
+      setReverting(false)
+    }
+  }
+
   // DIFF mode (#235: ALL files in one scroll, the clicked row is just the scroll
   // target), gated on `isActive` so a backgrounded (mounted-hidden) Workspace left in
   // DIFF doesn't keep the `@pierre/diffs` worker pool alive while off-screen — and only
@@ -442,6 +474,14 @@ export function ChangesPanel({
                 })
               }
               onSelect={() => setSelectedPath(file.path)}
+              onRevert={
+                busy
+                  ? undefined
+                  : () => {
+                      setRevertError(null)
+                      setRevertTarget(file)
+                    }
+              }
             />
           ))}
         </ul>
@@ -479,8 +519,68 @@ export function ChangesPanel({
             error={actionError ?? commitError}
             onRun={(kind) => void runQuickAction(kind)}
           />
+          {view.files.length > 0 && (
+            // Revert-all (#250): a deliberately quiet affordance — destruction hides
+            // behind the dialog, not behind a prominent button.
+            <button
+              type="button"
+              onClick={() => {
+                setRevertError(null)
+                setRevertTarget('all')
+              }}
+              disabled={busy || reverting}
+              className="self-start text-[11px] text-muted transition-colors hover:text-bad disabled:opacity-50"
+            >
+              Revert all changes…
+            </button>
+          )}
         </div>
       )}
+
+      {/* Revert warning (#250): the ONE consent gate before the app's only destructive
+          git write. Names exactly what is destroyed — an untracked file is DELETED,
+          not restored — and that it cannot be undone. Esc/Cancel leaves the tree
+          untouched; a failed revert stays here with git's actual reason. */}
+      <Dialog open={revertTarget !== null} onOpenChange={(open) => !reverting && !open && setRevertTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {revertTarget === 'all'
+                ? `Revert all ${view.fileCount} changed ${view.fileCount === 1 ? 'file' : 'files'}?`
+                : revertTarget?.untracked
+                  ? `Delete ${revertTarget.path}?`
+                  : `Revert changes to ${revertTarget?.path}?`}
+            </DialogTitle>
+            <DialogDescription>
+              {revertTarget === 'all'
+                ? 'Tracked files are restored to the last commit; untracked files are DELETED from disk.'
+                : revertTarget !== null && revertTarget.untracked
+                  ? 'This file is untracked — there is nothing to restore. It will be deleted from disk.'
+                  : 'Your changes to this file are discarded and it is restored to the last commit.'}{' '}
+              This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          {revertError && (
+            <p className="text-[11px] text-bad" role="alert">
+              {revertError}
+            </p>
+          )}
+          <DialogFooter>
+            <DialogClose render={<Button variant="secondary" size="sm" disabled={reverting} />}>
+              Cancel
+            </DialogClose>
+            <Button variant="destructive" size="sm" disabled={reverting} onClick={() => void doRevert()}>
+              {reverting
+                ? 'Reverting…'
+                : revertTarget === 'all'
+                  ? 'Revert all'
+                  : revertTarget?.untracked
+                    ? 'Delete file'
+                    : 'Revert file'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Default-branch guard (#238, generalized by #236): interposed by
           `runQuickAction` on ANY commit-family action when HEAD is the repository's

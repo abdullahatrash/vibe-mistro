@@ -1,4 +1,5 @@
 import type { JSX } from 'react'
+import { Undo2 } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { glyphClass, type GitFileView } from './status-view'
 
@@ -6,6 +7,8 @@ import { glyphClass, type GitFileView } from './status-view'
  * One changed-file row. A leading checkbox toggles the file's commit selection (#86)
  * WITHOUT opening the diff (it's a separate control, not nested in the row button);
  * clicking the rest of the row opens the file's working-tree diff (#85, DIFF mode).
+ * A trailing hover-revealed Revert affordance (#250) asks the panel to open its
+ * warning dialog for this file — the row itself never destroys anything.
  * The row insets from the panel edges (mx-2) so its rounded hover tint floats clear of
  * the border, matching the menu/list idiom.
  */
@@ -14,14 +17,17 @@ export function FileRow({
   checked,
   onToggle,
   onSelect,
+  onRevert,
 }: {
   file: GitFileView
   checked: boolean
   onToggle: () => void
   onSelect: () => void
+  /** Open the revert warning dialog for this file (#250); absent = affordance hidden. */
+  onRevert?: () => void
 }): JSX.Element {
   return (
-    <li className="mx-2 flex items-center gap-1 rounded-md transition-colors hover:bg-accent/10">
+    <li className="group mx-2 flex items-center gap-1 rounded-md transition-colors hover:bg-accent/10">
       <input
         type="checkbox"
         checked={checked}
@@ -54,6 +60,19 @@ export function FileRow({
           </span>
         )}
       </button>
+      {onRevert && (
+        <button
+          type="button"
+          onClick={onRevert}
+          aria-label={
+            file.untracked ? `Delete ${file.path} (untracked)` : `Revert changes to ${file.path}`
+          }
+          title={file.untracked ? 'Delete file (untracked)…' : 'Revert changes…'}
+          className="mr-1.5 inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-bad focus-visible:opacity-100"
+        >
+          <Undo2 className="size-3.5" aria-hidden />
+        </button>
+      )}
     </li>
   )
 }

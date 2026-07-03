@@ -11,6 +11,7 @@ import {
   type GitOpResult,
   type GitRangeDiffArgs,
   type GitRangeDiffResult,
+  type GitRevertArgs,
   type GhCreatePrArgs,
   type GhCreateResult,
   type GhCurrentPrArgs,
@@ -22,6 +23,7 @@ import {
 } from '../../shared/ipc'
 import { readGitFullDiff, readGitRangeDiff } from './diff'
 import { gitCommit } from './commit'
+import { gitRevert } from './revert'
 import { runStackedAction } from './stacked-action'
 import { gitBranches, gitCheckout, gitCreateBranch } from './branches'
 import { ghCreatePr, ghCurrentPr } from './github'
@@ -90,6 +92,17 @@ export function registerGitIpc(deps: {
     return settle(
       await gitCommit(args.workspaceDir, args.message, args.paths),
       `[vibe-mistro:git] commit failed (${args.workspaceDir})`,
+      args.workspaceDir,
+    )
+  })
+
+  ipcMain.handle(IPC.gitRevert, async (_event, args: GitRevertArgs): Promise<GitOpResult> => {
+    // REVERT working-tree changes (#250) — destructive; the renderer's warning dialog
+    // is the consent gate. A revert rewrites the working tree AND `.git` (index), so
+    // on success re-read status — the reverted rows drop off the panel.
+    return settle(
+      await gitRevert(args.workspaceDir, args.files, args.all),
+      `[vibe-mistro:git] revert failed (${args.workspaceDir})`,
       args.workspaceDir,
     )
   })
