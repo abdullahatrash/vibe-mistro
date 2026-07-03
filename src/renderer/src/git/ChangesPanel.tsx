@@ -1,9 +1,23 @@
 import { useEffect, useState, type JSX } from 'react'
 import { Boxes, GitCommitHorizontal, Monitor, PanelRightClose, RefreshCw } from 'lucide-react'
 import type { GitStatus } from '../../../shared/ipc'
-import { Badge, Button, IconButton, Textarea } from '../ui'
+import {
+  Badge,
+  Button,
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  IconButton,
+  Input,
+  Textarea,
+} from '../ui'
 import { getCommitDraft, setCommitDraft } from './commit-draft-store'
 import { buildChangesView, buildSyncView, reconcileUnchecked } from './status-view'
+import { autoCommitMessage, isDefaultBranch, suggestBranchName } from './commit-guard'
 import { BranchMenu } from './BranchMenu'
 import { PrSection } from './PrSection'
 import { SyncSection } from './SyncSection'
@@ -81,6 +95,12 @@ export function ChangesPanel({
   // manual refresh too (its own effect otherwise only fires on a branch change — a PR is a
   // network call we don't tie to every status tick).
   const [prRefreshKey, setPrRefreshKey] = useState(0)
+  // The default-branch guard dialog (#238): open flag, the escape hatch's editable
+  // branch name (prefilled from the effective message), its in-flight + error state.
+  const [guardOpen, setGuardOpen] = useState(false)
+  const [guardBranchName, setGuardBranchName] = useState('')
+  const [guardWorking, setGuardWorking] = useState(false)
+  const [guardError, setGuardError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!isActive) return
@@ -137,15 +157,34 @@ export function ChangesPanel({
 
   // The selected files = everything not explicitly deselected (#86). These are the exact
   // paths handed to `gitCommit`; main stages precisely this selection then commits.
-  const selectedPaths = view.files.filter((f) => !unchecked.has(f.path)).map((f) => f.path)
-  const canCommit = message.trim().length > 0 && selectedPaths.length > 0 && !busy && !committing
+  const selectedFiles = view.files.filter((f) => !unchecked.has(f.path))
+  const selectedPaths = selectedFiles.map((f) => f.path)
+  // A BLANK message no longer blocks committing (#238): the heuristic message shows as
+  // the placeholder — what you see is exactly what a blank submit commits.
+  const generatedMessage = autoCommitMessage(selectedFiles)
+  const effectiveMessage = message.trim() || generatedMessage
+  const canCommit = effectiveMessage.length > 0 && selectedPaths.length > 0 && !busy && !committing
 
   async function commit(): Promise<void> {
     if (!canCommit) return
+    // Default-branch guard (#238): interpose BEFORE a commit that would land straight
+    // on the default branch. Strictly best-effort — a failed branches read (or an
+    // unresolved default) skips the guard rather than blocking the commit.
+    const branches = await window.api.gitBranches({ workspaceDir })
+    if (branches.ok && isDefaultBranch(status?.branch ?? null, branches.branches)) {
+      setGuardBranchName(suggestBranchName(effectiveMessage))
+      setGuardError(null)
+      setGuardOpen(true)
+      return
+    }
+    await doCommit()
+  }
+
+  async function doCommit(): Promise<void> {
     setCommitting(true)
     setCommitError(null)
     try {
-      const result = await window.api.gitCommit({ workspaceDir, message: message.trim(), paths: selectedPaths })
+      const result = await window.api.gitCommit({ workspaceDir, message: effectiveMessage, paths: selectedPaths })
       if (result.ok) {
         // The committed files drop off via the status refresh main triggers; clear the
         // message so the next commit starts fresh. The deselection set reconciles itself
@@ -159,6 +198,26 @@ export function ChangesPanel({
       // Always re-enable the button — even if the IPC unexpectedly rejects, it can't
       // stick on "Committing…".
       setCommitting(false)
+    }
+  }
+
+  /** The guard's escape hatch (#238): create + switch to the named branch, then run the
+   *  original commit on it. A create failure (name collision) stays IN the dialog. */
+  async function createBranchAndCommit(): Promise<void> {
+    const name = guardBranchName.trim()
+    if (!name) return
+    setGuardWorking(true)
+    setGuardError(null)
+    try {
+      const result = await window.api.gitCreateBranch({ workspaceDir, name })
+      if (!result.ok) {
+        setGuardError(result.error)
+        return
+      }
+      setGuardOpen(false)
+      await doCommit()
+    } finally {
+      setGuardWorking(false)
     }
   }
 
@@ -247,14 +306,15 @@ export function ChangesPanel({
             ))}
           </ul>
 
-          {/* Commit area (#86): message + "Commit N". Disabled on an empty message,
-              no selection, or `busy` (the v1 concurrency guard — no concurrent
-              user+agent commit). git's reason surfaces inline + recoverable. */}
+          {/* Commit area (#86, #238): message + "Commit N". A BLANK message commits
+              with the heuristic shown as the placeholder; disabled only with no
+              selection or `busy` (the v1 concurrency guard — no concurrent user+agent
+              commit). git's reason surfaces inline + recoverable. */}
           <div className="flex flex-col gap-2 border-t border-border-muted px-3 py-2.5">
             <Textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
-              placeholder="Commit message"
+              placeholder={generatedMessage || 'Commit message'}
               rows={2}
               className="min-h-16 resize-y text-[13px]"
               // Ctrl/Cmd+Enter commits, matching the prompt composer's submit chord.
@@ -276,6 +336,62 @@ export function ChangesPanel({
               {committing ? 'Committing…' : `Commit ${selectedPaths.length}`}
             </Button>
           </div>
+
+          {/* Default-branch guard (#238): interposed by `commit()` when HEAD is the
+              repository's default branch — Abort / Continue on default / Create feature
+              branch (prefilled, editable) & continue. A create failure stays in the
+              dialog with git's reason; Continue behaves exactly like today's commit. */}
+          <Dialog open={guardOpen} onOpenChange={(open) => !guardWorking && setGuardOpen(open)}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Commit on {view.branch}?</DialogTitle>
+                <DialogDescription>
+                  {view.branch} is this repository’s default branch. You can commit here, or move the
+                  commit onto a new feature branch.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="guard-branch-name" className="text-[11px] font-medium text-muted">
+                  New branch name
+                </label>
+                <Input
+                  id="guard-branch-name"
+                  value={guardBranchName}
+                  onChange={(e) => setGuardBranchName(e.target.value)}
+                  disabled={guardWorking}
+                  className="text-[13px]"
+                />
+                {guardError && (
+                  <p className="text-[11px] text-bad" role="alert">
+                    {guardError}
+                  </p>
+                )}
+              </div>
+              <DialogFooter>
+                <DialogClose render={<Button variant="secondary" size="sm" disabled={guardWorking} />}>
+                  Cancel
+                </DialogClose>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={guardWorking}
+                  onClick={() => {
+                    setGuardOpen(false)
+                    void doCommit()
+                  }}
+                >
+                  Commit on {view.branch}
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={guardWorking || guardBranchName.trim().length === 0}
+                  onClick={() => void createBranchAndCommit()}
+                >
+                  {guardWorking ? 'Creating…' : 'Create branch & commit'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </>
       )}
     </aside>
