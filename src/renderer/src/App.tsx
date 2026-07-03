@@ -40,7 +40,8 @@ import { Logo } from './shell/logo'
 import { firstRunState } from './shell/first-run'
 import { installBannerMessage } from './shell/install-banner'
 import { InstallBanner } from './shell/InstallBanner'
-import { findSelectedThread, initialNavState, navReducer } from './shell/nav-reducer'
+import { findSelectedThread } from './shell/nav-reducer'
+import { initialNavHistory, navHistoryReducer } from './shell/nav-history'
 import {
   getSidebarCollapsed,
   setSidebarCollapsed as setSidebarCollapsedStore,
@@ -112,7 +113,10 @@ export function App(): JSX.Element {
   }, [])
   // Navigation (decision 2): WHICH Workspace/Thread the user is looking at —
   // lifted here so the connect flow (Open project, Continue, sign-in) can drive it.
-  const [nav, navDispatch] = useReducer(navReducer, initialNavState)
+  // Wrapped in the pure history reducer so the header's back/forward arrows walk
+  // real moves; NavAction dispatches pass through unchanged (nav-history.ts).
+  const [navHistory, navDispatch] = useReducer(navHistoryReducer, initialNavHistory)
+  const nav = navHistory.present
   // Per-Workspace connection registry (decision 3): one ConnectState per warm
   // Workspace, so switching between two is instant and both keep streaming.
   const [connections, connDispatch] = useReducer(connectionsReducer, initialConnections)
@@ -171,6 +175,16 @@ export function App(): JSX.Element {
    */
   function selectThreadInWorkspace(workspaceId: string, threadId: string): void {
     navDispatch({ type: 'select-thread', workspaceId, threadId })
+    hostSelectedThread(workspaceId, threadId)
+  }
+
+  /**
+   * The NON-nav half of a Thread selection: host it live / auto-continue it. Split
+   * from `selectThreadInWorkspace` so a history jump (back/forward) can replay the
+   * same side effects — nav alone moves the sidebar highlight, but the mounted
+   * conversation follows `workspaceThreads`' active pointer, which lives here.
+   */
+  function hostSelectedThread(workspaceId: string, threadId: string): void {
     const status = connections[workspaceId]?.status
     if (status === 'connected') {
       wtDispatch({ type: 'open', workspaceId, threadId })
@@ -182,6 +196,22 @@ export function App(): JSX.Element {
     if (status === undefined) {
       const meta = threadsForWorkspace(recents, workspaceId).find((t) => t.id === threadId)
       if (meta) void continueColdThread(meta)
+    }
+  }
+
+  /**
+   * Header back/forward (#future no more): move the nav-history pointer, then
+   * replay the target's Thread through the same hosting side effects a sidebar
+   * click runs — otherwise the highlight would move while the mounted view stayed.
+   * Settings/skills/workspace-only targets need no side effects (outlet reads nav).
+   */
+  function goNavHistory(direction: 'history-back' | 'history-forward'): void {
+    const target =
+      direction === 'history-back' ? navHistory.past.at(-1) : navHistory.future[0]
+    if (!target) return
+    navDispatch({ type: direction })
+    if (target.view === 'conversation' && target.selectedWorkspaceId && target.selectedThreadId) {
+      hostSelectedThread(target.selectedWorkspaceId, target.selectedThreadId)
     }
   }
 
@@ -719,21 +749,35 @@ export function App(): JSX.Element {
 
   return (
     <div className="flex h-screen flex-col bg-bg text-text">
-      {/* Window chrome (#113): a draggable top bar. Back/forward are STATIC placeholders
-          (#future) — styled but non-functional; the top-right layout controls are live.
-          The bar stays `-webkit-app-region: drag` so the window moves; every interactive
-          control opts back out with `[-webkit-app-region:no-drag]`. On macOS we pad the
+      {/* Window chrome (#113): a draggable top bar. Back/forward walk the nav history
+          (nav-history.ts); the top-right layout controls are live. The bar stays
+          `-webkit-app-region: drag` so the window moves; every interactive control
+          opts back out with `[-webkit-app-region:no-drag]`. On macOS we pad the
           left edge so the OS traffic lights don't collide with our controls. */}
       <header
         className="flex h-11 flex-none items-center gap-2 border-b border-border px-3 [-webkit-app-region:drag]"
         style={isMac ? { paddingLeft: 78 } : undefined}
       >
-        {/* placeholder — back / forward navigation (#future) */}
+        {/* Back / forward: walk the nav history (nav-history.ts) — every real move
+            (workspace, thread, settings, skills) is a step; disabled at the ends so
+            the state reads before the click, like the right-region controls. */}
         <div className="flex items-center gap-0.5 [-webkit-app-region:no-drag]">
-          <IconButton size="icon-sm" aria-label="Back" title="Back">
+          <IconButton
+            size="icon-sm"
+            aria-label="Back"
+            title="Back"
+            disabled={navHistory.past.length === 0}
+            onClick={() => goNavHistory('history-back')}
+          >
             <ArrowLeft className="size-4" aria-hidden />
           </IconButton>
-          <IconButton size="icon-sm" aria-label="Forward" title="Forward">
+          <IconButton
+            size="icon-sm"
+            aria-label="Forward"
+            title="Forward"
+            disabled={navHistory.future.length === 0}
+            onClick={() => goNavHistory('history-forward')}
+          >
             <ArrowRight className="size-4" aria-hidden />
           </IconButton>
         </div>

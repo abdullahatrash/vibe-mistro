@@ -35,6 +35,20 @@ describe('navReducer', () => {
     expect(next).toBe(start) // same reference: no spurious re-render or cleared Thread
   })
 
+  it('re-selecting the current Thread while in the conversation view is a no-op (same reference)', () => {
+    // Keeps a connect's redundant re-select (applyConnectResult) out of the
+    // back/forward history — nav-history only records referentially-new states.
+    const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'conversation' }
+    const next = navReducer(start, { type: 'select-thread', workspaceId: 'w1', threadId: 't1' })
+    expect(next).toBe(start)
+  })
+
+  it('re-selecting the current Thread FROM Settings still returns to the conversation view', () => {
+    const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'settings' }
+    const next = navReducer(start, { type: 'select-thread', workspaceId: 'w1', threadId: 't1' })
+    expect(next).toEqual({ selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'conversation' })
+  })
+
   it('clear resets to nothing selected in the conversation view', () => {
     const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'settings' }
     expect(navReducer(start, { type: 'clear' })).toEqual(initialNavState)
