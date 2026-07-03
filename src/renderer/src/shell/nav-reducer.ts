@@ -53,6 +53,16 @@ export function navReducer(state: NavState, action: NavAction): NavState {
     case 'select-thread':
       // Selecting a Thread pins its Workspace too, so the two never disagree — and
       // leaves Settings (picking a thread returns to the conversation view).
+      // Re-selecting the CURRENT Thread in the conversation view is a referential
+      // no-op (uniform with select-workspace) — it keeps a connect's redundant
+      // re-select (applyConnectResult) out of the back/forward history.
+      if (
+        state.selectedWorkspaceId === action.workspaceId &&
+        state.selectedThreadId === action.threadId &&
+        state.view === 'conversation'
+      ) {
+        return state
+      }
       return { selectedWorkspaceId: action.workspaceId, selectedThreadId: action.threadId, view: 'conversation' }
     case 'open-settings':
       // Swap the outlet for the Settings page, PRESERVING the current selection.
