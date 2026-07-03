@@ -1,4 +1,5 @@
-import type { JSX } from 'react'
+import { useEffect, useRef, useState, type JSX } from 'react'
+import { Check, Copy } from 'lucide-react'
 import type { VibeDetectResult } from '../../../shared/ipc'
 import { INSTALL_COMMAND, INSTALL_DOCS_URL, INSTALL_HINT } from '../../../shared/install-guidance'
 import { Button } from '../ui/button'
@@ -67,11 +68,17 @@ export function EmptyState({
         <Button size="lg" onClick={onOpenProject} disabled={opening}>
           {opening ? 'Connecting…' : 'Open project'}
         </Button>
-        <div className="mt-2 w-full max-w-[440px] rounded-lg border border-border bg-surface px-4 py-3.5 text-left">
+        <div className="mt-2 w-full max-w-[500px] rounded-lg border border-border bg-surface px-4 py-3.5 text-left">
           <div className="text-[13px] font-semibold text-text-strong">New to Mistral Vibe?</div>
-          <ol className="mt-2 flex flex-col gap-1.5 text-[13px] text-text-secondary">
-            <li>
-              1. Install the CLI: <CodeText text={`\`${INSTALL_COMMAND}\``} />
+          <ol className="mt-2 flex flex-col gap-2 text-[13px] text-text-secondary">
+            <li className="flex flex-col gap-1">
+              <span>1. Install the CLI:</span>
+              <span className="flex items-center gap-1.5 rounded-md border border-border bg-sidebar py-0.5 pr-0.5 pl-2">
+                <code className="min-w-0 flex-1 truncate font-mono text-[12px] text-text">
+                  {INSTALL_COMMAND}
+                </code>
+                <CopyCommandButton text={INSTALL_COMMAND} />
+              </span>
             </li>
             <li>
               2. Run <CodeText text="`vibe`" /> once to sign in
@@ -104,5 +111,55 @@ export function EmptyState({
         Select a thread from the sidebar to view it, or open a project to start a live agent.
       </p>
     </div>
+  )
+}
+
+/**
+ * The install-command copy control: icon flips to a check for a beat on success
+ * (title flips to "Failed to copy" on a rejected clipboard write — never silent).
+ * Same StrictMode-safe mounted guard as the transcript's MessageCopyButton (#263):
+ * set true in SETUP, not just the initializer, or dev's mount rehearsal leaves it
+ * false forever and every click silently bails.
+ */
+function CopyCommandButton({ text }: { text: string }): JSX.Element {
+  const [feedback, setFeedback] = useState<'copied' | 'failed' | null>(null)
+  const timeoutRef = useRef<number | null>(null)
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current)
+    }
+  }, [])
+  function onCopy(): void {
+    navigator.clipboard.writeText(text).then(
+      () => showFeedback('copied'),
+      () => showFeedback('failed'),
+    )
+  }
+  function showFeedback(next: 'copied' | 'failed'): void {
+    if (!mountedRef.current) return
+    setFeedback(next)
+    if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current)
+    timeoutRef.current = window.setTimeout(() => {
+      if (mountedRef.current) setFeedback(null)
+    }, 1500)
+  }
+  return (
+    <Button
+      variant="ghost"
+      size="icon-xs"
+      className="flex-none"
+      onClick={onCopy}
+      aria-label="Copy install command"
+      title={feedback === 'failed' ? 'Failed to copy' : 'Copy'}
+    >
+      {feedback === 'copied' ? (
+        <Check className="size-3.5 text-ok" aria-hidden />
+      ) : (
+        <Copy className="size-3.5" aria-hidden />
+      )}
+    </Button>
   )
 }

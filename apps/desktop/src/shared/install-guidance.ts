@@ -8,8 +8,8 @@
 
 export const INSTALL_DOCS_URL = 'https://docs.mistral.ai/vibe/code/cli/install-setup'
 
-/** The canonical install command (the mistral-vibe README's primary path). */
-export const INSTALL_COMMAND = 'uv tool install mistral-vibe'
+/** The canonical install command (the mistral-vibe README's primary macOS path). */
+export const INSTALL_COMMAND = 'curl -LsSf https://mistral.ai/vibe/install.sh | bash'
 
 /** The one actionable install hint. Backtick spans render as inline code in the UI. */
 export const INSTALL_HINT =
