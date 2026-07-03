@@ -8,7 +8,7 @@ import {
   type JSX,
   type KeyboardEvent,
 } from 'react'
-import { ArrowUp, Mic, Plus, Sparkles, Square, X } from 'lucide-react'
+import { ArrowUp, File, Mic, Plus, Sparkles, Square, X } from 'lucide-react'
 import type {
   FileEntry,
   ThreadConfigAxis,
@@ -23,7 +23,6 @@ import { Textarea } from '../ui/textarea'
 import type { AcpCommand } from './reducer'
 import { getDraft, setDraft as persistDraft, clearDraft } from './composer-draft-store'
 import {
-  appendMention,
   appendText,
   subscribeComposerInsert,
   subscribeComposerInsertImage,
@@ -168,18 +167,16 @@ export function Composer({
     setPendingContexts((prev) => addContext(prev, context)),
   )
 
-  // Insert `@path` from the Files preview's action (#189): the side panel is a sibling of
-  // this view, so it reaches the composer through the module-level `composer-insert` channel
-  // keyed by threadId. We append to the CURRENT persisted draft (kept in lockstep with
-  // `draft` state on every keystroke below), then write state + persisted draft together —
-  // the same write-through the textarea's onChange uses. Plain text only: the agent expands
-  // `@path` itself (ADR-0002).
+  // Insert from the Files preview's action (#189): the side panel is a sibling of this
+  // view, so it reaches the composer through the module-level `composer-insert` channel
+  // keyed by threadId. The path stages as a pending-context FILE chip (#230) — same as an
+  // `@` autocomplete accept — and is re-serialized to a plain-text `@path` mention at send
+  // (the agent expands it itself, ADR-0002).
   useEffect(() => {
     return subscribeComposerInsert(threadId, (relativePath) => {
-      writeDraft(appendMention(getDraft(window.localStorage, threadId), relativePath))
+      setPendingContexts((prev) => addContext(prev, { kind: 'file', path: relativePath }))
       inputRef.current?.focus()
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId])
 
   // Insert RAW text from the Terminal Surface's "Add to chat" (ADR-0014 slice 4): the
@@ -352,24 +349,31 @@ export function Composer({
           )}
 
           {pendingContexts.length > 0 && (
-            // Pending-context chip row (#229): the structured attachments staged beside
-            // the draft — mirrors the sent-turn invocation chip (PR #213) with a ✕ remove.
+            // Pending-context chip row (#229/#230): the structured attachments staged
+            // beside the draft — mirrors the sent-turn chips with a ✕ remove per chip.
             <div className="mb-3 flex flex-wrap gap-2">
               {pendingContexts.map((context) => (
                 <span
                   key={contextKey(context)}
                   data-pending-context-chip
-                  title={context.description}
-                  className="inline-flex items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] py-0.5 pr-1 pl-1.5 font-mono text-xs leading-none text-accent-text"
+                  title={context.kind === 'skill' ? context.description : context.path}
+                  className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] py-0.5 pr-1 pl-1.5 font-mono text-xs leading-none text-accent-text"
                 >
-                  <Sparkles className="size-3 shrink-0" aria-hidden />/{context.name}
+                  {context.kind === 'skill' ? (
+                    <Sparkles className="size-3 shrink-0" aria-hidden />
+                  ) : (
+                    <File className="size-3 shrink-0" aria-hidden />
+                  )}
+                  <span className="truncate">
+                    {context.kind === 'skill' ? `/${context.name}` : context.path}
+                  </span>
                   <button
                     type="button"
-                    aria-label={`Remove /${context.name}`}
+                    aria-label={`Remove ${context.kind === 'skill' ? `/${context.name}` : context.path}`}
                     onClick={() =>
                       setPendingContexts((prev) => removeContext(prev, contextKey(context)))
                     }
-                    className="inline-flex size-3.5 items-center justify-center rounded-sm text-accent-text outline-none hover:bg-[var(--accent-tint-border)]"
+                    className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-sm text-accent-text outline-none hover:bg-[var(--accent-tint-border)]"
                   >
                     <X className="size-3" aria-hidden />
                   </button>

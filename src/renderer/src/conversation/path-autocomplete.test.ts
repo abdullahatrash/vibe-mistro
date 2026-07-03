@@ -4,6 +4,7 @@ import {
   filterPaths,
   getPathQuery,
   moveSelection,
+  removePathToken,
   MAX_PATH_RESULTS,
 } from './path-autocomplete'
 import type { FileEntry } from '../../../shared/ipc'
@@ -155,6 +156,16 @@ describe('applyPath — plain-text insertion transform', () => {
     const out = applyPath('see @sr done', 4, 7, { path: 'src', kind: 'directory' })
     expect(out.value).toBe('see @src/ done')
     expect(out.caret).toBe(9)
+  })
+})
+
+describe('removePathToken — chip-accept transform (#230)', () => {
+  it('removes the `@query` token and rests the caret where it began', () => {
+    expect(removePathToken('@re', 0, 3)).toEqual({ value: '', caret: 0 })
+  })
+
+  it('removes a mid-sentence token, keeping text either side intact', () => {
+    expect(removePathToken('see @re done', 4, 7)).toEqual({ value: 'see  done', caret: 4 })
   })
 })
 

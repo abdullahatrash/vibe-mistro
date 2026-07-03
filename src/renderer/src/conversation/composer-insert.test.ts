@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  appendMention,
   appendText,
   emitComposerInsert,
   emitComposerInsertImage,
@@ -10,21 +9,6 @@ import {
   subscribeComposerInsertText,
   type ComposerInsertImage,
 } from './composer-insert'
-
-describe('appendMention', () => {
-  it('inserts into an empty draft with a trailing space', () => {
-    expect(appendMention('', 'src/app.ts')).toBe('@src/app.ts ')
-  })
-
-  it('adds a separating space when the draft does not end in whitespace', () => {
-    expect(appendMention('see', 'src/app.ts')).toBe('see @src/app.ts ')
-  })
-
-  it('does not double the space when the draft already ends in whitespace', () => {
-    expect(appendMention('see ', 'src/app.ts')).toBe('see @src/app.ts ')
-    expect(appendMention('see\n', 'src/app.ts')).toBe('see\n@src/app.ts ')
-  })
-})
 
 describe('composer-insert channel', () => {
   it('delivers an emit to the subscriber for that Thread only', () => {
