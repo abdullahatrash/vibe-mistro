@@ -40,4 +40,25 @@ export const STATE_MIGRATIONS: readonly Migration[] = [
       `)
     },
   },
+  {
+    id: 2,
+    name: 'transcript-entries',
+    up: (db) => {
+      // The transcript event log (ADR-0019): the source of truth the projections
+      // derive from. `seq` is the global total order (replacing per-file append
+      // order); `payload` holds the WHOLE TranscriptEntry as JSON, so the wire
+      // type in shared/ipc is unchanged. Cascades with its Thread.
+      db.exec(`
+        CREATE TABLE transcript_entries (
+          seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+          thread_id  TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+          kind       TEXT NOT NULL,
+          payload    TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX idx_transcript_entries_thread ON transcript_entries(thread_id, seq);
+      `)
+    },
+  },
 ]
