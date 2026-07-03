@@ -6,7 +6,7 @@
 > 2026-07-02, branch `main` @ `4d367b9`, **916 tests**.
 > **Latest session: UX polish sprint — PRs #201–#204, all squash-merged, live-verified by the user.**
 > #201 composer pinned to the bottom (h-full/min-h-0 chain from `<main>` down; `.messages` owns the
-> scroll, dropping the scaffold-era 360px cap). #202 side panel matched to t3code's shell: full-height
+> scroll, dropping the scaffold-era 360px cap). #202 side panel matched to the reference shell: full-height
 > flush `border-l` column to the window edges (`<main>` went full-bleed; padding moved into the views),
 > drag-resizable width (`side-panel/panel-width-store`: 360 / default 540 / max min(1400, 70vw),
 > persisted per-window), centered "Open a surface" launcher grid, tab-strip "+" add-surface menu +
@@ -28,12 +28,12 @@
 
 - **What:** `vibe-mistro` — an Electron + TypeScript + React 19 + Bun **desktop app** that orchestrates
   the **Mistral Vibe** coding agent over **ACP** (Agent Client Protocol — JSON-RPC 2.0 over stdio).
-  It's a GUI "monitor/orchestrator" for Vibe, modeled on **CodexMonitor** (which does the same for Codex).
+  It's a GUI "monitor/orchestrator" for Vibe — the desktop shell that supervises the agent.
 - **Where:** `/Users/abdullahatrash/mistral/vibe-mistro` (repo, dir, and package all named `vibe-mistro`).
   GitHub: `https://github.com/abdullahatrash/vibe-mistro` (owner `abdullahatrash`, host `github.com`).
 - **State:** MVP works end-to-end (open project → prompt → streamed reasoning → tool calls with approval).
   Merged: Auth, fs-hardening, the **persistence epic**, the **UI/layout-shell epic**, **composer drafts**
-  (#60), the **t3code UI stack** (#61: Tailwind v4 + base-ui + lucide + react-markdown), the full
+  (#60), the **modern UI stack** (#61: Tailwind v4 + base-ui + lucide + react-markdown), the full
   **Agent controls** feature (Mode/Model/Reasoning-effort — #65 spike → #66 picker → #70 per-Thread →
   #72 re-assert-after-load → #75 draft pre-select; **live-verified** in `bun run dev`), and **sign-in
   resilience** (#78 preserve failure reason + RPC code + stderr log; #80 a "Check status" re-query
@@ -84,7 +84,7 @@ the agent, an LSP, or Vibe's own context management.
   `bun build scripts/x.ts --target=node --outfile=/tmp/x.mjs && node /tmp/x.mjs`.
   The Electron app itself is unaffected (it uses its own node). This cost us a day; it's in memory.
 - **🔴 Worktree isolation gotcha:** the Agent tool's `isolation: worktree` forks the *session's* cwd
-  repo (which is **CodexMonitor**, not vibe-mistro). So we create worktrees **manually** (see §3).
+  repo (which may NOT be vibe-mistro). So we create worktrees **manually** (see §3).
 - **🔴 Worktree node_modules gotcha (learned the hard way, #64):** do **NOT** `ln -s` the main
   `node_modules` into a worktree. `.gitignore`'s `node_modules/` (now hardened to `node_modules`) didn't
   match the *symlink*, a `git add -A` committed it, and on checkout it became a self-referential loop
@@ -149,12 +149,10 @@ repeat — never horizontal "all tests then all code").
   JSON-RPC `-32602` "Session not found" = the re-bind signal). **This is ground truth — trust it over
   guessing.**
 - `docs/vibe-acp-protocol.md` — the ACP protocol overview for Vibe.
-- `docs/codexmonitor-reference.md` — what to build (feature parity target).
 - `docs/opencode-electron-patterns.md` — Electron mechanics (PATH resolution, electron-store, etc.).
-- `docs/t3code-reference.md` — patterns adopted from t3code.
 - `docs/conventions.md` — code conventions.
 - **Design system (the active epic — ADR-0010):** `docs/adr/0010-…` (decisions) + `docs/design-tokens.md`
-  (exact token values) + `docs/design-system-components.md` (what to lift from shadcn/t3code + how). ⚠️
+  (exact token values) + `docs/design-system-components.md` (what to lift from the references + how). ⚠️
   These **supersede `docs/design/brand.md`** — the design epic REVERSES the old brand (bright `--accent
   #fa500f` → softer gradient-orange `#cf6a3a`/`#e07a3e`; **zero radius → a rounded scale**). Use
   `design-tokens.md`, not `brand.md`, for anything visual from now on.
@@ -165,31 +163,26 @@ These are **cloned, real codebases** — grep them for concrete implementations.
 not dependencies; right-size their ideas to our thin-orchestrator scope. Copy-adapt + own in-repo — never
 add them as npm deps.
 
-1. **`CodexMonitor/`** — *the concept we're cloning.* Tauri/**Rust** GUI orchestrator for **Codex**.
-   ⚠️ This is also the **session's cwd**, so shell commands reset here. Use it for **what features to
-   build and how the UX should feel** (thread list, approvals, workspace switching). Don't copy code —
-   different stack (Rust/Tauri vs our TS/Electron).
-2. **`opencode/packages/desktop/`** — *same stack as us* (electron-vite + Bun, but SolidJS). Use it for
+1. **`opencode/packages/desktop/`** — *same stack as us* (electron-vite + Bun, but SolidJS). Use it for
    **Electron mechanics**: shell-env PATH resolution, electron-store persistence, window-state,
    electron-updater, electron-log, node-pty terminal, electron-builder packaging.
-3. **`t3code/`** — *a mature multi-agent Effect-TS GUI* (`/Users/abdullahatrash/mistral/t3code`; ignore its
-   `.repos/` + `node_modules`). Our **north star for Thread/Session modeling, the UI shell, AND the rich
-   conversation aesthetic** (design-system epic mines its chat: `apps/web/src/components/chat/*` +
-   `ChatMarkdown.tsx` — message/bubble, file-path links, `SimpleWorkEntryRow` tool rows, reasoning, working
+2. **A mature multi-agent Effect-TS GUI** (studied locally). Our **north star for Thread/Session
+   modeling, the UI shell, AND the rich conversation aesthetic** (design-system epic mined its chat:
+   message/bubble, file-path links, compact tool rows, reasoning, working
    indicator; see `docs/design-system-components.md`). Its stack matches ours (Tailwind v4 + base-ui + CVA +
    lucide). Take patterns, not the Effect/CQRS machinery.
-4. **`ui/`** — the **shadcn/ui monorepo** (`/Users/abdullahatrash/mistral/ui`). The **primitive-library
+3. **`ui/`** — the **shadcn/ui monorepo** (`/Users/abdullahatrash/mistral/ui`). The **primitive-library
    source for the design-system epic**: base-ui components under `apps/v4/registry/bases/base/ui/` (the
    `base` base, NOT `radix`) — Button CVA exemplar + Message/Bubble/MessageScroller. Copy-adapt to our
    tokens (swap their `cn-*` theme tokens for inline Tailwind). Details in `docs/design-system-components.md`.
-5. **`mistral-vibe/`** — the **cloned Vibe CLI / ACP backend source** (`/Users/abdullahatrash/mistral/mistral-vibe`,
+4. **`mistral-vibe/`** — the **cloned Vibe CLI / ACP backend source** (`/Users/abdullahatrash/mistral/mistral-vibe`,
    package under `vibe/`). Ground truth for **how the agent behaves over ACP** — e.g. `vibe/acp/acp_agent_loop.py`
    resolved that skills fold into the `available_commands_update` list (`$`≡`/`) and `@path` is expanded
    server-side via `render_path_prompt`. Read it to verify protocol behavior instead of guessing.
 
 ### Persistent memory (across sessions)
-There is a file-based memory at
-`/Users/abdullahatrash/.claude/projects/-Users-abdullahatrash-mistral-CodexMonitor/memory/`.
+There is a file-based memory under
+`/Users/abdullahatrash/.claude/projects/` (the project-scoped memory directory).
 Key files: `MEMORY.md` (index), `vibe-monitor-project.md` (the full project log — read this for the
 blow-by-blow of every merged slice), `vibe-mistro-team-workflow.md` (the loop + house rules),
 `vibe-mistro-bun-child-process-gotcha.md` (the Bun gotcha). **Update memory as you complete work.**
@@ -232,7 +225,7 @@ active one), via a main-side pure `ThreadStatusTracker` (`src/main/thread-status
 `thread:status` only on a flag flip; single source of truth for the sidebar roll-up.
 
 **#58 client-side draft** — a New thread you never prompt is **renderer-only** and persists nothing
-(no metadata, no session, no JSONL) until its first prompt; matches t3code. `App.tsx newThread()` mints
+(no metadata, no session, no JSONL) until its first prompt — the proven draft pattern. `App.tsx newThread()` mints
 `crypto.randomUUID()`, hosts it live, selects it; the first prompt binds + persists under that preserved
 id via the existing `mintAndBind` path.
 
@@ -242,7 +235,7 @@ id via the existing `mintAndBind` path.
 text, prunes empties (removes the key when the map empties), clear-on-send, delete-cascade, malformed/
 throwing/absent-storage tolerant. localStorage only — never touches JSONL/metadata.
 
-**#61 t3code UI stack** — Tailwind v4 (`@tailwindcss/vite` in the **renderer** config only) + base-ui
+**#61 UI stack** — Tailwind v4 (`@tailwindcss/vite` in the **renderer** config only) + base-ui
 (`@base-ui/react`) + lucide + react-markdown, all installed/wired. Brand tokens bridged via
 `@theme inline` in `styles.css` with the radius scale pinned to 0 (sharp edges can't regress through a
 utility). `cn()` at `src/renderer/src/lib/utils.ts`; `ui/menu.tsx` base-ui primitive. `ChatMarkdown.tsx`
@@ -355,7 +348,7 @@ next session.** Pipeline was: `/grill-with-docs` → **ADR-0010** + `docs/design
   `docs/design-system-components.md §2` (THE lift-from guide) · **streamdown** (`docs/streamdown-spike.md`) ·
   **shadcn/ui** `bases/base/ui/` (`message`/`bubble`/`message-scroller`/`marker`) · **shadcn AI Elements / ai-sdk
   Elements** (web: `ai-sdk.dev/elements` — Conversation/Message/Response/Reasoning/Tool/Actions patterns; structure
-  only, feed our ACP reducer) · **t3code** `apps/web/src/components/chat/*` + `ChatMarkdown.tsx` · base-ui docs.
+  only, feed our ACP reducer) · the reference chat GUI's chat components + markdown renderer · base-ui docs.
   Full list + how-to-drive-it in **`docs/NEXT-SESSION.md`**.
 
 **Composer-extras — remaining (RESOLVED from the Vibe CLI source `/Users/abdullahatrash/mistral/mistral-vibe`):**
@@ -379,7 +372,7 @@ status/diff/commit (#84-86), Agent-controls, and composer-extras `/`+image+queue
 live-verified. Do these smokes when convenient.
 
 **Deferred roadmap (no issues yet — propose as a PRD / grill-with-docs → tracer-bullet issues when the
-user picks one up; rough CodexMonitor build order):**
+user picks one up; rough parity build order):**
 - **Design-system pass** — the CHOSEN next epic (see ► above): tokens/theme → shared primitives →
   per-area migration onto the #61 foundation. Subsumes the old "per-area base-ui/Tailwind migration" line.
 - **Composer extras — final piece** — `$` skills DROPPED (already in the `/` list); `@` file-path
@@ -390,7 +383,6 @@ user picks one up; rough CodexMonitor build order):**
 - **File tree + prompt library** (also unblocks `@` autocomplete).
 - **Terminal dock** (node-pty — see opencode), then **settings / usage meter / in-app updates /
   packaging** (electron-updater/electron-builder — see opencode), then remote backend (deferred).
-Parity target: `docs/codexmonitor-reference.md`.
 
 ---
 
@@ -419,7 +411,8 @@ Parity target: `docs/codexmonitor-reference.md`.
   `Conversation` remount). Steer deferred pending a vibe steer method.
 - **0010** — design-system epic: keep the CSS-vars→`@theme` token hybrid, adopt the prototype values (warm
   neutrals, rounded radius scale reversing `--radius:0`, softer gradient-orange `#cf6a3a`/`#e07a3e`); a
-  base-ui+Tailwind+**CVA** primitive library under `ui/` copy-adapted from shadcn `bases/base` + t3code,
+  base-ui+Tailwind+**CVA** primitive library under `ui/` copy-adapted from shadcn `bases/base` + the
+  reference chat GUI,
   retiring BEM area-by-area; conversation keeps the discriminated-union item+switch (ADR-0001) with reusable
   inner primitives (Response=streamdown, gated); migrate area-by-area behavior-identical. Values →
   `docs/design-tokens.md`; adaptation notes → `docs/design-system-components.md`; PRD #109; issues #110–#119.

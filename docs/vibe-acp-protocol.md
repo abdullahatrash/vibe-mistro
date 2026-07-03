@@ -58,8 +58,8 @@ button, reply with `optionId` via `{outcome:{outcome:"selected", optionId}}`. Th
 - `allow_always_permanent` — persist across sessions.
 - `reject_once` — deny this execution.
 
-`toolCall.toolCallId` links the request to the pending `tool_call` item. → CodexMonitor's approval
-toasts; our slices #1 (once-off) / #2 (allow_always + remembered allowlist).
+`toolCall.toolCallId` links the request to the pending `tool_call` item. → rendered as approval
+UI; our slices #1 (once-off) / #2 (allow_always + remembered allowlist).
 
 ---
 
@@ -75,15 +75,15 @@ toasts; our slices #1 (once-off) / #2 (allow_always + remembered allowlist).
 **Modes (5):** `default` (approval-gated), `plan` (read-only), `accept-edits` (auto-approves edits
 only), `auto-approve` (auto-approves all), `chat` (read-only conversational). Changed via
 `session/set_mode {sessionId, modeId}` (acp-capture §10); NOT preserved across `session/load` (resets to
-`default`). `auto-approve` ≈ CodexMonitor's auto-approve / Vibe's `--yolo`.
+`default`). `auto-approve` ≈ Vibe's `--yolo`.
 
 **Errors** (map to user-facing messages): `SessionNotFoundError`, `ConfigurationError`
 (bad `~/.vibe/config.toml`), `UnauthenticatedError` (not signed in / no valid credential),
 `RateLimitError`.
 
 **Quirk:** history compaction has no native ACP message — Vibe surfaces it as a synthetic
-`tool_call` titled "Compacting conversation history…". Render it like CodexMonitor's
-`contextCompaction` item.
+`tool_call` titled "Compacting conversation history…". Render it as a dedicated
+context-compaction item.
 
 ---
 
@@ -98,8 +98,8 @@ Vibe is **not** API-key-only. Per Mistral's
 2. **API key (BYOK)** — the alternative path: `vibe --setup` / `MISTRAL_API_KEY` / `~/.vibe/.env`.
    Required for non-Mistral providers (OpenRouter, …), selected via presets in `config.toml`.
 
-**We never store credentials.** Like CodexMonitor with Codex, vibe-mistro delegates all auth and
-token storage to the `vibe` binary (`~/.vibe`). We only detect signed-in vs not.
+**We never store credentials.** vibe-mistro delegates all auth and token storage to the `vibe`
+binary (`~/.vibe`). We only detect signed-in vs not.
 
 **Over ACP — now captured (see [acp-capture.md](./acp-capture.md) §8):** detect with `_auth/status`
 (`initialize` can't reveal auth state); sign in via `authenticate` (`browser-auth-delegated`:
@@ -130,5 +130,5 @@ In-app sign-in is a later slice and warrants its own ADR.
 - `client.on('notification', …)` for `session/update` → reducer upserts conversation items.
 - `client.on('serverRequest', …)` for `request_permission` → approval UI → respond by id.
 
-See [codexmonitor-reference.md](./codexmonitor-reference.md) §5 for the `ConversationItem` shapes the
-`session/update` stream should map onto.
+The `session/update` stream maps onto the typed `ConversationItem` shapes owned by the renderer's
+conversation reducer.

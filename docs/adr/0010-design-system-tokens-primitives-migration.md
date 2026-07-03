@@ -8,8 +8,8 @@ primitive library, and migrate the existing UI onto them to match the user's **f
 `docs/design-tokens.md` holds the exact token values.
 
 References mined (all local): the design **prototype** `/Users/abdullahatrash/mistral/Vibe Mistro.html`
-(exact tokens) + the PNG mockups; **t3code** `/Users/abdullahatrash/mistral/t3code` (rich chat aesthetic,
-near-identical stack); **shadcn/ui** `/Users/abdullahatrash/mistral/ui` (`apps/v4/registry/bases/base/` —
+(exact tokens) + the PNG mockups; a production chat GUI with a near-identical stack (rich chat
+aesthetic); **shadcn/ui** `/Users/abdullahatrash/mistral/ui` (`apps/v4/registry/bases/base/` —
 base-ui primitives + the message/scroller/bubble/marker primitives).
 
 ## Decisions
@@ -42,31 +42,32 @@ base-ui primitives + the message/scroller/bubble/marker primitives).
   `<Panel>` — never hand-rolled class strings. `styles.css` shrinks to tokens (`:root` + `@theme`), global
   resets, the custom scrollbar, and the `vmCursorBlink` keyframe. **Copy-adapt, own it:** lift component
   source from shadcn `bases/base/ui/` (swapping their `cn-*` theme-token indirection for our inline
-  Tailwind utility strings) and t3code's `ui/` — we vendor + restyle, never add shadcn as a dependency.
+  Tailwind utility strings) and the reference GUI's `ui/` — we vendor + restyle, never add shadcn as
+  a dependency.
   Rejected: keeping BEM-first (the growing-`styles.css` maintainability problem this epic exists to fix);
   pure inline utilities with no primitives (class soup, no canonical component look, pixel drift).
 
 - **Conversation: keep the discriminated-union item model + switch dispatcher; build the inner pieces as
-  reusable primitives.** Both references converge on this — t3code uses a row-`kind` union + one
-  dispatcher; shadcn maps `message.parts` switching on `part.type` — and it matches our existing
+  reusable primitives.** Both references converge on this — the reference GUI uses a row-`kind` union +
+  one dispatcher; shadcn maps `message.parts` switching on `part.type` — and it matches our existing
   `ConversationState.items` (`kind`) + `Item` switch (ADR-0001, renderer owns conversation state). So we do
   NOT adopt a deep compound-component API; composability comes from the **primitive layer + the part
   switch**. Build/restyle: **MessageScroller** (autoscroll — vendor shadcn's engine or `use-stick-to-bottom`,
   replacing the naive `scrollTop=scrollHeight`), **Message/Bubble** (user = right bubble, assistant =
   full-width flowing markdown — both refs + the mockup agree), **Response** (markdown — see next), **ToolRow**
-  (t3code's compact tone-icon + heading + dimmed preview + right status glyph + chevron→indented `<pre>`;
+  (a compact tone-icon + heading + dimmed preview + right status glyph + chevron→indented `<pre>`;
   map its status to our ACP `pending/in_progress/completed/failed`), **Reasoning** (a `Collapsible`
   "thinking" block, auto-open while streaming), **Approval** (our `PermissionRow` restyled — kept **inline**
-  in the conversation, NOT in the composer footer like t3code, matching our app + mockup), an **Actions**
-  bar (hover-reveal copy/👍/👎/retry with an anchored toast), **file-path chip links** (t3code's pattern:
+  in the conversation, NOT in the composer footer, matching our app + mockup), an **Actions**
+  bar (hover-reveal copy/👍/👎/retry with an anchored toast), **file-path chip links** (the pattern:
   path → icon chip + `L12:C3`, orange, clickable), and a **Working** indicator (pulsing dots + self-ticking
   timer). We feed all of these OUR ACP reducer data, not any AI-SDK message shape.
 
 - **Markdown/Response layer: adopt `streamdown` + `@streamdown/code`, contingent on a compat spike.**
   Replace the current `react-markdown` `ChatMarkdown` with streamdown — it is *streaming-native* (renders
   incomplete markdown safely mid-stream) with shiki code highlighting + copy built in, purpose-built for a
-  streaming agent, and is what shadcn's Response uses (t3code hand-rolled the same thing and called it their
-  "most over-engineered piece"). **Gate:** a quick spike at the start of the conversation slice must confirm
+  streaming agent, and is what shadcn's Response uses (the reference GUI hand-rolled the same thing and
+  called it its most over-engineered piece). **Gate:** a quick spike at the start of the conversation slice must confirm
   streamdown themes to our tokens and works under Electron/Vite before we commit; the fallback is keeping
   `react-markdown` and adding shiki ourselves. This is the only decision here with an open verification.
 

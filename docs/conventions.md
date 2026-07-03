@@ -1,6 +1,6 @@
 # vibe-mistro conventions
 
-Our decisions, synthesized from the three references. When they disagree, this doc wins.
+Our decisions, synthesized from the reference studies. When they disagree, this doc wins.
 
 ## Scope boundary
 
@@ -21,7 +21,7 @@ structural difference from opencode (which *is* the agent). See
 ## Process responsibilities
 
 - **main** (`src/main`) — all Node/OS/process work: spawn & supervise `vibe-acp`, ACP transport,
-  persistence, git/gh, fs, shell-env. This is CodexMonitor's Rust backend, in TS.
+  persistence, git/gh, fs, shell-env. The entire backend of the app lives here.
 - **preload** (`src/preload`) — typed bridge only. Exposes one `VibeMistroApi` via `contextBridge`.
 - **renderer** (`src/renderer`) — UI only, no Node. Feature-Sliced Design (below).
 
@@ -51,16 +51,16 @@ renderer — everything through IPC.
 - `electron-store`, **lazy-created** in a `Map`, **after** `app.setPath('userData', …)`. Separate
   stores per domain (`settings`, `workspaces`). Key constants in one place — no inline strings.
 - Renderer-only UI state (panel sizes, drafts, scroll, expand/collapse) stays in `localStorage`,
-  keyed like CodexMonitor (`threadDrafts:<ws>:<thread>`, etc.).
+  with structured keys (`threadDrafts:<ws>:<thread>`, etc.).
 - Expose store access over IPC; renderer never touches disk directly.
 
-## Renderer architecture (from CodexMonitor)
+## Renderer architecture
 
 - **Feature-Sliced Design.** Each feature owns `components/`, `hooks/`, `utils/`, `types.ts`. No
   cross-slice imports except via `src/renderer/src/types.ts` and a `services/` layer.
 - **Thread state = a reducer with slices** (items, lifecycle, config, queue). Keyed by
-  workspace/thread. Reuse CodexMonitor's `ThreadState`/`ConversationItem`/`ThreadSummary` shapes,
-  renaming Codex methods to ACP.
+  workspace/thread, with typed `ThreadState`/`ConversationItem`/`ThreadSummary` shapes keyed to
+  ACP methods.
 - **Event router hook**: subscribe once to `acp:event`, `switch` on the ACP method, dispatch typed
   reducer actions. Optimistic processing flag set on send, cleared on turn completion.
 - **Per-kind row renderers** for the conversation (message/reasoning/tool/diff/permission/…).
@@ -74,7 +74,7 @@ renderer — everything through IPC.
 ## Git/GitHub
 
 - Shell out to `git` and `gh` from main via `child_process` (auth/SSH work out of the box); optional
-  `simple-git` for reads. Same command surface as CodexMonitor.
+  `simple-git` for reads.
 
 ## Naming & style
 
@@ -85,5 +85,5 @@ renderer — everything through IPC.
 
 ## Roadmap
 
-The build order lives in [codexmonitor-reference.md](./codexmonitor-reference.md#8-suggested-build-order-for-vibe-mistro)
-and the repo `README.md`. Next up: **slice #1 — ACP handshake + single conversation.**
+The build order lives in the repo `README.md`. Next up: **slice #1 — ACP handshake + single
+conversation.**

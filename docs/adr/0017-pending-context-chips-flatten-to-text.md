@@ -3,7 +3,7 @@
 **Status: ACCEPTED** (2026-07-03). Builds on **ADR-0002** (thin orchestrator — no client-side
 expansion, no new wire shapes), **ADR-0009** (queue payload unchanged), **ADR-0013** decision 2
 (Files-preview insert channel), **ADR-0016** (element picker — its output re-homed here). PRD
-#228; slices #229 (skill), #230 (file), #231 (element). Reference: t3code's composer, whose
+#228; slices #229 (skill), #230 (file), #231 (element). Reference: a production composer whose
 **attachment pattern** we adopt and whose **Lexical inline-chip editor** we deliberately do not.
 
 ## Context
@@ -14,8 +14,8 @@ a multi-line annotation into the draft. The user couldn't see at a glance what a
 couldn't remove one attachment without hand-editing text, and the draft stopped being theirs to
 edit.
 
-t3code solves the in-text version of this with a ~1,700-line Lexical editor whose decorator nodes
-render inline chips. But its browser **element contexts** — the closest analogue to our picker —
+The reference solves the in-text version of this with a ~1,700-line Lexical editor whose decorator
+nodes render inline chips. But its browser **element contexts** — the closest analogue to our picker —
 do NOT go through that editor: they are structured drafts rendered as removable chips *outside*
 the text field, flattened into a trailing plain-text block at send. Inline positional chips are
 only needed when a token must sit mid-sentence; none of ours do.

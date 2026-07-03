@@ -9,8 +9,8 @@ extension methods, which vibe-mistro merely drives and reflects:
   source of truth. A mid-session `UnauthenticatedError` (JSON-RPC code **-32000**, which Vibe reserves
   exclusively for unauthenticated — see `docs/acp-capture.md` §8) is treated as expiry.
 - **Sign in** via the **`browser-auth-delegated`** method (`authenticate(start)` → `signInUrl` → open in
-  the system browser → `authenticate(complete, attemptId)`), mirroring CodexMonitor's
-  `login/start → open authUrl → complete`. The blocking agent-driven `browser-auth` is the fallback.
+  the system browser → `authenticate(complete, attemptId)`) — the standard
+  `start → open authUrl → complete` shape. The blocking agent-driven `browser-auth` is the fallback.
 - **Sign out** via `_auth/signOut` (gated on `signOutAvailable`); it clears the keyring entry.
 
 This is the auth-specific application of ADR-0002's thin-orchestrator stance: agent capabilities

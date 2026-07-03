@@ -36,13 +36,13 @@ We split the persisted data **three** ways, by owner and volume:
    full-text queries at scale (e.g. search across thousands of Threads). The JSONL→SQLite migration is
    bounded (small metadata + per-Thread logs) and deliberately kept that way by not starting there.
 
-**Why own the transcript (the revision):** the two mature references we studied **both** own their
-transcript — t3code in a SQLite event log, opencode in a SQLite `SessionMessageTable` — and both mint
-their own ids and lazy-load (metadata list, transcript on open). Owning the transcript is what makes
-thread UX robust: instant process-free reopen, survivable session loss, and a basis for future search.
-We adopt **own-id + lazy + own-transcript**, but **right-size the engine to JSONL** for a single-user,
-single-provider app with no native-dependency budget. (See `docs/t3code-reference.md` §3, which already
-named "a single session row per Thread + an append-only message log" as the minimal shape.)
+**Why own the transcript (the revision):** the mature references we studied **all** own their
+transcript (typically a SQLite event log or message table — opencode's `SessionMessageTable` is one)
+and all mint their own ids and lazy-load (metadata list, transcript on open). Owning the transcript is
+what makes thread UX robust: instant process-free reopen, survivable session loss, and a basis for
+future search. We adopt **own-id + lazy + own-transcript**, but **right-size the engine to JSONL** for
+a single-user, single-provider app with no native-dependency budget. The minimal shape is "a single
+session row per Thread + an append-only message log".
 
 **Spike, now de-risked:** `session/load` replay is still marked "to verify" in the capture doc. It no
 longer gates the reopen UX — we render from our JSONL regardless — so the spike only confirms whether
@@ -55,7 +55,7 @@ the *agent* can resume context; if it can't, we re-bind fresh and the user still
   and it is the outlier versus both references. It also forced an unappealing "dead/read-only Thread"
   behavior on resume failure because there was no history to show.
 - **`better-sqlite3` (transcript + metadata) from day one** — deferred. Real query power and cheap
-  incremental appends, and it is what t3code/opencode use, but it is a **native addon** requiring an
+  incremental appends, and it is what the reference apps use, but it is a **native addon** requiring an
   Electron-ABI rebuild in packaging — the same native-build tax we declined for `openat` in #21
   (ADR-0004) — and it over-provisions for our scale. Adopt when a feature (search) justifies it.
 - **JSON metadata + per-Thread JSONL transcript + Vibe for agent context** (chosen) — owns the display

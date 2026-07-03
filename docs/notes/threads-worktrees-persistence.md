@@ -1,6 +1,7 @@
-# t3code: Threads, Worktrees & Local Persistence — Findings
+# Reference multi-agent GUI: Threads, Worktrees & Local Persistence — Findings
 
-> Investigation notes. Line numbers reflect the repo state at time of writing (2026-07-01) and may drift.
+> Investigation notes on a production Effect-TS multi-agent GUI we studied (2026-07-01). Specific
+> file references to that codebase have been removed; the architectural findings stand alone.
 
 ## Q1: Is each thread a git worktree?
 
@@ -9,89 +10,84 @@
 *zero-or-one* reference (by filesystem path); worktree → threads is *one-to-many*.
 
 ### Three possible states for a thread
-1. **Own worktree** — dedicated git worktree + temporary branch (`t3code/<hex>`).
+1. **Own worktree** — dedicated git worktree + temporary branch (a namespaced `<prefix>/<hex>`).
 2. **Shared worktree** — multiple threads point at the same `worktreePath`.
 3. **Local mode** — no worktree; runs in the project root checkout (`workspaceRoot`).
 
-The env-mode toggle (`apps/web/src/components/BranchToolbarEnvModeSelector.tsx`) lets the
-user pick **"local"** vs **"worktree"** per thread.
+An env-mode toggle in the branch toolbar lets the user pick **"local"** vs **"worktree"** per
+thread.
 
-### Key locations
-- Thread shell shape (nullable `worktreePath`, `branch`): `packages/contracts/src/orchestration.ts:560`
-- Projection column `worktree_path AS "worktreePath"`: `apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts:127,331`
-- Worktree prepared only on first message + `sendEnvMode === "worktree"` + no existing path: `apps/web/src/components/ChatView.tsx:3969`
-- Server creates worktree then writes path/branch back to thread: `apps/server/src/ws.ts:836` (`gitWorkflow.createWorktree` + `thread.meta.update`)
-- Actual git call `git worktree add -b <branch> <path> <ref>`: `apps/server/src/vcs/GitVcsDriverCore.ts:2245`
-  - path: `worktreesDir/<repoName>/<sanitizedBranch>`; branch prefix `t3code/<hex>` (`packages/shared/src/git.ts`)
-- Fallback to project root when no worktree: `apps/server/src/ws.ts:1448`
-  - `workspaceRoot: thread.value.worktreePath ?? project.value.workspaceRoot`
-- Sharing evidence — orphan check skips worktrees still referenced by other threads:
-  `apps/web/src/worktreeCleanup.ts:11` (`getOrphanedWorktreePathForThread`)
+### Key mechanics
+- The thread shell shape carries a nullable `worktreePath` + `branch`; the projection layer
+  exposes them as read-model columns.
+- A worktree is prepared only on the thread's **first message**, when the send env-mode is
+  `"worktree"` and no path exists yet; the server creates the worktree and writes path/branch
+  back onto the thread.
+- The actual git call is `git worktree add -b <branch> <path> <ref>`, with
+  path `worktreesDir/<repoName>/<sanitizedBranch>` and a namespaced branch prefix.
+- When a thread has no worktree, execution falls back to the project root:
+  `workspaceRoot = thread.worktreePath ?? project.workspaceRoot`.
+- Sharing is real: the orphan-cleanup check skips worktrees still referenced by other threads.
 
 ### Git isolation
 Opt-in per thread. "worktree" mode → dedicated worktree/branch (isolated cwd + branch).
 "local" / reused path → shares the checkout, no per-thread isolation. The same
-`worktreePath` flows into terminal sessions (`apps/server/src/terminal/Manager.ts`) and
-setup-script execution (`apps/server/src/project/ProjectSetupScriptRunner.ts:135`).
+`worktreePath` flows into terminal sessions and setup-script execution.
 
 ---
 
-## Q2: How does t3code save threads & conversations locally?
+## Q2: How does the reference app save threads & conversations locally?
 
-**One SQLite file, event-sourced (CQRS).** Default path: **`~/.t3/userdata/state.sqlite`**
+**One SQLite file, event-sourced (CQRS).** A single `state.sqlite` under the app's home dir
 (+ `-wal` / `-shm` sidecars, WAL mode).
 
 ### Storage engine
-SQLite via Effect's `unstable/sql`. Driver picked at runtime (`persistence/Layers/Sqlite.ts:19-31`):
+SQLite via Effect's `unstable/sql`. Driver picked at runtime:
 - Bun → `@effect/sql-sqlite-bun/SqliteClient`
-- Node → local `apps/server/src/persistence/NodeSqliteClient.ts` wrapping `node:sqlite`
+- Node → a local client wrapping `node:sqlite`
   (`DatabaseSync`; needs Node >=22.16/23.11/24)
 
-On connect: `PRAGMA journal_mode = WAL`, `PRAGMA foreign_keys = ON`, then run migrations
-(`Sqlite.ts:33-40`). No JSON/LevelDB store for chat data.
+On connect: `PRAGMA journal_mode = WAL`, `PRAGMA foreign_keys = ON`, then run migrations.
+No JSON/LevelDB store for chat data.
 
 ### Architecture — event sourced, not a plain row store
-1. **Append-only event log** → `orchestration_events` (`Migrations/001_OrchestrationEvents.ts`).
+1. **Append-only event log** → an `orchestration_events` table.
    Immutable rows; global `sequence AUTOINCREMENT` + per-stream `stream_version` with optimistic
    concurrency (unique on `(aggregate_kind, stream_id, stream_version)`). Store only INSERTs /
-   reads forward (`persistence/Layers/OrchestrationEventStore.ts`).
+   reads forward.
 2. **Projector** folds events → read-model tables, tracking a per-projector cursor
-   `last_applied_sequence` in `projection_state` (`orchestration/Layers/ProjectionPipeline.ts`,
-   `persistence/Layers/ProjectionState.ts`).
-3. **Read side** queries the projection tables to build UI snapshots
-   (`orchestration/Layers/ProjectionSnapshotQuery.ts`).
+   `last_applied_sequence` in a `projection_state` table.
+3. **Read side** queries the projection tables to build UI snapshots.
 
 Flow: commands → append events → project into `projection_*` → snapshot queries read them.
 
-### Main read-model tables (`Migrations/005_Projections.ts`)
+### Main read-model tables
 - `projection_projects`
 - `projection_threads` — `thread_id PK`, `project_id`, `title`, `model`, `branch`,
   `worktree_path`, `latest_turn_id`, timestamps, `deleted_at` (indexed by `project_id`)
 - `projection_thread_messages` — `message_id PK`, `thread_id`, `turn_id?`, `role`, `text`,
-  `is_streaming`, timestamps; `attachments_json` added in migration 007. Ordered history via
-  `idx_projection_thread_messages_thread_created (thread_id, created_at)`
+  `is_streaming`, timestamps; `attachments_json` added in a later migration. Ordered history via
+  an index on `(thread_id, created_at)`
 - `projection_turns` — one request/response cycle; `UNIQUE (thread_id, turn_id)`
 - `projection_thread_activities` (tool calls), `projection_thread_sessions` (live session state)
 
-Messages are written by idempotent upsert `INSERT ... ON CONFLICT(message_id) DO UPDATE`
-(`persistence/Layers/ProjectionThreadMessages.ts`), so streaming assistant text repeatedly
-upserts the same row. A message links to its conversation via `thread_id` and its cycle via `turn_id`.
+Messages are written by idempotent upsert `INSERT ... ON CONFLICT(message_id) DO UPDATE`,
+so streaming assistant text repeatedly upserts the same row. A message links to its conversation
+via `thread_id` and its cycle via `turn_id`.
 
-### On-disk path config (`ServerConfig`)
-- `apps/server/src/config.ts:91-121` (`deriveServerPaths`):
-  `stateDir = baseDir/{userdata|dev}`, `dbPath = stateDir/state.sqlite`
-- `apps/server/src/os-jank.ts:86-92` — default `baseDir = ~/.t3`; override via `--baseDir` /
-  `T3_HOME` (`apps/server/src/cli/config.ts:262-274`)
-- Wired in `persistence/Layers/Sqlite.ts:66-68` — `layerConfig` reads `dbPath` off `ServerConfig`;
-  `:memory:` variant for tests
+### On-disk path config
+- A server-config module derives `stateDir = baseDir/{userdata|dev}` and
+  `dbPath = stateDir/state.sqlite`
+- The default `baseDir` is a dotdir in `$HOME`; overridable via a CLI flag / env var
+- The SQLite layer reads `dbPath` off the server config; a `:memory:` variant serves tests
 
 ### Migrations
-`apps/server/src/persistence/Migrations/`, registered in `persistence/Migrations.ts` (32 migrations),
-run via Effect `Migrator` (tracking table `effect_sql_migrations`).
+Numbered migration modules (32 at time of study), run via Effect `Migrator`
+(tracking table `effect_sql_migrations`).
 
 ---
 
-## Q3: vibe-mistro persistence vs t3code, and the adoption path
+## Q3: vibe-mistro persistence vs the reference, and the adoption path
 
 ### What vibe-mistro does today (`/Users/abdullahatrash/mistral/vibe-mistro`)
 Purely files, **no database** (design in `docs/adr/0005-persistence-json-metadata-vibe-owns-history.md`).
@@ -112,7 +108,7 @@ Single-writer: only the Electron main process mutates; renderer is pure.
 
 ### Head-to-head
 
-| | vibe-mistro | t3code |
+| | vibe-mistro | reference app |
 |---|---|---|
 | Store | JSON index + per-thread JSONL | single SQLite `state.sqlite` (WAL) |
 | Model | metadata rows + append-only transcript | event log + projected read tables (CQRS) |
@@ -121,8 +117,8 @@ Single-writer: only the Electron main process mutates; renderer is pure.
 | Queries | load whole file, filter in JS | SQL (indexed by project/thread/turn) |
 | Schema evolution | ad-hoc shape-filtering on load | numbered migrations (`Migrator`) |
 
-**Key insight:** vibe-mistro already has the important half of t3code's design — an append-only event
-stream (its JSONL *is* the log; `TranscriptEntry` ≈ an event). What's missing is (1) a queryable
+**Key insight:** vibe-mistro already has the important half of the reference design — an append-only
+event stream (its JSONL *is* the log; `TranscriptEntry` ≈ an event). What's missing is (1) a queryable
 projected read-model and (2) formal migrations. So this is less of a rewrite than it looks.
 
 ### Adoption path (staged, each stage shippable)
@@ -131,22 +127,22 @@ projected read-model and (2) formal migrations. So this is less of a rewrite tha
 migrations. Target "SQLite + a projections layer," not "adopt the whole Effect orchestration engine."
 
 **Stage 1 — SQLite behind the existing store interface.**
-- Add `node:sqlite` (Node ≥22.16, like t3code's `NodeSqliteClient.ts`) or `better-sqlite3`.
+- Add `node:sqlite` (Node ≥22.16, as the reference's Node client does) or `better-sqlite3`.
 - Keep `MetadataStore`/`TranscriptStore` public methods identical; swap bodies for SQL. IPC/renderer unchanged.
-- On open: `journal_mode=WAL`, `foreign_keys=ON` (mirror `Sqlite.ts:33`).
+- On open: `journal_mode=WAL`, `foreign_keys=ON`.
 - _Captures ~80% of the durability benefit for ~10% of the effort._
 
 **Stage 2 — port the event log.**
 - Table `events(sequence INTEGER PK AUTOINCREMENT, thread_id, stream_version, type, payload_json, created_at)`
-  = the JSONL, one row per `TranscriptEntry`. `append()` → INSERT (mirror `OrchestrationEventStore.ts`).
+  = the JSONL, one row per `TranscriptEntry`. `append()` → INSERT.
 - Optional `UNIQUE(thread_id, stream_version)` for optimistic concurrency — probably skip initially
   given single-writer.
 
 **Stage 3 — projection tables + projector.**
-- `projection_threads`, `projection_thread_messages`, `projection_turns` (crib from `Migrations/005_Projections.ts`),
-  plus `projection_state(name, last_applied_sequence)`.
-- Projector folds events → tables (mirror `ProjectionPipeline.ts`); messages via idempotent
-  `INSERT ... ON CONFLICT(message_id) DO UPDATE` for streaming (mirror `ProjectionThreadMessages.ts`).
+- `projection_threads`, `projection_thread_messages`, `projection_turns` (crib the reference's
+  projection-table shapes), plus `projection_state(name, last_applied_sequence)`.
+- Projector folds events → tables; messages via idempotent
+  `INSERT ... ON CONFLICT(message_id) DO UPDATE` for streaming.
 - `listMetadata` becomes an indexed SQL query instead of load-whole-JSON + filter.
 
 **Stage 4 — migrations + one-time importer.**
@@ -156,7 +152,7 @@ migrations. Target "SQLite + a projections layer," not "adopt the whole Effect o
 
 **Pragmatic stopping points:** Stages 1–2 alone give atomic multi-thread writes, crash safety, and
 cross-thread queries without a projector. Stages 3–4 add the fast indexed read-model and safe schema
-evolution. Full Effect-style CQRS is optional — only worth it at t3code-like scale/concurrency.
+evolution. Full Effect-style CQRS is optional — only worth it at the reference's scale/concurrency.
 
 **Caveat:** vibe-mistro's current design is clean, documented, single-writer. Justify the migration by
 real pain: (a) large-JSON load/filter getting slow, (b) wanting relational cross-thread/turn queries,
@@ -166,8 +162,8 @@ real pain: (a) large-JSON load/filter getting slow, (b) wanting relational cross
 
 ## Decision log — grill session 2026-07-01 (branch `docs/persistence-adoption`)
 
-**Persistence migration: DEFERRED, per ADR-0005.** Re-evaluated adopting t3code's SQLite + event-
-sourcing. Verdict: no fired trigger.
+**Persistence migration: DEFERRED, per ADR-0005.** Re-evaluated adopting the reference's SQLite +
+event-sourcing. Verdict: no fired trigger.
 - Search (0005's stated trigger) is a *future* feature, not present → not yet.
 - The "slow cold-start" symptom was traced and is **NOT** a storage problem: launch reads only the small
   `metadata.json`; zero JSONL is touched at startup; transcripts load lazily on thread-open. SQLite would

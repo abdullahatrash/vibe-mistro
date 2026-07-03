@@ -2,8 +2,8 @@
 
 **Status: ACCEPTED** (2026-07-03). Builds on **ADR-0015** (Browser Surface webview embed +
 guest security posture — this preserves it) and **ADR-0002** (thin orchestrator — the picker is
-a USER affordance, not an agent tool). PRD #223; slice #224. Reference implementation: t3code's
-"pick to chat" (`apps/desktop/src/preview/PickPreload.ts`), whose approach we deliberately do NOT
+a USER affordance, not an agent tool). PRD #223; slice #224. Reference implementation: a
+production "pick to chat" feature (a guest pick-preload), whose approach we deliberately do NOT
 copy — see below.
 
 ## Context
@@ -12,12 +12,12 @@ The Browser Surface previews a dev server. When the user spots something to chan
 in words ("the blue button top-right") is slow and imprecise. "Pick to chat" lets them click the
 element in the preview and hand it to the agent as a screenshot + metadata.
 
-t3code implements this with a **guest preload running at `contextIsolation=false`**, so
+The reference implements this with a **guest preload running at `contextIsolation=false`**, so
 react-grab/bippy can read the page's `__REACT_DEVTOOLS_GLOBAL_HOOK__` and attribute a React
 component name + source frames to the picked element. That is exactly the posture ADR-0015 and its
 adversarial security review locked DOWN: our guest runs `contextIsolation=true`, sandboxed, with
 **no preload**, and the `will-attach-webview` clamp force-strips any preload from an attaching
-guest. Matching t3code would mean reopening that attack surface.
+guest. Matching the reference would mean reopening that attack surface.
 
 ## Decision
 
@@ -59,10 +59,10 @@ guest. Matching t3code would mean reopening that attack surface.
 
 - The entire feature is renderer-only and adds ZERO to the guest's attack surface — the reason it's
   a small, contained slice rather than a security re-litigation.
-- No React component names (the deliberate deviation from t3code). If a future "trusted preview"
+- No React component names (the deliberate deviation from the reference). If a future "trusted preview"
   posture is ever introduced, component attribution could return — but that is its own ADR, not a
   quiet relaxation here.
-- The picker is single-element, one pick at a time; t3code's annotation studio (multi-select,
+- The picker is single-element, one pick at a time; a full annotation studio (multi-select,
   draw, region, live-CSS-edit, comment box) is out of scope (PRD #223).
 - Capture uses CSS-px coordinates end to end; if a future need arises for device-pixel-accurate
   crops the helper is the single place to adjust.

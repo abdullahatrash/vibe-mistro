@@ -10,7 +10,7 @@ ACP's session-state model), not per-turn.
 ## Decisions
 
 - **Scope:** the three ACP-native axes only (Mode, Model, Reasoning effort), grouped as Agent controls.
-  Out: t3code's separate access/`RuntimeMode` axis (covered for us by `default` mode gating writes +
+  Out: a separate access/runtime-mode axis (covered for us by `default` mode gating writes +
   fs confinement, ADR-0004) and the `/fast` service tier (no ACP surface in our capture).
 - **Ownership / persistence:** Vibe owns the live value; we render it from `session/new`/`session/load`
   and do NOT persist it as authoritative in our metadata store (ADR-0005: Vibe owns session state, we
@@ -44,7 +44,7 @@ The #65 spike captured the change mechanism against vibe-acp 2.18.0 (acp-capture
 
 ## Considered alternatives
 
-- **Persist the selection per-Thread in our metadata (t3code's approach: committed on the thread +
+- **Persist the selection per-Thread in our metadata (committed on the thread +
   pending on the composer draft, `composer ?? thread ?? default`).** Rejected as the default: it
   duplicates state Vibe already tracks and risks drift; we adopt it only as the spike-contingent
   fallback if Vibe doesn't preserve Mode across reload.
