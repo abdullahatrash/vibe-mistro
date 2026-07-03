@@ -19,6 +19,8 @@ import {
 import { eventBelongsToThread } from './event-routing'
 import { replayTranscript, transcriptHasImages } from './replay'
 import { replayCache } from './replay-cache'
+import { peekPendingJump } from '../search/jump-store'
+import { useJumpToItem } from './use-jump-to-item'
 import { MessageScroller } from './MessageScroller'
 import { Item } from './items/Item'
 import { UsageBar } from './items/UsageBar'
@@ -381,11 +383,18 @@ export function Conversation({
   const availableCommands =
     state.availableCommands.length > 0 ? state.availableCommands : workspaceCommands
 
+  // Land a Search jump (#174 slice 3) once this Thread's items are rendered.
+  // `hadJumpPending` is captured at MOUNT so the scroller's initial bottom-pin
+  // is suppressed for exactly the open that carries a jump (state can't flip later).
+  const convRef = useRef<HTMLDivElement | null>(null)
+  const [hadJumpPending] = useState(() => peekPendingJump(thread.threadId) !== null)
+  useJumpToItem(thread.threadId, state.items.length > 0, convRef)
+
   return (
     // Chip clicks (#116) open files through main; provided here (agentId closed over)
     // for the FileChips streamdown renders far below in the assistant markdown.
     <FileOpenProvider value={openFile}>
-      <div className="conv">
+      <div className="conv" ref={convRef}>
         <div className="conv__head">
           <span className="dot dot--ok" aria-hidden />
           <span className="conv__title">{title}</span>
@@ -394,21 +403,23 @@ export function Conversation({
 
         <UsageBar state={state} />
 
-        <MessageScroller>
+        <MessageScroller pinInitial={!hadJumpPending}>
           {state.items.length === 0 && (
             <p className="hint">Send a prompt to start the conversation.</p>
           )}
           {state.items.map((item, idx) => (
-            <Item
-              key={item.id}
-              item={item}
-              // Auto-open reasoning only for the CURRENT turn — items AFTER the last
-              // user message — so sending a new prompt doesn't re-expand the whole
-              // history's "Thinking" blocks (they belong to prior, settled turns).
-              streaming={state.isProcessing && idx > lastUserIndex}
-              onPermission={respondPermission}
-              availableCommands={availableCommands}
-            />
+            // The data-item-id wrapper is the Search jump anchor (#174 slice 3).
+            <div key={item.id} data-item-id={item.id} className="rounded-lg">
+              <Item
+                item={item}
+                // Auto-open reasoning only for the CURRENT turn — items AFTER the last
+                // user message — so sending a new prompt doesn't re-expand the whole
+                // history's "Thinking" blocks (they belong to prior, settled turns).
+                streaming={state.isProcessing && idx > lastUserIndex}
+                onPermission={respondPermission}
+                availableCommands={availableCommands}
+              />
+            </div>
           ))}
           {/* Working indicator (#115): while a turn is in flight, a self-ticking
               "Working for …" row after the transcript. It mounts when the turn opens

@@ -115,17 +115,17 @@ describe('searchThreads', () => {
 
   it('matches transcript prose (slice 2): strong entries carry snippet/hitCount/entryIndex', () => {
     const prose = new Map([
-      ['t-miss', [{ index: 3, text: 'we should use the warm pool here' }, { index: 7, text: 'warm pool again' }]],
+      ['t-miss', [{ index: 3, itemId: 'item-3', text: 'we should use the warm pool here' }, { index: 7, itemId: 'item-7', text: 'warm pool again' }]],
     ])
     const hits = searchThreads(ws, 'warm pool', 20, prose)
     const hit = hits.find((h) => h.threadId === 't-miss')
-    expect(hit).toMatchObject({ hitCount: 2, entryIndex: 3 })
+    expect(hit).toMatchObject({ hitCount: 2, entryIndex: 3, jumpItemId: 'item-3' })
     expect(hit?.snippet).toContain('warm pool here')
   })
 
   it('ranks strong prose matches above scattered matches within tier 0, by hit count', () => {
     const prose = new Map([
-      ['t-miss', [{ index: 0, text: 'warm pool' }]], // strong body match, low recency (50)
+      ['t-miss', [{ index: 0, itemId: 'item-0', text: 'warm pool' }]], // strong body match, low recency (50)
     ])
     const ids = searchThreads(ws, 'warm pool', 20, prose).map((h) => h.threadId)
     // t-scattered (tier 0, no strong entries, recency 40) loses to the strong body hit
@@ -136,7 +136,7 @@ describe('searchThreads', () => {
 
   it('matches tokens scattered ACROSS messages (no snippet — no single strong entry)', () => {
     const prose = new Map([
-      ['t-miss', [{ index: 1, text: 'the pool is here' }, { index: 2, text: 'keep it warm' }]],
+      ['t-miss', [{ index: 1, itemId: 'item-1', text: 'the pool is here' }, { index: 2, itemId: 'item-2', text: 'keep it warm' }]],
     ])
     const hit = searchThreads(ws, 'warm pool', 20, prose).find((h) => h.threadId === 't-miss')
     expect(hit).toBeDefined()
@@ -145,7 +145,7 @@ describe('searchThreads', () => {
   })
 
   it('folds accents in prose and ignores prose entirely at rest', () => {
-    const prose = new Map([['t-miss', [{ index: 0, text: 'le café était chaud' }]]])
+    const prose = new Map([['t-miss', [{ index: 0, itemId: 'item-0', text: 'le café était chaud' }]]])
     expect(searchThreads(ws, 'cafe chaud', 20, prose).map((h) => h.threadId)).toEqual(['t-miss'])
     const resting = searchThreads(ws, '', 20, prose)
     expect(resting.every((h) => h.snippet === undefined)).toBe(true)

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type JSX } from 'react'
 import { MessageSquare } from 'lucide-react'
 import type { SearchHit } from '../../../shared/ipc'
 import { formatRelativeTime } from '../shell/relative-time'
+import { setPendingJump } from './jump-store'
 import { Badge } from '../ui/badge'
 import {
   Command,
@@ -64,6 +65,9 @@ export function SearchPalette({
   }, [open, query])
 
   function selectHit(hit: SearchHit): void {
+    // Record the jump target BEFORE navigating (#174 slice 3): the conversation
+    // view that renders this Thread consumes it and scrolls to the matched item.
+    if (hit.jumpItemId) setPendingJump(hit.threadId, hit.jumpItemId)
     onOpenChange(false)
     onSelectThread(hit.workspaceId, hit.threadId)
   }

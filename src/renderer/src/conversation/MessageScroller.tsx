@@ -16,12 +16,19 @@ import { cn } from '../lib/utils'
 export function MessageScroller({
   children,
   className,
+  pinInitial = true,
 }: {
   children: ReactNode
   className?: string
+  /**
+   * Whether mount scrolls to the newest message (the default). A Search jump
+   * (#174 slice 3) passes false so the initial bottom-pin doesn't race — and
+   * win against — the jump's scroll-to-item.
+   */
+  pinInitial?: boolean
 }): JSX.Element {
   const { scrollRef, contentRef, isAtBottom, scrollToBottom } = useStickToBottom({
-    initial: 'instant',
+    initial: pinInitial ? 'instant' : false,
     resize: 'smooth',
   })
   return (

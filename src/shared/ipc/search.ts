@@ -41,6 +41,12 @@ export interface SearchHit {
   hitCount?: number
   /** Transcript line index of the best match — the slice-3 jump-to-message pointer. */
   entryIndex?: number
+  /**
+   * The conversation ITEM id the best match replays into (user item id or
+   * `assistant:${messageId}`) — the jump-to-message scroll anchor. Absent when
+   * the id can't be derived; the row then opens at the bottom like any hit.
+   */
+  jumpItemId?: string
 }
 
 /** The `search:query` reply: ranked hits, best first, capped at the limit. */
