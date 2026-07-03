@@ -1,14 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type JSX } from 'react'
 import { ArrowLeft, ArrowRight, Code, ExternalLink, Globe, Loader2, MousePointerClick, RefreshCw, RotateCw, TriangleAlert } from 'lucide-react'
 import type { DevServer } from '../../../shared/ipc'
-import { emitComposerInsertImage, emitComposerInsertText } from '../conversation/composer-insert'
+import { emitComposerInsertElement, type ComposerInsertImage } from '../conversation/composer-insert'
 import { parseDataUrl } from '../conversation/image-attach'
-import {
-  buildPickerScript,
-  coercePickedElement,
-  cropRectForElement,
-  formatPickAnnotation,
-} from './browser-picker'
+import { buildPickerScript, coercePickedElement, cropRectForElement } from './browser-picker'
 import { cn } from '../lib/utils'
 import {
   buildWebviewPreferencesAttribute,
@@ -117,10 +112,11 @@ export function BrowserSurface({
     view?.openDevTools()
   }
 
-  // Pick an element to chat (#224, ADR-0016): inject the picker into the guest via
+  // Pick an element to chat (#224/#231, ADR-0016): inject the picker into the guest via
   // executeJavaScript (isolated world — no preload, isolation stays ON), await the click,
-  // screenshot the element, and drop a screenshot + text annotation into the active
-  // Thread's composer. A no-op without a mounted composer (Thread) or webview.
+  // screenshot the element, and deliver ONE payload — the element metadata + optional
+  // screenshot — to the active Thread's composer, which stages it as a pending-context
+  // ELEMENT chip paired to the staged image. A no-op without a mounted composer or webview.
   async function pickElement(): Promise<void> {
     if (!view || !activeThreadId || picking) return
     setPicking(true)
@@ -132,23 +128,28 @@ export function BrowserSurface({
       // Screenshot AFTER the picker overlay is gone (the injected script tore it down
       // before resolving), so the crop is the page, not the picker chrome.
       const crop = cropRectForElement(picked.rect, { width: view.offsetWidth, height: view.offsetHeight }, { padding: 8 })
+      let image: ComposerInsertImage | null = null
       if (crop) {
         try {
-          const image = await view.capturePage(crop)
-          const parsed = parseDataUrl(image.toDataURL())
+          const captured = await view.capturePage(crop)
+          const parsed = parseDataUrl(captured.toDataURL())
           if (parsed) {
-            emitComposerInsertImage(activeThreadId, {
-              ...parsed,
-              name: `element-${picked.tagName}.png`,
-              previewUrl: image.toDataURL(),
-            })
+            image = { ...parsed, name: `element-${picked.tagName}.png`, previewUrl: captured.toDataURL() }
           }
         } catch (err) {
-          // A capture failure is non-fatal — the text annotation still lands.
+          // A capture failure is non-fatal — the element chip still lands, screenshot-less.
           console.error('[browser] element screenshot failed', err)
         }
       }
-      emitComposerInsertText(activeThreadId, formatPickAnnotation(picked))
+      emitComposerInsertElement(activeThreadId, {
+        element: {
+          tagName: picked.tagName,
+          selector: picked.selector,
+          text: picked.text,
+          pageUrl: picked.pageUrl,
+        },
+        image,
+      })
     } catch (err) {
       // executeJavaScript rejects if the guest navigated mid-pick — treat as a cancel.
       console.error('[browser] pick cancelled', err)

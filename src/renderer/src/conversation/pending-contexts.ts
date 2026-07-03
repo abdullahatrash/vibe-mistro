@@ -19,12 +19,35 @@ export interface FileContext {
   path: string
 }
 
-/** A context chip staged in the composer awaiting send. The element kind follows (#231). */
-export type PendingContext = SkillContext | FileContext
+/**
+ * A Browser Surface element pick staged as a chip (#231, upgrading #224/ADR-0016): the
+ * picker's DOM metadata, plus `imageId` pairing it to its staged screenshot so removing
+ * the chip removes the screenshot with it. `id` is minted by the composer (each pick is
+ * its own chip — no dedupe; picking twice deliberately stages twice).
+ */
+export interface ElementContext {
+  kind: 'element'
+  id: string
+  tagName: string
+  selector: string | null
+  text: string
+  pageUrl: string
+  imageId: string | null
+}
+
+/** A context chip staged in the composer awaiting send. */
+export type PendingContext = SkillContext | FileContext | ElementContext
 
 /** The stable identity of a chip — the React key, the remove handle, and the dedupe key. */
 export function contextKey(context: PendingContext): string {
-  return context.kind === 'skill' ? `skill:${context.name}` : `file:${context.path}`
+  switch (context.kind) {
+    case 'skill':
+      return `skill:${context.name}`
+    case 'file':
+      return `file:${context.path}`
+    case 'element':
+      return `element:${context.id}`
+  }
 }
 
 /** Drop the chip whose {@link contextKey} matches; a miss returns the list unchanged. */
@@ -57,6 +80,23 @@ export function addContext(
 const ATTACHED_FILES_OPEN = '<attached_files>'
 const ATTACHED_FILES_CLOSE = '</attached_files>'
 
+/** The marker element fencing picked-element context in the wire text (#231) — descriptive
+ *  prose the agent reads naturally (the former #224 draft-text annotation, relocated). */
+const ELEMENT_CONTEXT_OPEN = '<element_context>'
+const ELEMENT_CONTEXT_CLOSE = '</element_context>'
+
+/** One element's lines inside the block — `Picked element <tag>` (the entry delimiter),
+ *  optional `selector:`/`text:` lines (text whitespace-normalized so entries stay line-
+ *  parseable), then the page URL. Mirrors the former `formatPickAnnotation` content. */
+function formatElementEntry(element: ElementContext): string[] {
+  const lines = [`Picked element <${element.tagName}>`]
+  if (element.selector) lines.push(`selector: ${element.selector}`)
+  const text = element.text.replace(/\s+/g, ' ').trim()
+  if (text.length > 0) lines.push(`text: ${text}`)
+  lines.push(element.pageUrl)
+  return lines
+}
+
 /** The prose + recovered file chips of a sent prompt — {@link extractAttachedFiles}. */
 export interface ExtractedAttachedFiles {
   cleanText: string
@@ -87,19 +127,85 @@ export function extractAttachedFiles(text: string): ExtractedAttachedFiles {
   }
 }
 
+/** One entry's parsed lines inside an `<element_context>` block — the extraction inverse
+ *  of {@link formatElementEntry}. Returns null on a shape we didn't write. */
+function parseElementEntry(lines: string[], index: number): ElementContext | null {
+  const head = /^Picked element <([^>]+)>$/.exec(lines[0] ?? '')
+  if (!head || lines.length < 2) return null
+  const pageUrl = lines[lines.length - 1]
+  let selector: string | null = null
+  let text = ''
+  for (const line of lines.slice(1, -1)) {
+    if (line.startsWith('selector: ')) selector = line.slice('selector: '.length)
+    else if (line.startsWith('text: ')) text = line.slice('text: '.length)
+    else return null
+  }
+  return { kind: 'element', id: `el-extract:${index}`, tagName: head[1], selector, text, pageUrl, imageId: null }
+}
+
+/** The prose + recovered chips of a sent prompt — {@link extractPromptContexts}. */
+export interface ExtractedPromptContexts {
+  cleanText: string
+  files: FileContext[]
+  elements: ElementContext[]
+}
+
+/**
+ * The FULL display mirror of {@link serializeForSend} (#230/#231): strip a trailing
+ * `<element_context>` block, then a (now-)trailing `<attached_files>` block, recovering
+ * the chips the prompt was sent with. Each stage passes text through untouched when its
+ * marker is absent or malformed, so hand-typed prompts are never altered. Extracted
+ * element ids are render-local (`el-extract:<n>`) — pairing to a live screenshot exists
+ * only pre-send.
+ */
+export function extractPromptContexts(text: string): ExtractedPromptContexts {
+  let working = text
+  let elements: ElementContext[] = []
+  const trimmed = working.trimEnd()
+  if (trimmed.endsWith(ELEMENT_CONTEXT_CLOSE)) {
+    const open = trimmed.lastIndexOf(ELEMENT_CONTEXT_OPEN)
+    if (open !== -1) {
+      const inner = trimmed.slice(open + ELEMENT_CONTEXT_OPEN.length, trimmed.length - ELEMENT_CONTEXT_CLOSE.length)
+      const lines = inner.split('\n').filter((line) => line.trim().length > 0)
+      // Split into entries on each `Picked element <…>` head line.
+      const entries: string[][] = []
+      for (const line of lines) {
+        if (line.startsWith('Picked element <') || entries.length === 0) entries.push([line])
+        else entries[entries.length - 1].push(line)
+      }
+      const parsed = entries.map((entry, i) => parseElementEntry(entry, i))
+      if (parsed.length > 0 && parsed.every((p) => p !== null)) {
+        elements = parsed
+        working = trimmed.slice(0, open).replace(/\n+$/, '')
+      }
+    }
+  }
+  const { cleanText, files } = extractAttachedFiles(working)
+  return { cleanText, files, elements }
+}
+
 /**
  * Flatten the staged contexts into the outgoing prompt text: a skill chip becomes the
  * leading `/name ` invocation (bare `/name` when there is no prose); file chips become
  * a TRAILING `<attached_files>` block of `@path` mentions the agent expands itself
- * (ADR-0002 — plain text, no client-side expansion). The prose itself is trimmed
- * exactly like the send path trims the draft.
+ * (ADR-0002 — plain text, no client-side expansion); element chips become a final
+ * `<element_context>` block of descriptive prose. The prose itself is trimmed exactly
+ * like the send path trims the draft.
  */
 export function serializeForSend(text: string, contexts: readonly PendingContext[]): string {
   const prose = text.trim()
   const skill = contexts.find((c) => c.kind === 'skill')
   const body = skill ? (prose.length > 0 ? `/${skill.name} ${prose}` : `/${skill.name}`) : prose
+  const parts = [body]
   const files = contexts.filter((c) => c.kind === 'file')
-  if (files.length === 0) return body
-  const block = [ATTACHED_FILES_OPEN, ...files.map((f) => `@${f.path}`), ATTACHED_FILES_CLOSE].join('\n')
-  return body.length > 0 ? `${body}\n\n${block}` : block
+  if (files.length > 0) {
+    parts.push([ATTACHED_FILES_OPEN, ...files.map((f) => `@${f.path}`), ATTACHED_FILES_CLOSE].join('\n'))
+  }
+  const elements = contexts.filter((c) => c.kind === 'element')
+  if (elements.length > 0) {
+    parts.push(
+      [ELEMENT_CONTEXT_OPEN, ...elements.flatMap(formatElementEntry), ELEMENT_CONTEXT_CLOSE].join('\n'),
+    )
+  }
+  return parts.filter((p) => p.length > 0).join('\n\n')
 }

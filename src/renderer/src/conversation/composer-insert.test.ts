@@ -2,11 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   appendText,
   emitComposerInsert,
-  emitComposerInsertImage,
+  emitComposerInsertElement,
   emitComposerInsertText,
   subscribeComposerInsert,
-  subscribeComposerInsertImage,
+  subscribeComposerInsertElement,
   subscribeComposerInsertText,
+  type ComposerInsertElement,
   type ComposerInsertImage,
 } from './composer-insert'
 
@@ -32,6 +33,37 @@ describe('composer-insert channel', () => {
     const off = subscribeComposerInsert('thread-a', listener)
     off()
     emitComposerInsert('thread-a', 'x.ts')
+    expect(listener).not.toHaveBeenCalled()
+  })
+})
+
+describe('composer-insert ELEMENT channel (#231 pick-to-chat)', () => {
+  it('delivers the pick payload — element metadata + optional screenshot — to the Thread\'s subscriber', () => {
+    const listener = vi.fn()
+    const off = subscribeComposerInsertElement('thread-a', listener)
+    const payload: ComposerInsertElement = {
+      element: { tagName: 'button', selector: '#go', text: 'Go', pageUrl: 'http://localhost:3000/' },
+      image: null,
+    }
+    emitComposerInsertElement('thread-a', payload)
+    expect(listener).toHaveBeenCalledWith(payload)
+    off()
+  })
+
+  it('is a no-op without a subscriber and stops after unsubscribe', () => {
+    const listener = vi.fn()
+    expect(() =>
+      emitComposerInsertElement('nobody', {
+        element: { tagName: 'div', selector: null, text: '', pageUrl: 'x' },
+        image: null,
+      }),
+    ).not.toThrow()
+    const off = subscribeComposerInsertElement('thread-a', listener)
+    off()
+    emitComposerInsertElement('thread-a', {
+      element: { tagName: 'div', selector: null, text: '', pageUrl: 'x' },
+      image: null,
+    })
     expect(listener).not.toHaveBeenCalled()
   })
 })
@@ -76,46 +108,44 @@ describe('composer-insert TEXT channel (raw)', () => {
   })
 })
 
-describe('composer-insert IMAGE channel (#224 element picker)', () => {
+describe('composer-insert ELEMENT channel — screenshot payload riding along', () => {
   const img: ComposerInsertImage = {
     data: 'AAAA',
     mimeType: 'image/png',
-    name: 'picked-element.png',
+    name: 'element-button.png',
     previewUrl: 'data:image/png;base64,AAAA',
   }
 
-  it('delivers an image payload to the Thread\'s subscriber, isolated from text/mention', () => {
-    const image = vi.fn()
+  it('delivers the screenshot inside the pick payload, isolated from the text channel', () => {
+    const element = vi.fn()
     const text = vi.fn()
-    const offImage = subscribeComposerInsertImage('thread-a', image)
+    const offElement = subscribeComposerInsertElement('thread-a', element)
     const offText = subscribeComposerInsertText('thread-a', text)
 
-    emitComposerInsertImage('thread-a', img)
-    expect(image).toHaveBeenCalledWith(img)
+    const payload: ComposerInsertElement = {
+      element: { tagName: 'button', selector: '#go', text: 'Go', pageUrl: 'http://localhost:3000/' },
+      image: img,
+    }
+    emitComposerInsertElement('thread-a', payload)
+    expect(element).toHaveBeenCalledWith(payload)
     expect(text).not.toHaveBeenCalled() // separate channel
 
-    offImage()
+    offElement()
     offText()
   })
 
   it('delivers only to the target Thread', () => {
     const a = vi.fn()
     const b = vi.fn()
-    const offA = subscribeComposerInsertImage('thread-a', a)
-    const offB = subscribeComposerInsertImage('thread-b', b)
-    emitComposerInsertImage('thread-a', img)
-    expect(a).toHaveBeenCalledWith(img)
+    const offA = subscribeComposerInsertElement('thread-a', a)
+    const offB = subscribeComposerInsertElement('thread-b', b)
+    emitComposerInsertElement('thread-a', {
+      element: { tagName: 'div', selector: null, text: '', pageUrl: 'x' },
+      image: img,
+    })
+    expect(a).toHaveBeenCalled()
     expect(b).not.toHaveBeenCalled()
     offA()
     offB()
-  })
-
-  it('is a no-op with no subscriber, and stops after unsubscribe', () => {
-    expect(() => emitComposerInsertImage('nobody', img)).not.toThrow()
-    const listener = vi.fn()
-    const off = subscribeComposerInsertImage('thread-a', listener)
-    off()
-    emitComposerInsertImage('thread-a', img)
-    expect(listener).not.toHaveBeenCalled()
   })
 })

@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  buildPickerScript,
-  coercePickedElement,
-  cropRectForElement,
-  formatPickAnnotation,
-} from './browser-picker'
+import { buildPickerScript, coercePickedElement, cropRectForElement } from './browser-picker'
 
 describe('cropRectForElement', () => {
   const viewport = { width: 1000, height: 800 }
@@ -77,34 +72,6 @@ describe('coercePickedElement (untrusted guest JSON)', () => {
     const long = 'x'.repeat(500)
     const p = coercePickedElement({ ...valid, text: long })
     expect(p!.text.length).toBeLessThanOrEqual(200)
-  })
-})
-
-describe('formatPickAnnotation', () => {
-  it('renders a compact, human+agent readable block with tag, selector, text, url', () => {
-    const text = formatPickAnnotation({
-      pageUrl: 'http://localhost:5173/pricing',
-      tagName: 'button',
-      selector: 'button.cta',
-      text: 'Get started',
-      rect: { x: 0, y: 0, width: 1, height: 1 },
-    })
-    expect(text).toContain('<button>')
-    expect(text).toContain('button.cta')
-    expect(text).toContain('Get started')
-    expect(text).toContain('http://localhost:5173/pricing')
-  })
-
-  it('omits the selector and text lines when they are absent', () => {
-    const text = formatPickAnnotation({
-      pageUrl: 'http://localhost:5173/',
-      tagName: 'div',
-      selector: null,
-      text: '',
-      rect: { x: 0, y: 0, width: 1, height: 1 },
-    })
-    expect(text).toContain('<div>')
-    expect(text).not.toContain('selector')
   })
 })
 

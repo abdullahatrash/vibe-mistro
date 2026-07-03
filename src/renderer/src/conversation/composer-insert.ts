@@ -27,11 +27,48 @@ export interface ComposerInsertImage {
   previewUrl: string
 }
 
-type ImageListener = (image: ComposerInsertImage) => void
+/**
+ * A Browser Surface element pick to stage in a Thread's composer (#231): the picker's DOM
+ * metadata plus the optional cropped screenshot, delivered as ONE payload so the composer
+ * can pair the element chip to its staged image atomically (removing the chip removes the
+ * screenshot). The composer mints the chip/image ids.
+ */
+export interface ComposerInsertElement {
+  element: { tagName: string; selector: string | null; text: string; pageUrl: string }
+  image: ComposerInsertImage | null
+}
+
+type ElementListener = (payload: ComposerInsertElement) => void
 
 const listenersByThread = new Map<string, Set<InsertListener>>()
 const textListenersByThread = new Map<string, Set<InsertListener>>()
-const imageListenersByThread = new Map<string, Set<ImageListener>>()
+const elementListenersByThread = new Map<string, Set<ElementListener>>()
+
+/** Subscribe a Thread's composer to element-pick payloads (#231); returns an unsubscribe. */
+export function subscribeComposerInsertElement(
+  threadId: string,
+  listener: ElementListener,
+): () => void {
+  let set = elementListenersByThread.get(threadId)
+  if (!set) {
+    set = new Set()
+    elementListenersByThread.set(threadId, set)
+  }
+  set.add(listener)
+  return () => {
+    const current = elementListenersByThread.get(threadId)
+    if (!current) return
+    current.delete(listener)
+    if (current.size === 0) elementListenersByThread.delete(threadId)
+  }
+}
+
+/** Deliver a Browser Surface pick to the Thread's composer; a no-op if none is mounted. */
+export function emitComposerInsertElement(threadId: string, payload: ComposerInsertElement): void {
+  const set = elementListenersByThread.get(threadId)
+  if (!set) return
+  for (const listener of set) listener(payload)
+}
 
 /** Subscribe a Thread's composer to insert requests; returns an unsubscribe. */
 export function subscribeComposerInsert(threadId: string, listener: InsertListener): () => void {
@@ -92,30 +129,3 @@ export function emitComposerInsertText(threadId: string, text: string): void {
   for (const listener of set) listener(text)
 }
 
-/**
- * Subscribe a Thread's composer to IMAGE insert requests (#224): the Browser Surface's
- * element picker stages a screenshot as a pending image through here — a side-panel
- * sibling reaching the composer, keyed by threadId, exactly like the text/@ channels.
- * Returns an unsubscribe.
- */
-export function subscribeComposerInsertImage(threadId: string, listener: ImageListener): () => void {
-  let set = imageListenersByThread.get(threadId)
-  if (!set) {
-    set = new Set()
-    imageListenersByThread.set(threadId, set)
-  }
-  set.add(listener)
-  return () => {
-    const current = imageListenersByThread.get(threadId)
-    if (!current) return
-    current.delete(listener)
-    if (current.size === 0) imageListenersByThread.delete(threadId)
-  }
-}
-
-/** Request the given Thread's composer stage `image`; a no-op if none is mounted. */
-export function emitComposerInsertImage(threadId: string, image: ComposerInsertImage): void {
-  const set = imageListenersByThread.get(threadId)
-  if (!set) return
-  for (const listener of set) listener(image)
-}

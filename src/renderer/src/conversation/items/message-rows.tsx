@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
-import { Check, Copy, File, RotateCcw, Sparkles, ThumbsDown, ThumbsUp } from 'lucide-react'
+import { Check, Copy, File, MousePointerClick, RotateCcw, Sparkles, ThumbsDown, ThumbsUp } from 'lucide-react'
 import { IconButton } from '../../ui/icon-button'
 import { Response } from '../Response'
 import { matchInvokedCommand } from '../command-autocomplete'
-import { extractAttachedFiles } from '../pending-contexts'
+import { extractPromptContexts } from '../pending-contexts'
 import type { AcpCommand, AssistantItem, UserItem } from '../reducer'
 
 export function UserRow({
@@ -14,11 +14,11 @@ export function UserRow({
   /** The session's slash commands/skills — a leading `/name` match renders a chip. */
   availableCommands?: readonly AcpCommand[]
 }): JSX.Element {
-  // Attached-files extraction (#230): a prompt sent with pending file chips carries a
-  // trailing `<attached_files>` marker block; strip it back into chips at RENDER time so
-  // the bubble shows the clean prose — live and on JSONL replay, which ride the same
-  // text. User-typed inline `@path` mentions pass through untouched.
-  const { cleanText, files } = extractAttachedFiles(item.text)
+  // Context extraction (#230/#231): a prompt sent with pending chips carries trailing
+  // `<attached_files>` / `<element_context>` marker blocks; strip them back into chips at
+  // RENDER time so the bubble shows the clean prose — live and on JSONL replay, which
+  // ride the same text. User-typed inline `@path` mentions pass through untouched.
+  const { cleanText, files, elements } = extractPromptContexts(item.text)
   // Skill/command chip: vibe-acp invokes a skill when the prompt opens with a
   // known `/name`, but gives NO wire-level acknowledgment — so we surface the
   // match ourselves. Matched at RENDER time against the CURRENT list (not stamped
@@ -29,7 +29,7 @@ export function UserRow({
   // instead of spanning the pane. Echoed attachments (#100) re-home into the bubble.
   return (
     <div className="flex flex-col items-end gap-1.5">
-      {(command || files.length > 0) && (
+      {(command || files.length > 0 || elements.length > 0) && (
         <div className="flex max-w-[80%] flex-wrap justify-end gap-1.5">
           {command && (
             <span
@@ -49,6 +49,19 @@ export function UserRow({
             >
               <File className="size-3 shrink-0" aria-hidden />
               <span className="truncate">{file.path}</span>
+            </span>
+          ))}
+          {elements.map((element) => (
+            <span
+              key={element.id}
+              data-element-chip
+              title={[`<${element.tagName}>`, element.selector ?? '', element.text, element.pageUrl]
+                .filter((line) => line.length > 0)
+                .join('\n')}
+              className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] px-1.5 py-0.5 font-mono text-xs leading-none text-accent-text"
+            >
+              <MousePointerClick className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">{element.selector ?? `<${element.tagName}>`}</span>
             </span>
           ))}
         </div>
