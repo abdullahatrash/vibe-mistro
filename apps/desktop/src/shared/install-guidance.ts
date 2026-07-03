@@ -8,6 +8,9 @@
 
 export const INSTALL_DOCS_URL = 'https://docs.mistral.ai/vibe/code/cli/install-setup'
 
+/** The canonical install command (the mistral-vibe README's primary path). */
+export const INSTALL_COMMAND = 'uv tool install mistral-vibe'
+
 /** The one actionable install hint. Backtick spans render as inline code in the UI. */
 export const INSTALL_HINT =
   'Install the Mistral Vibe CLI and ensure `vibe-acp` is on your PATH, then run `vibe` to sign in.'
