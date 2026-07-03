@@ -103,26 +103,28 @@ export function ColdThread({
       <UsageBar state={view} />
 
       <div className="messages">
-        {state === null ? (
-          <p className="hint">Loading conversation…</p>
-        ) : view.items.length === 0 ? (
-          <p className="hint">This thread has no saved conversation yet.</p>
-        ) : (
-          view.items.map((item) => (
-            // Read-only reopened history: no live turn, so reasoning renders collapsed.
-            // The retroactive skill chip (PR #213) matches against the Workspace-level
-            // commands cache (#241) — no agent runs here, so there is no session list.
-            // The data-item-id wrapper is the Search jump anchor (#174 slice 3).
-            <div key={item.id} data-item-id={item.id} className="rounded-lg">
-              <Item
-                item={item}
-                streaming={false}
-                onPermission={noPermission}
-                availableCommands={getWorkspaceCommands(window.localStorage, thread.workspaceId)}
-              />
-            </div>
-          ))
-        )}
+        <div className="conv-measure flex flex-col gap-3">
+          {state === null ? (
+            <p className="hint">Loading conversation…</p>
+          ) : view.items.length === 0 ? (
+            <p className="hint">This thread has no saved conversation yet.</p>
+          ) : (
+            view.items.map((item) => (
+              // Read-only reopened history: no live turn, so reasoning renders collapsed.
+              // The retroactive skill chip (PR #213) matches against the Workspace-level
+              // commands cache (#241) — no agent runs here, so there is no session list.
+              // The data-item-id wrapper is the Search jump anchor (#174 slice 3).
+              <div key={item.id} data-item-id={item.id} className="rounded-lg">
+                <Item
+                  item={item}
+                  streaming={false}
+                  onPermission={noPermission}
+                  availableCommands={getWorkspaceCommands(window.localStorage, thread.workspaceId)}
+                />
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
       <p className="hint">

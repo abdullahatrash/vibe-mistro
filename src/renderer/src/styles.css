@@ -491,6 +491,15 @@ body {
   font-weight: 600;
 }
 
+/* The conversation column's shared reading measure: transcript content and the
+   Composer cap to the same centered width, so collapsing the sidebar/side panel
+   widens the outlet without the transcript sprawling past the composer. */
+.conv-measure {
+  width: 100%;
+  max-width: 830px;
+  margin-inline: auto;
+}
+
 .messages {
   display: flex;
   flex-direction: column;
