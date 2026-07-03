@@ -32,6 +32,10 @@ publish:
   provider: github
   owner: abdullahatrash
   repo: vibe-mistro
+  # electron-builder defaults to DRAFT releases, which `releases/latest` (the
+  # marketing button) and electron-updater both ignore — v0.1.0 needed a manual
+  # un-draft. Publish for real from the start.
+  releaseType: release
 
 mac:
   target:
