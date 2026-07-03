@@ -2,8 +2,12 @@ import { useEffect, useRef, useState, type JSX } from 'react'
 import type { ThreadMeta } from '../../../shared/ipc'
 import { Item } from './items/Item'
 import { UsageBar } from './items/UsageBar'
-import { initialConversationState, type ConversationState } from './reducer'
-import { replayTranscript, transcriptHasImages } from './replay'
+import {
+  initialConversationState,
+  REDUCER_SCHEMA_VERSION,
+  type ConversationState,
+} from './reducer'
+import { foldTranscriptTail, parseSnapshotState, transcriptHasImages } from './replay'
 import { replayCache } from './replay-cache'
 import { useJumpToItem } from './use-jump-to-item'
 import { getWorkspaceCommands } from './workspace-commands'
@@ -50,14 +54,34 @@ export function ColdThread({
       return
     }
     let active = true
-    void window.api.readTranscript(thread.id).then(async (entries) => {
+    const hydrateFromStore = async (): Promise<void> => {
+      // Tiered read (ADR-0019, #297) like Conversation's, minus the durable put
+      // (this is an edge-state fallback view — the live path owns snapshotting).
+      let result = await window.api.readTranscript({
+        threadId: thread.id,
+        reducerVersion: REDUCER_SCHEMA_VERSION,
+      })
+      let base = initialConversationState
+      if (result.snapshot) {
+        const parsed = parseSnapshotState(result.snapshot.state)
+        if (parsed) {
+          base = parsed
+        } else {
+          result = await window.api.readTranscript({
+            threadId: thread.id,
+            reducerVersion: REDUCER_SCHEMA_VERSION,
+            forceFull: true,
+          })
+        }
+      }
       // Resolve persisted image attachments (one batched IPC) ONLY when the
-      // transcript references any — an image-less reopen costs nothing extra.
-      const attachments = transcriptHasImages(entries)
+      // tail references any — an image-less reopen costs nothing extra.
+      const attachments = transcriptHasImages(result.tail)
         ? await window.api.readThreadAttachments(thread.id)
         : undefined
-      if (active) setState(replayTranscript(entries, attachments))
-    })
+      if (active) setState(foldTranscriptTail(base, result.tail, attachments))
+    }
+    void hydrateFromStore()
     return () => {
       active = false
     }

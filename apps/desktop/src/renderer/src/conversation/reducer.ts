@@ -179,6 +179,18 @@ export interface ConversationState {
 export const REBOUND_NOTICE =
   "Agent context was reset — the agent couldn't resume this thread, so it starts fresh and won't recall earlier turns. Your conversation history above is preserved."
 
+/**
+ * The DURABLE FOLD-SNAPSHOT schema version (ADR-0019, #297). A folded
+ * `ConversationState` is persisted as an opaque blob keyed by this constant and
+ * re-hydrated by a LATER app run — so it must be bumped in ANY PR that changes
+ * the shape of `ConversationState` or a `ConversationItem` in a way an old
+ * blob wouldn't satisfy (renamed/removed fields, changed discriminants, new
+ * REQUIRED fields). Additive OPTIONAL fields don't need a bump. The cost of a
+ * bump is one full re-fold per Thread, lazily, on its next open — never data
+ * loss (snapshots are disposable projections of the transcript event log).
+ */
+export const REDUCER_SCHEMA_VERSION = 1
+
 export const initialConversationState: ConversationState = {
   items: [],
   title: null,

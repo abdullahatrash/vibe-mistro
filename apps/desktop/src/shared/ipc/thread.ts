@@ -23,8 +23,12 @@ export const threadChannels = {
   threadTitle: 'thread:title',
   /** List persisted Workspaces + their Threads for the cold launch list (ADR-0005). */
   listMetadata: 'metadata:list',
-  /** Read a Thread's persisted JSONL transcript for a process-free reopen (TB3). */
+  /** Read a Thread's transcript for a process-free reopen (TB3): the stored fold
+   * snapshot (when its reducer version matches) + the entry tail beyond it (ADR-0019). */
   readTranscript: 'transcript:read',
+  /** Renderer -> main (fire-and-forget): store a Thread's folded view as the durable
+   * fold snapshot (ADR-0019, #297). Main stores the blob OPAQUELY — never parses it. */
+  threadSnapshotPut: 'thread:snapshot-put',
   /**
    * Read a Thread's persisted image attachments for replay — ONE batched read per
    * reopen (file name -> data URL), called only when the transcript references
@@ -369,8 +373,47 @@ export type TranscriptEntry =
   // a renderer-side constant, so the entry carries no payload.
   | { t: 'agent-rebound' }
 
-/** The `readTranscript` reply: a Thread's transcript entries (empty when none). */
-export type ReadTranscriptResult = TranscriptEntry[]
+/** The `readTranscript` request (ADR-0019, #297): the renderer states which
+ * reducer schema it can hydrate; `forceFull` bypasses a stored-but-unparseable
+ * snapshot (the renderer's corruption fallback). */
+export interface ReadTranscriptArgs {
+  threadId: string
+  reducerVersion: number
+  forceFull?: boolean
+}
+
+/** A stored fold snapshot: the renderer's own folded ConversationState as an
+ * opaque JSON string, plus the log horizon (`transcript_entries.seq`) it folds up to. */
+export interface TranscriptSnapshot {
+  state: string
+  lastSeq: number
+}
+
+/**
+ * The `readTranscript` reply (ADR-0019, #297): a version-matched fold snapshot
+ * (or null) + the entry `tail` BEYOND it — the renderer hydrates the snapshot
+ * and folds only the tail, making reopen O(tail) instead of O(conversation).
+ * With no usable snapshot, `tail` is the whole log (today's full-fold path).
+ * `lastSeq` is the log horizon this reply covers — echoed back verbatim in a
+ * later {@link ThreadSnapshotPutArgs} so a stored snapshot always corresponds
+ * to an exact read. 0 on an empty log or the legacy JSONL engine (which never
+ * snapshots — its `lastSeq` would be meaningless).
+ */
+export interface ReadTranscriptResult {
+  snapshot: TranscriptSnapshot | null
+  tail: TranscriptEntry[]
+  lastSeq: number
+}
+
+/** The fire-and-forget snapshot put (ADR-0019, #297). `state` is the renderer's
+ * folded view as JSON — opaque to main; `lastSeq` is the horizon echoed from the
+ * read this state folds up to (main refuses regressions past a newer snapshot). */
+export interface ThreadSnapshotPutArgs {
+  threadId: string
+  reducerVersion: number
+  lastSeq: number
+  state: string
+}
 
 /**
  * A persisted image attachment referenced by a `user-prompt` transcript entry.

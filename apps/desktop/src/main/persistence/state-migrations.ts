@@ -120,4 +120,25 @@ export const STATE_MIGRATIONS: readonly Migration[] = [
       }
     },
   },
+  {
+    id: 4,
+    name: 'thread-snapshots',
+    up: (db) => {
+      // The fold-snapshot projection (ADR-0019, #297): the renderer's folded
+      // ConversationState as an OPAQUE blob (main never parses it — ADR-0001),
+      // versioned by the renderer's reducer schema constant and anchored to the
+      // log horizon (`last_seq`) it folds up to. Disposable and rebuildable —
+      // NOT backfilled here: snapshots populate lazily on each Thread's first
+      // open (one last full fold each), because only the renderer can fold.
+      db.exec(`
+        CREATE TABLE thread_snapshots (
+          thread_id       TEXT PRIMARY KEY REFERENCES threads(id) ON DELETE CASCADE,
+          reducer_version INTEGER NOT NULL,
+          last_seq        INTEGER NOT NULL,
+          state           TEXT NOT NULL,
+          updated_at      INTEGER NOT NULL
+        );
+      `)
+    },
+  },
 ]

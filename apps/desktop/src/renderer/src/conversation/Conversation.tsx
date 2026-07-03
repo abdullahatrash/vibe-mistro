@@ -11,13 +11,19 @@ import { FileOpenProvider } from './file-open-context'
 import { isRejectOption } from './permission-option'
 import type { FileLink } from './file-link'
 import {
+  REDUCER_SCHEMA_VERSION,
   conversationReducer,
   initialConversationState,
   type PermissionItem,
   type PermissionOption,
 } from './reducer'
 import { eventBelongsToThread } from './event-routing'
-import { replayTranscript, transcriptHasImages } from './replay'
+import {
+  foldTranscriptTail,
+  parseSnapshotState,
+  shouldPutSnapshot,
+  transcriptHasImages,
+} from './replay'
 import { replayCache } from './replay-cache'
 import { peekPendingJump } from '../search/jump-store'
 import { useJumpToItem } from './use-jump-to-item'
@@ -150,22 +156,67 @@ export function Conversation({
       return
     }
     let active = true
-    void window.api.readTranscript(thread.threadId).then(async (entries) => {
+    const hydrateFromStore = async (): Promise<void> => {
+      // Tiered read (ADR-0019, #297): a reducer-version-matched fold snapshot +
+      // only the tail beyond it. An unparseable blob falls back to one forced
+      // full read — a bad snapshot costs a re-fold, never a broken view.
+      let result = await window.api.readTranscript({
+        threadId: thread.threadId,
+        reducerVersion: REDUCER_SCHEMA_VERSION,
+      })
+      let base = initialConversationState
+      let usedSnapshot = false
+      if (result.snapshot) {
+        const parsed = parseSnapshotState(result.snapshot.state)
+        if (parsed) {
+          base = parsed
+          usedSnapshot = true
+        } else {
+          result = await window.api.readTranscript({
+            threadId: thread.threadId,
+            reducerVersion: REDUCER_SCHEMA_VERSION,
+            forceFull: true,
+          })
+        }
+      }
       // Resolve persisted image attachments (one batched IPC) ONLY when the
-      // transcript references any — an image-less reopen costs nothing extra.
-      const attachments = transcriptHasImages(entries)
+      // TAIL references any — the snapshot-covered part embeds its own (and the
+      // put policy below keeps image-bearing states out of snapshots anyway).
+      const tailHasImages = transcriptHasImages(result.tail)
+      const attachments = tailHasImages
         ? await window.api.readThreadAttachments(thread.threadId)
         : undefined
       if (!active || liveSeen.current) return
       // Hydrated even when the transcript is EMPTY — a legitimately empty
       // Thread may cache as empty; only an unresolved read must not.
       hydratedRef.current = true
-      const replayed = replayTranscript(entries, attachments)
+      const replayed = foldTranscriptTail(base, result.tail, attachments)
       if (replayed.items.length > 0) {
         stateRef.current = replayed // pre-render sync, same poison guard as above
         dispatch({ type: 'hydrate', state: replayed })
       }
-    })
+      // Durable put (fire-and-forget): persist this fold when it improves on
+      // what's stored, so the NEXT open of this Thread — beyond the in-memory
+      // LRU, past a restart — hydrates in O(tail). Policy in shouldPutSnapshot;
+      // the liveSeen guard above means this state reflects exactly the read.
+      if (
+        shouldPutSnapshot({
+          usedSnapshot,
+          tailLength: result.tail.length,
+          hasImages: tailHasImages,
+          itemCount: replayed.items.length,
+          lastSeq: result.lastSeq,
+        })
+      ) {
+        window.api.putThreadSnapshot({
+          threadId: thread.threadId,
+          reducerVersion: REDUCER_SCHEMA_VERSION,
+          lastSeq: result.lastSeq,
+          state: JSON.stringify(replayed),
+        })
+      }
+    }
+    void hydrateFromStore()
     return () => {
       active = false
     }

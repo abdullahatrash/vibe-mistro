@@ -1,6 +1,6 @@
 import { appendFile, readFile, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { TranscriptEntry, TranscriptImageRef } from '../../shared/ipc'
+import type { ReadTranscriptResult, TranscriptEntry, TranscriptImageRef } from '../../shared/ipc'
 
 /**
  * The per-Thread visible-conversation transcript we OWN (ADR-0005). The main
@@ -272,6 +272,19 @@ export class TranscriptStore {
     }
     return parseTranscript(raw)
   }
+
+  /**
+   * The tiered-read seam method (ADR-0019, #297) on the LEGACY engine: JSONL
+   * never snapshots, so this is always the full log as the tail with no
+   * snapshot and a meaningless-by-design `lastSeq: 0` (the renderer's put is
+   * a no-op below, so the horizon is never echoed anywhere).
+   */
+  async readWithSnapshot(threadId: string): Promise<ReadTranscriptResult> {
+    return { snapshot: null, tail: await this.read(threadId), lastSeq: 0 }
+  }
+
+  /** Fold snapshots don't exist on the legacy engine — a documented no-op. */
+  async putSnapshot(): Promise<void> {}
 
   /**
    * Delete a Thread's log (TB6 #35). Best-effort by design, mirroring the guarded
