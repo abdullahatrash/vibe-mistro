@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildChangesView, fileGlyph, glyphClass, reconcileUnchecked } from './status-view'
+import { buildChangesView, buildSyncView, fileGlyph, glyphClass, reconcileUnchecked } from './status-view'
 import type { GitFile, GitStatus } from '../../../shared/ipc'
 
 function file(partial: Partial<GitFile> & { path: string }): GitFile {
@@ -66,6 +66,53 @@ describe('buildChangesView', () => {
     const view = buildChangesView({ ...status, branch: null, files: [] })
     expect(view.branch).toBe('HEAD')
     expect(view.detached).toBe(true)
+  })
+})
+
+describe('buildSyncView', () => {
+  const clean: GitStatus = {
+    isRepo: true,
+    branch: 'feat/x',
+    upstream: 'origin/feat/x',
+    ahead: 0,
+    behind: 0,
+    files: [],
+  }
+
+  it('clean + ahead: offers Push (upstream already set)', () => {
+    expect(buildSyncView({ ...clean, ahead: 2 })).toEqual({ showPush: true, showPull: false, pushSetsUpstream: false })
+  })
+
+  it('clean + behind: offers Pull', () => {
+    expect(buildSyncView({ ...clean, behind: 3 })).toEqual({ showPush: false, showPull: true, pushSetsUpstream: false })
+  })
+
+  it('diverged (ahead AND behind): offers both', () => {
+    const sync = buildSyncView({ ...clean, ahead: 1, behind: 1 })
+    expect(sync.showPush).toBe(true)
+    expect(sync.showPull).toBe(true)
+  })
+
+  it('clean branch with NO upstream: offers a first Push that will set the upstream', () => {
+    expect(buildSyncView({ ...clean, upstream: null })).toEqual({
+      showPush: true,
+      showPull: false,
+      pushSetsUpstream: true,
+    })
+  })
+
+  it('a DIRTY tree offers neither — the commit area owns the panel then (slice 1)', () => {
+    const dirty = { ...clean, ahead: 2, files: [file({ path: 'a.txt' })] }
+    expect(buildSyncView(dirty)).toEqual({ showPush: false, showPull: false, pushSetsUpstream: false })
+  })
+
+  it('detached HEAD and up-to-date trees offer neither', () => {
+    expect(buildSyncView({ ...clean, branch: null, upstream: null })).toEqual({
+      showPush: false,
+      showPull: false,
+      pushSetsUpstream: false,
+    })
+    expect(buildSyncView(clean)).toEqual({ showPush: false, showPull: false, pushSetsUpstream: false })
   })
 })
 

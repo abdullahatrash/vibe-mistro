@@ -3,9 +3,10 @@ import { Boxes, GitCommitHorizontal, Monitor, PanelRightClose, RefreshCw } from 
 import type { GitStatus } from '../../../shared/ipc'
 import { Badge, Button, IconButton, Textarea } from '../ui'
 import { getCommitDraft, setCommitDraft } from './commit-draft-store'
-import { buildChangesView, reconcileUnchecked } from './status-view'
+import { buildChangesView, buildSyncView, reconcileUnchecked } from './status-view'
 import { BranchMenu } from './BranchMenu'
 import { PrSection } from './PrSection'
+import { SyncSection } from './SyncSection'
 import { FileRow } from './FileRow'
 import { DiffWorkerProvider } from './DiffWorkerProvider'
 import { DiffView } from './DiffView'
@@ -222,7 +223,13 @@ export function ChangesPanel({
       />
 
       {view.files.length === 0 ? (
-        <p className="px-3 py-3 text-[13px] text-muted">No changes — working tree clean.</p>
+        <>
+          <p className="px-3 py-3 text-[13px] text-muted">No changes — working tree clean.</p>
+          {/* Clean-tree sync actions (#234): Push when ahead / upstream-less, Pull when
+              behind — driven by the pure `buildSyncView`. This un-dead-ends the PR
+              section's "Push your branch first" gate. */}
+          <SyncSection workspaceDir={workspaceDir} sync={buildSyncView(status)} busy={busy} />
+        </>
       ) : (
         <>
           <ul className="flex flex-col gap-0.5 py-1.5">

@@ -33,6 +33,10 @@ export const gitChannels = {
   gitCheckout: 'git:checkout',
   /** Renderer -> main: CREATE + switch to a new branch on the active Workspace (#87) — see {@link GitBranchOpArgs}. */
   gitCreateBranch: 'git:create-branch',
+  /** Renderer -> main: run a STACKED git action (push/pull, #234) — see {@link GitStackedActionArgs}. */
+  gitRunStackedAction: 'git:run-stacked-action',
+  /** Main -> renderer: streamed progress for a running stacked action (#234) — see {@link GitActionProgressEvent}. */
+  gitActionProgress: 'git:action-progress',
 } as const
 
 /**
@@ -183,6 +187,52 @@ export type GitOpResult = { ok: true } | { ok: false; error: string }
 export interface GitBranchesArgs {
   workspaceDir: string
 }
+
+/**
+ * Which stacked git action to run (#234, PRD #233). Slice 1 ships the two single-phase
+ * actions — `push` / `pull`; the commit-composing chains (`commit_push`,
+ * `commit_push_pr`) arrive with the quick-action slice (#236) on the same engine.
+ */
+export type GitStackedActionKind = 'push' | 'pull'
+
+/** One phase of a stacked action (#234). Single-phase in slice 1; `commit`/`create_pr` join in #236. */
+export type GitActionPhase = 'push' | 'pull'
+
+/**
+ * Args for `gitRunStackedAction` (#234). `actionId` is CALLER-minted (the renderer
+ * generates it before invoking) so the caller can correlate `gitActionProgress` pushes
+ * with its own invocation — the invoke itself resolves with the final
+ * {@link GitStackedActionResult}; the stream is advisory UI.
+ */
+export interface GitStackedActionArgs {
+  workspaceDir: string
+  actionId: string
+  action: GitStackedActionKind
+}
+
+/**
+ * Main -> renderer streamed progress for a running stacked action (#234), tagged by
+ * `workspaceDir` + `actionId` (fans out to every window like `gitStatus`; the renderer
+ * filters). Ordered per action: `actionStarted`, then per phase `phaseStarted` /
+ * optional `output` (a finished command's non-empty stdout/stderr — hook output lives
+ * here) / `phaseFinished`, closed by exactly one of `actionFinished` | `actionFailed`.
+ * A failed phase STOPS the chain — later phases never start (#236 relies on this).
+ */
+export type GitActionProgressEvent = { workspaceDir: string; actionId: string } & (
+  | { kind: 'actionStarted'; action: GitStackedActionKind }
+  | { kind: 'phaseStarted'; phase: GitActionPhase }
+  | { kind: 'output'; phase: GitActionPhase; text: string }
+  | { kind: 'phaseFinished'; phase: GitActionPhase }
+  | { kind: 'actionFinished' }
+  | { kind: 'actionFailed'; phase: GitActionPhase; error: string }
+)
+
+/**
+ * The `gitRunStackedAction` reply (#234). `{ok:false}` names the phase that failed and
+ * carries git's ACTUAL reason (a rejected push, a non-fast-forward pull, a failed hook)
+ * — never a collapsed message (#86 style). Surfaced inline + recoverable.
+ */
+export type GitStackedActionResult = { ok: true } | { ok: false; phase: GitActionPhase; error: string }
 
 /**
  * Args for `gitCheckout` / `gitCreateBranch` (#87). For a CHECKOUT `name` is the branch's
