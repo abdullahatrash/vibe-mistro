@@ -34,6 +34,20 @@ agent blocks until the user picks a Permission option (allow once / reject once 
 pending queue and answered by request id.
 _Avoid_: approval, confirmation, prompt (reserve "prompt" for the user's message to the agent).
 
+**Search**:
+Finding past conversations by what was said — matches Thread titles and the conversation proper
+(the user's prompts and the agent's replies), across all Workspaces. Never matches the agent's
+reasoning or tool input/output (diffs, terminal dumps, file reads), never searches files (the
+Files browser owns file finding, per Workspace), and never touches Vibe-owned context/history.
+A Search result is a **Thread** (evidenced by its best-matching text), never an individual message.
+_Avoid_: file search, global search (it is conversation-history search only).
+
+**Search palette**:
+The modal command window where Search happens — opened from the sidebar's Search item or ⌘K,
+floating above the whole shell (it is cross-Workspace, so it belongs to no Workspace's side panel).
+_Avoid_: Surface (reserved for side-panel tabs), command palette (a possible future superset that
+would add actions; the Search palette is search-only).
+
 ## Side panel
 
 **Surface**:
