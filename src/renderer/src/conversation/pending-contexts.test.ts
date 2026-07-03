@@ -4,6 +4,10 @@ import {
   contextKey,
   extractAttachedFiles,
   extractPromptContexts,
+  isLongPaste,
+  LONG_PASTE_CHARS,
+  LONG_PASTE_LINES,
+  pastedLabel,
   removeContext,
   serializeForSend,
   type PendingContext,
@@ -111,6 +115,7 @@ describe('extractPromptContexts — display mirror for the full payload', () => 
       cleanText: '/teach style this',
       files: [reducerFile],
       reviews: [],
+      pasted: [],
       elements: [
         {
           kind: 'element',
@@ -148,6 +153,7 @@ describe('extractPromptContexts — display mirror for the full payload', () => 
       files: [],
       elements: [],
       reviews: [],
+      pasted: [],
     })
   })
 })
@@ -249,5 +255,73 @@ describe('review-comment chips (#239)', () => {
     const text = 'what does <review_comments> mean here?\nnothing.'
     expect(extractPromptContexts(text).cleanText).toBe(text)
     expect(extractPromptContexts(text).reviews).toEqual([])
+  })
+})
+
+describe('pasted-text chips (long-paste compression)', () => {
+  const blob = Array.from({ length: 30 }, (_, i) => `line ${i}`).join('\n')
+  const paste1: PendingContext = { kind: 'pasted', id: 'paste:0', text: blob }
+  const paste2: PendingContext = { kind: 'pasted', id: 'paste:1', text: 'const x = 1\nconst y = 2\n' }
+
+  describe('isLongPaste', () => {
+    it('compresses past EITHER bound — chars or lines', () => {
+      expect(isLongPaste('x'.repeat(LONG_PASTE_CHARS + 1))).toBe(true)
+      expect(isLongPaste('short\n'.repeat(LONG_PASTE_LINES + 1))).toBe(true)
+    })
+
+    it('leaves an ordinary paste alone', () => {
+      expect(isLongPaste('a normal sentence')).toBe(false)
+      expect(isLongPaste('x'.repeat(LONG_PASTE_CHARS))).toBe(false)
+      expect(isLongPaste(Array(LONG_PASTE_LINES).fill('l').join('\n'))).toBe(false)
+    })
+  })
+
+  it('labels the chip in brackets with a line count (chars for a single line)', () => {
+    expect(pastedLabel({ kind: 'pasted', id: 'p', text: blob })).toBe('[pasted text · 30 lines]')
+    expect(pastedLabel({ kind: 'pasted', id: 'p', text: 'x'.repeat(1200) })).toBe(
+      '[pasted text · 1200 chars]',
+    )
+  })
+
+  it('accumulates pastes (each id its own chip) and removes by key', () => {
+    const staged = addContext(addContext([], paste1), paste2)
+    expect(staged).toEqual([paste1, paste2])
+    expect(removeContext(staged, contextKey(paste1))).toEqual([paste2])
+  })
+
+  it('serializes as a trailing <pasted_text> block carrying the text VERBATIM', () => {
+    expect(serializeForSend('explain this', [paste1])).toBe(
+      `explain this\n\n<pasted_text>\n${blob}\n</pasted_text>`,
+    )
+  })
+
+  it('round-trips through the display mirror, preserving a trailing newline in the paste', () => {
+    const wire = serializeForSend('compare these', [paste1, paste2])
+    const extracted = extractPromptContexts(wire)
+    expect(extracted.cleanText).toBe('compare these')
+    expect(extracted.pasted.map((p) => p.text)).toEqual([blob, 'const x = 1\nconst y = 2\n'])
+  })
+
+  it('coexists with the other chip kinds — pastes serialize LAST and extract first', () => {
+    const wire = serializeForSend('style this', [teach, reducerFile, button, paste1])
+    const extracted = extractPromptContexts(wire)
+    expect(extracted.cleanText).toBe('/teach style this')
+    expect(extracted.files).toEqual([reducerFile])
+    expect(extracted.elements.length).toBe(1)
+    expect(extracted.pasted.map((p) => p.text)).toEqual([blob])
+  })
+
+  it('sends a paste with no prose as a bare block the mirror fully recovers', () => {
+    const wire = serializeForSend('', [paste1])
+    expect(wire).toBe(`<pasted_text>\n${blob}\n</pasted_text>`)
+    const extracted = extractPromptContexts(wire)
+    expect(extracted.cleanText).toBe('')
+    expect(extracted.pasted.map((p) => p.text)).toEqual([blob])
+  })
+
+  it('hand-typed text mentioning <pasted_text> mid-prose passes through untouched', () => {
+    const text = 'what does <pasted_text> mean here?\nnothing.'
+    expect(extractPromptContexts(text).cleanText).toBe(text)
+    expect(extractPromptContexts(text).pasted).toEqual([])
   })
 })

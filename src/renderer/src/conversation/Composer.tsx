@@ -8,7 +8,7 @@ import {
   type JSX,
   type KeyboardEvent,
 } from 'react'
-import { ArrowUp, File, Mic, MessageSquareText, MousePointerClick, Plus, Sparkles, Square, X } from 'lucide-react'
+import { ArrowUp, Clipboard, File, Mic, MessageSquareText, MousePointerClick, Plus, Sparkles, Square, X } from 'lucide-react'
 import type {
   FileEntry,
   ThreadConfigAxis,
@@ -34,6 +34,8 @@ import { ACCEPTED_IMAGE_TYPES, isAcceptedImageType, parseDataUrl } from './image
 import {
   addContext,
   contextKey,
+  isLongPaste,
+  pastedLabel,
   removeContext,
   serializeForSend,
   type PendingContext,
@@ -42,10 +44,11 @@ import { nextQueueId, type FollowUpQueue } from './follow-up-queue'
 import { useComposerAutocomplete, CompletionPopover } from './use-composer-autocomplete'
 import { createCommandSource, createPathSource } from './composer-sources'
 
-/** Process-local counters for unique pending-image / element / review-chip ids (not Math.random/Date). */
+/** Process-local counters for unique pending-image / element / review / paste-chip ids (not Math.random/Date). */
 let imageSeq = 0
 let elementSeq = 0
 let reviewSeq = 0
+let pasteSeq = 0
 
 /** A review chip's compact line-range suffix, e.g. `:10-12` / `:7` — empty when unlocated. */
 function reviewRange(context: { startLine: number | null; endLine: number | null }): string {
@@ -66,8 +69,13 @@ function chipLabel(context: PendingContext): string {
       return context.selector ?? `<${context.tagName}>`
     case 'review':
       return `${context.filePath}${reviewRange(context)}`
+    case 'pasted':
+      return pastedLabel(context)
   }
 }
+
+/** A pasted chip's hover preview — the head of the text, capped so the tooltip stays sane. */
+const PASTE_TITLE_PREVIEW_CHARS = 400
 
 /** A pending-context chip's hover detail (`title`), per kind. */
 function chipTitle(context: PendingContext): string | undefined {
@@ -87,6 +95,10 @@ function chipTitle(context: PendingContext): string | undefined {
         .join('\n')
     case 'review':
       return [`${context.filePath}${reviewRange(context)}`, context.note, '', context.excerpt].join('\n')
+    case 'pasted':
+      return context.text.length > PASTE_TITLE_PREVIEW_CHARS
+        ? `${context.text.slice(0, PASTE_TITLE_PREVIEW_CHARS)}…`
+        : context.text
   }
 }
 
@@ -294,8 +306,11 @@ export function Composer({
     reader.readAsDataURL(file)
   }
 
-  // Clipboard paste (#100): stage any pasted image files. `preventDefault` fires
-  // ONLY when at least one image was handled, so a normal text paste is untouched.
+  // Clipboard paste (#100): stage any pasted image files. A LONG text paste stages as a
+  // pending-context chip instead of splicing into the draft (t3code's inline-token
+  // treatment, via our ADR-0017 chips) — the composer stays compact and the full text
+  // rides a trailing <pasted_text> block at send. `preventDefault` fires ONLY when we
+  // handled the paste ourselves, so a normal short text paste is untouched.
   function onPaste(e: ClipboardEvent<HTMLTextAreaElement>): void {
     let handled = false
     for (const item of e.clipboardData.items) {
@@ -304,6 +319,14 @@ export function Composer({
       if (!file) continue
       addFile(file, file.name || 'pasted-image')
       handled = true
+    }
+    if (!handled) {
+      // CRLF-normalized so line counts and the wire block are stable across sources.
+      const text = e.clipboardData.getData('text/plain').replace(/\r\n/g, '\n')
+      if (isLongPaste(text)) {
+        setPendingContexts((prev) => addContext(prev, { kind: 'pasted', id: `paste:${pasteSeq++}`, text }))
+        handled = true
+      }
     }
     if (handled) e.preventDefault()
   }
@@ -444,6 +467,8 @@ export function Composer({
                     <File className="size-3 shrink-0" aria-hidden />
                   ) : context.kind === 'review' ? (
                     <MessageSquareText className="size-3 shrink-0" aria-hidden />
+                  ) : context.kind === 'pasted' ? (
+                    <Clipboard className="size-3 shrink-0" aria-hidden />
                   ) : (
                     <MousePointerClick className="size-3 shrink-0" aria-hidden />
                   )}
@@ -583,7 +608,11 @@ export function Composer({
             <button
               type="button"
               onClick={() => void send()}
-              disabled={draft.trim().length === 0 && pendingImages.length === 0}
+              // A staged chip alone is sendable — it serializes to wire text (a bare
+              // /skill, @path block, or pasted_text block) even with an empty draft.
+              disabled={
+                draft.trim().length === 0 && pendingImages.length === 0 && pendingContexts.length === 0
+              }
               aria-label={followUps.sending ? 'Queue message' : 'Send message'}
               title={followUps.sending ? 'Queue' : 'Send'}
               className="inline-flex size-9 shrink-0 items-center justify-center rounded-full text-white shadow-[0_1px_2px_var(--accent-shadow)] outline-none transition-opacity [background:var(--accent-grad-action)] hover:opacity-90 disabled:cursor-default disabled:opacity-40 @max-[560px]:size-8"
