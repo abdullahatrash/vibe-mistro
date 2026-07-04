@@ -24,8 +24,10 @@
     "postinstall": "node scripts/fix-node-pty-perms.mjs && node scripts/patch-dev-electron.mjs"
   },
   "dependencies": {
+    "@lexical/react": "^0.46.0",
     "chokidar": "^5.0.0",
     "electron-updater": "^6.6.2",
+    "lexical": "^0.46.0",
     "node-pty": "^1.1.0"
   },
   "devDependencies": {

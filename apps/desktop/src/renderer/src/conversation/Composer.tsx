@@ -19,7 +19,6 @@ import type {
 import { AgentControls } from './AgentControls'
 import { Card } from '../ui/card'
 import { IconButton } from '../ui/icon-button'
-import { Textarea } from '../ui/textarea'
 import type { AcpCommand } from './reducer'
 import { useComposerDraftText } from './composer-draft-store'
 import {
@@ -47,6 +46,8 @@ import {
   createQueuedFollowUp,
   restoreFailedSendSnapshot,
 } from './composer-send-lifecycle'
+import { ComposerPromptEditor } from './ComposerPromptEditor'
+import type { ComposerEditorHandle } from './composer-editor-handle'
 
 /** Process-local counters for unique pending-image / element / review / paste-chip ids (not Math.random/Date). */
 let imageSeq = 0
@@ -184,7 +185,7 @@ export function Composer({
   const [pendingContexts, setPendingContexts] = useState<PendingContext[]>([])
   const liveComposerStateRef = useRef({ prompt: draft, contexts: pendingContexts, images: pendingImages })
   liveComposerStateRef.current = { prompt: draft, contexts: pendingContexts, images: pendingImages }
-  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const inputRef = useRef<ComposerEditorHandle>(null)
   // The hidden file picker behind the 📎 button (#100).
   const fileInputRef = useRef<HTMLInputElement>(null)
   // The shared `files:list` listing (ADR-0013 decision 5), fetched ONCE per composer
@@ -316,7 +317,7 @@ export function Composer({
   // treatment, via our ADR-0017 chips) — the composer stays compact and the full text
   // rides a trailing <pasted_text> block at send. `preventDefault` fires ONLY when we
   // handled the paste ourselves, so a normal short text paste is untouched.
-  function onPaste(e: ClipboardEvent<HTMLTextAreaElement>): void {
+  function onPaste(e: ClipboardEvent<HTMLDivElement>): void {
     let handled = false
     for (const item of e.clipboardData.items) {
       if (item.kind !== 'file' || !isAcceptedImageType(item.type)) continue
@@ -392,7 +393,7 @@ export function Composer({
     }
   }
 
-  function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
+  function onKeyDown(e: KeyboardEvent<HTMLDivElement>): void {
     // The autocomplete intercepts nav/accept/Esc while open; when it doesn't handle the
     // key (closed, or a non-nav key), Enter falls through to send.
     if (autocomplete.onKeyDown(e)) return
@@ -519,22 +520,21 @@ export function Composer({
                 onAccept={autocomplete.accept}
               />
             )}
-            <Textarea
+            <ComposerPromptEditor
               ref={inputRef}
               className="min-h-0 resize-none border-0 bg-transparent p-0 text-[17px] leading-normal focus-visible:border-0"
               placeholder={isEmpty ? 'Ask anything…' : 'Ask for follow-up changes'}
               value={draft}
-              onChange={(e) => {
+              onChange={(value, caret) => {
                 // Write-through: keep React state and the persisted draft (#60) in lockstep.
-                writeDraft(e.target.value)
+                writeDraft(value)
                 // Re-derive the `/` (#95) and `@` (#190) triggers from the new value + caret.
-                autocomplete.onInput(e.target.value, e.target.selectionStart)
+                autocomplete.onInput(value, caret)
               }}
               // Caret moves (arrows/click) with no edit also open/close the triggers.
-              onSelect={(e) => autocomplete.onInput(e.currentTarget.value, e.currentTarget.selectionStart)}
+              onSelect={(value, caret) => autocomplete.onInput(value, caret)}
               onKeyDown={onKeyDown}
               onPaste={onPaste}
-              rows={2}
             />
           </div>
 
