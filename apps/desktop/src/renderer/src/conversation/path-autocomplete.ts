@@ -12,8 +12,7 @@
  *
  * Accepting inserts PLAIN TEXT `@<path>` with NO client-side expansion (ADR-0002): a FILE
  * gets a trailing space (`@path `, token closed, caret past it); a DIRECTORY gets a
- * trailing slash (`@dir/`, no space) so re-deriving the fragment naturally continues into
- * the directory's children. The agent resolves the literal `@path` itself server-side
+ * trailing slash (`@dir/`). The agent resolves the literal `@path` itself server-side
  * (render_path_prompt).
  *
  * Deliberately DOM-free and side-effect-free so it unit-tests as plain data
@@ -127,14 +126,4 @@ export function applyPath(
   const insert = `@${entry.path}${suffix}`
   const nextValue = value.slice(0, start) + insert + value.slice(caret)
   return { value: nextValue, caret: start + insert.length }
-}
-
-/**
- * Remove the `@query` token (from `start` up to `caret`) outright — the chip-accept
- * transform (#230): an accepted FILE becomes a pending-context chip beside the text
- * (a directory still drills down in-text via {@link applyPath}). Text after the caret
- * is kept; the caret rests where the token began.
- */
-export function removePathToken(value: string, start: number, caret: number): PathInsertion {
-  return { value: value.slice(0, start) + value.slice(caret), caret: start }
 }
