@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
+  COMPOSER_DRAFT_IMAGE_MAX_COUNT,
+  COMPOSER_DRAFT_IMAGE_MAX_DATA_URL_CHARS,
   COMPOSER_DRAFT_STORAGE_KEY,
   LEGACY_COMPOSER_DRAFT_STORAGE_KEY,
   clearDraft,
@@ -31,6 +33,20 @@ function fakeStorage(): DraftStorage & { map: Map<string, string> } {
       map.delete(k)
     },
   }
+}
+
+function image(id: string, previewUrl = 'data:image/png;base64,AAAA') {
+  return {
+    id,
+    data: previewUrl.slice('data:image/png;base64,'.length),
+    mimeType: 'image/png',
+    name: `${id}.png`,
+    previewUrl,
+  }
+}
+
+function storedDraft(storage: DraftStorage & { map: Map<string, string> }, threadId: string) {
+  return JSON.parse(storage.map.get(COMPOSER_DRAFT_STORAGE_KEY) ?? '{}').drafts?.[threadId]
 }
 
 describe('getDraft / setDraft round-trip', () => {
@@ -107,6 +123,26 @@ describe('getDraft / setDraft round-trip', () => {
       ],
       nonPersistedImageIds: [],
     })
+  })
+
+  it('persists image drafts as data-url records only and restores sendable data from them', () => {
+    const storage = fakeStorage()
+    setComposerDraft(storage, 't1', {
+      prompt: 'look',
+      inlineTokens: [],
+      contextAttachments: [],
+      images: [image('img:1')],
+      nonPersistedImageIds: [],
+    })
+
+    expect(storedDraft(storage, 't1').images).toEqual([
+      {
+        id: 'img:1',
+        name: 'img:1.png',
+        previewUrl: 'data:image/png;base64,AAAA',
+      },
+    ])
+    expect(getComposerDraft(storage, 't1').images).toEqual([image('img:1')])
   })
 
   it('stores and reads back a draft keyed by threadId', () => {
@@ -269,6 +305,50 @@ describe('composer draft external store', () => {
     })
 
     expect(store.getSnapshot('t1')).toBe(store.getSnapshot('t1'))
+  })
+
+  it('keeps over-count images usable in the current session but omits them from storage', () => {
+    const storage = fakeStorage()
+    const store = createComposerDraftStore(storage)
+    const images = Array.from({ length: COMPOSER_DRAFT_IMAGE_MAX_COUNT + 1 }, (_, i) =>
+      image(`img:${i}`),
+    )
+
+    store.setDraft('t1', {
+      prompt: 'look',
+      inlineTokens: [],
+      contextAttachments: [],
+      images,
+      nonPersistedImageIds: [],
+    })
+
+    expect(store.getSnapshot('t1').images).toHaveLength(COMPOSER_DRAFT_IMAGE_MAX_COUNT + 1)
+    expect(store.getSnapshot('t1').nonPersistedImageIds).toEqual([
+      `img:${COMPOSER_DRAFT_IMAGE_MAX_COUNT}`,
+    ])
+    expect(storedDraft(storage, 't1').images).toHaveLength(COMPOSER_DRAFT_IMAGE_MAX_COUNT)
+  })
+
+  it('keeps oversized images usable in the current session but prunes image-only storage', () => {
+    const storage = fakeStorage()
+    const store = createComposerDraftStore(storage)
+    const prefix = 'data:image/png;base64,'
+    const oversized = image(
+      'img:big',
+      `${prefix}${'A'.repeat(COMPOSER_DRAFT_IMAGE_MAX_DATA_URL_CHARS - prefix.length + 1)}`,
+    )
+
+    store.setDraft('t1', {
+      prompt: '',
+      inlineTokens: [],
+      contextAttachments: [],
+      images: [oversized],
+      nonPersistedImageIds: [],
+    })
+
+    expect(store.getSnapshot('t1').images).toEqual([oversized])
+    expect(store.getSnapshot('t1').nonPersistedImageIds).toEqual(['img:big'])
+    expect(storage.map.has(COMPOSER_DRAFT_STORAGE_KEY)).toBe(false)
   })
 })
 
