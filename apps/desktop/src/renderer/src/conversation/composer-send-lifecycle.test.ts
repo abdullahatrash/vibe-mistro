@@ -55,6 +55,45 @@ describe('createComposerSendSnapshot', () => {
       ],
     })
   })
+
+  it('serializes terminal inline tokens into supporting context and restore metadata', () => {
+    const snapshot = createComposerSendSnapshot({
+      prompt: 'inspect [terminal:term-1:4]',
+      inlineTokens: [
+        {
+          kind: 'terminal',
+          id: 'terminal:4',
+          source: 'term-1',
+          reference: '[terminal:term-1:4]',
+          output: 'error: boom',
+        },
+      ],
+      contexts: [],
+      images: [],
+    })
+
+    expect(snapshot).toMatchObject({
+      hasContent: true,
+      text:
+        'inspect [terminal:term-1:4]\n\n' +
+        '<terminal_context>\n' +
+        'Terminal output for [terminal:term-1:4] from term-1:\n' +
+        'error: boom\n' +
+        '</terminal_context>',
+      restore: {
+        prompt: 'inspect [terminal:term-1:4]',
+        inlineTokens: [
+          {
+            kind: 'terminal',
+            id: 'terminal:4',
+            source: 'term-1',
+            reference: '[terminal:term-1:4]',
+            output: 'error: boom',
+          },
+        ],
+      },
+    })
+  })
 })
 
 describe('restoreFailedSendSnapshot', () => {
