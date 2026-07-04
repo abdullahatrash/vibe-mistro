@@ -48,9 +48,9 @@ describe('getCommandQuery — trigger detection', () => {
     expect(getCommandQuery('/re', 0).active).toBe(false)
   })
 
-  it('activates for a `/`-token at the start of a later line', () => {
+  it('does NOT activate for a `/`-token at the start of a later line', () => {
     // "hello\n/re" — the slash opens the second line (index 6), caret at end.
-    expect(getCommandQuery('hello\n/re', 9)).toEqual({ active: true, query: 're', start: 6 })
+    expect(getCommandQuery('hello\n/re', 9).active).toBe(false)
   })
 
   it('does NOT activate for a non-slash line', () => {

@@ -21,6 +21,7 @@ describe('createComposerSendSnapshot', () => {
 
     const snapshot = createComposerSendSnapshot({
       prompt: 'read this',
+      inlineTokens: [{ kind: 'slashCommand', name: 'teach' }],
       contexts,
       images,
     })
@@ -29,7 +30,9 @@ describe('createComposerSendSnapshot', () => {
     images[0].data = 'mutated'
 
     expect(snapshot.hasContent).toBe(true)
-    expect(snapshot.text).toBe('read this\n\n<attached_files>\n@src/app.ts\n</attached_files>')
+    expect(snapshot.text).toBe(
+      '/teach read this\n\n<attached_files>\n@src/app.ts\n</attached_files>',
+    )
     expect(snapshot.images).toEqual([
       {
         data: 'abc',
@@ -39,6 +42,7 @@ describe('createComposerSendSnapshot', () => {
     ])
     expect(snapshot.restore).toEqual({
       prompt: 'read this',
+      inlineTokens: [{ kind: 'slashCommand', name: 'teach' }],
       contexts: [{ kind: 'file', path: 'src/app.ts' }],
       images: [
         {
@@ -57,6 +61,7 @@ describe('restoreFailedSendSnapshot', () => {
   it('restores the attempted snapshot only when the current composer is still empty', () => {
     const snapshot = createComposerSendSnapshot({
       prompt: 'retry this',
+      inlineTokens: [{ kind: 'slashCommand', name: 'teach' }],
       contexts: [{ kind: 'skill', name: 'teach' }],
       images: [
         {
@@ -72,6 +77,7 @@ describe('restoreFailedSendSnapshot', () => {
     expect(
       restoreFailedSendSnapshot(snapshot, {
         prompt: '',
+        inlineTokens: [],
         contexts: [],
         images: [],
       }),
@@ -80,11 +86,13 @@ describe('restoreFailedSendSnapshot', () => {
     expect(
       restoreFailedSendSnapshot(snapshot, {
         prompt: 'new draft',
+        inlineTokens: [],
         contexts: [],
         images: [],
       }),
     ).toEqual({
       prompt: 'new draft',
+      inlineTokens: [],
       contexts: [],
       images: [],
     })
@@ -95,6 +103,7 @@ describe('createQueuedFollowUp', () => {
   it('stores the send-ready snapshot payload independently from later snapshot mutation', () => {
     const snapshot = createComposerSendSnapshot({
       prompt: 'queue this',
+      inlineTokens: [],
       contexts: [],
       images: [
         {

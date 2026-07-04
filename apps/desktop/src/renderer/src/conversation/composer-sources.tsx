@@ -4,6 +4,7 @@ import type { AcpCommand } from './reducer'
 import { filterCommands, getCommandQuery, removeCommandToken } from './command-autocomplete'
 import { applyPath, filterPaths, getPathQuery, removePathToken } from './path-autocomplete'
 import type { CompletionSource } from './use-composer-autocomplete'
+import { createSlashCommandInlineToken } from './composer-inline-tokens'
 
 /**
  * The two concrete completion sources (quality-review slice 4a): thin configs over the pure
@@ -14,10 +15,9 @@ import type { CompletionSource } from './use-composer-autocomplete'
  */
 
 /**
- * The `/` slash-command source (#95): start-anchored, always closes on accept. Accepting
- * stages the skill as a pending-context CHIP (#229) — the trigger token is removed from
- * the text and the chip rides back through `apply`'s `context`; the invocation is
- * re-prepended to the wire text at send. Rows show `/name` + an optional description.
+ * The `/` slash-command source (#95/#309): prompt-start anchored, always closes on accept.
+ * Accepting stages the command as the single structured Inline token; the typed trigger
+ * text is removed from the prompt body and the command is serialized back at send.
  */
 export function createCommandSource(commands: readonly AcpCommand[]): CompletionSource<AcpCommand> {
   return {
@@ -34,7 +34,7 @@ export function createCommandSource(commands: readonly AcpCommand[]): Completion
     rowKey: (command) => command.name,
     apply: (value, start, caret, command) => ({
       ...removeCommandToken(value, start, caret),
-      context: { kind: 'skill', name: command.name, description: command.description },
+      inlineToken: createSlashCommandInlineToken(command),
     }),
     closeOnAccept: () => true,
     renderRow: (command) => (
