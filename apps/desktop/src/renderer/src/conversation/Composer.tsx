@@ -20,7 +20,7 @@ import { AgentControls } from './AgentControls'
 import { Card } from '../ui/card'
 import { IconButton } from '../ui/icon-button'
 import type { AcpCommand } from './reducer'
-import { useComposerDraftText } from './composer-draft-store'
+import { useComposerDraft } from './composer-draft-store'
 import {
   appendText,
   subscribeComposerInsert,
@@ -48,6 +48,7 @@ import {
 } from './composer-send-lifecycle'
 import { ComposerPromptEditor } from './ComposerPromptEditor'
 import type { ComposerEditorHandle } from './composer-editor-handle'
+import { getSlashCommandInlineToken, setSlashCommandInlineToken } from './composer-inline-tokens'
 
 /** Process-local counters for unique pending-image / element / review / paste-chip ids (not Math.random/Date). */
 let imageSeq = 0
@@ -174,17 +175,29 @@ export function Composer({
   // REMOUNTS on a Thread switch — the lazy initializer seeds THAT Thread's stored
   // draft fresh, with no stale carry-over (no re-seed effect needed). Reading here
   // must not write, so we only persist on change/send below.
-  const [draft, setDraft, clearPersistedDraft] = useComposerDraftText(threadId)
+  const [composerDraft, setComposerDraft, clearPersistedDraft] = useComposerDraft(threadId)
+  const draft = composerDraft.prompt
+  const slashCommandToken = getSlashCommandInlineToken(composerDraft.inlineTokens)
   // Images staged in the composer, awaiting send (#100). Renderer-only, ephemeral:
   // this view remounts on a Thread switch (keyed by threadId), so the strip starts
   // empty per Thread. Kept on a failed send so the user can retry / switch model.
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
   // Pending-context chips (#229): structured attachments staged BESIDE the draft
-  // text — a `/` accept stages a skill chip here instead of splicing text in. Same
-  // lifecycle as staged images: ephemeral, cleared on send/enqueue, kept on failure.
+  // text. Same lifecycle as staged images: ephemeral, cleared on send/enqueue,
+  // kept on failure. Slash commands live in the structured draft's Inline tokens.
   const [pendingContexts, setPendingContexts] = useState<PendingContext[]>([])
-  const liveComposerStateRef = useRef({ prompt: draft, contexts: pendingContexts, images: pendingImages })
-  liveComposerStateRef.current = { prompt: draft, contexts: pendingContexts, images: pendingImages }
+  const liveComposerStateRef = useRef({
+    prompt: draft,
+    inlineTokens: composerDraft.inlineTokens,
+    contexts: pendingContexts,
+    images: pendingImages,
+  })
+  liveComposerStateRef.current = {
+    prompt: draft,
+    inlineTokens: composerDraft.inlineTokens,
+    contexts: pendingContexts,
+    images: pendingImages,
+  }
   const inputRef = useRef<ComposerEditorHandle>(null)
   // The hidden file picker behind the 📎 button (#100).
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -215,7 +228,17 @@ export function Composer({
   // autocomplete hook calls this when it accepts a completion; the textarea's onChange
   // and the composer-insert subscription use it too.
   function writeDraft(next: string | ((current: string) => string)): void {
-    setDraft(next)
+    setComposerDraft((current) => ({
+      ...current,
+      prompt: typeof next === 'function' ? next(current.prompt) : next,
+    }))
+  }
+
+  function setSlashCommandToken(command: AcpCommand | null): void {
+    setComposerDraft((current) => ({
+      ...current,
+      inlineTokens: setSlashCommandInlineToken(current.inlineTokens, command),
+    }))
   }
 
   // The `/` (#95) and `@` (#190) autocompletes, unified into ONE state machine over two
@@ -228,8 +251,15 @@ export function Composer({
     [pathEntries],
   )
   const sources = useMemo(() => [commandSource, pathSource], [commandSource, pathSource])
-  const autocomplete = useComposerAutocomplete(sources, draft, writeDraft, inputRef, (context) =>
-    setPendingContexts((prev) => addContext(prev, context)),
+  const autocomplete = useComposerAutocomplete(
+    sources,
+    draft,
+    writeDraft,
+    inputRef,
+    (context) => setPendingContexts((prev) => addContext(prev, context)),
+    (token) => {
+      if (token.kind === 'slashCommand') setSlashCommandToken(token)
+    },
   )
 
   // Insert from the Files preview's action (#189): the side panel is a sibling of this
@@ -356,6 +386,7 @@ export function Composer({
   async function send(): Promise<void> {
     const snapshot = createComposerSendSnapshot({
       prompt: draft,
+      inlineTokens: composerDraft.inlineTokens,
       contexts: pendingContexts,
       images: pendingImages,
     })
@@ -366,7 +397,7 @@ export function Composer({
       // a concurrent prompt) and clear the composer so the user can compose the next
       // follow-up. It auto-flushes on the next turn end.
       followUps.enqueue(createQueuedFollowUp(nextQueueId(), snapshot))
-      setDraft('')
+      writeDraft('')
       clearPersistedDraft()
       setPendingImages([])
       setPendingContexts([])
@@ -380,14 +411,18 @@ export function Composer({
     // after -31008) — unless the user started composing something new meanwhile.
     setPendingImages([])
     setPendingContexts([])
-    setDraft('')
+    writeDraft('')
     clearPersistedDraft()
     const ok = await submitPrompt(snapshot.text, snapshot.images)
     if (!ok) {
       // Restore the PRE-serialize prose + chips (not the flattened wire text), so a
       // retry re-serializes cleanly instead of double-prepending the invocation.
       const restored = restoreFailedSendSnapshot(snapshot, liveComposerStateRef.current)
-      setDraft(restored.prompt)
+      setComposerDraft((current) => ({
+        ...current,
+        prompt: restored.prompt,
+        inlineTokens: restored.inlineTokens,
+      }))
       setPendingImages(restored.images)
       setPendingContexts(restored.contexts)
     }
@@ -397,6 +432,14 @@ export function Composer({
     // The autocomplete intercepts nav/accept/Esc while open; when it doesn't handle the
     // key (closed, or a non-nav key), Enter falls through to send.
     if (autocomplete.onKeyDown(e)) return
+    if ((e.key === 'Backspace' || e.key === 'Delete') && slashCommandToken) {
+      const caret = inputRef.current?.getSelectionStart() ?? draft.length
+      if (caret === 0) {
+        e.preventDefault()
+        setSlashCommandToken(null)
+        return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       void send()
@@ -443,13 +486,31 @@ export function Composer({
             </div>
           )}
 
-          {pendingContexts.length > 0 && (
-            // Pending-context chip row (#229/#230/#231): the structured attachments staged
-            // beside the draft — mirrors the sent-turn chips with a ✕ remove per chip.
+          {(slashCommandToken || pendingContexts.length > 0) && (
+            // Token/chip row (#229/#230/#231/#309): the structured slash command token and
+            // pending attachments staged beside the draft, with a remove action per chip.
             // Removing an ELEMENT chip also removes its paired screenshot (one payload in,
             // one gesture out); removing the thumbnail alone keeps the chip (screenshot is
             // optional context, the pick isn't).
             <div className="mb-3 flex flex-wrap gap-2">
+              {slashCommandToken && (
+                <span
+                  data-inline-token-chip
+                  title={slashCommandToken.description}
+                  className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] py-0.5 pr-1 pl-1.5 font-mono text-xs leading-none text-accent-text"
+                >
+                  <Sparkles className="size-3 shrink-0" aria-hidden />
+                  <span className="truncate">/{slashCommandToken.name}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove /${slashCommandToken.name}`}
+                    onClick={() => setSlashCommandToken(null)}
+                    className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-sm text-accent-text outline-none hover:bg-[var(--accent-tint-border)]"
+                  >
+                    <X className="size-3" aria-hidden />
+                  </button>
+                </span>
+              )}
               {pendingContexts.map((context) => (
                 <span
                   key={contextKey(context)}
@@ -606,7 +667,10 @@ export function Composer({
               // A staged chip alone is sendable — it serializes to wire text (a bare
               // /skill, @path block, or pasted_text block) even with an empty draft.
               disabled={
-                draft.trim().length === 0 && pendingImages.length === 0 && pendingContexts.length === 0
+                draft.trim().length === 0 &&
+                composerDraft.inlineTokens.length === 0 &&
+                pendingImages.length === 0 &&
+                pendingContexts.length === 0
               }
               aria-label={followUps.sending ? 'Queue message' : 'Send message'}
               title={followUps.sending ? 'Queue' : 'Send'}

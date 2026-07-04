@@ -199,6 +199,20 @@ describe('composer draft external store', () => {
     expect(notifications).toBe(1)
     expect(store.getSnapshot('t1').prompt).toBe('two')
   })
+
+  it('returns a referentially stable structured snapshot between writes', () => {
+    const storage = fakeStorage()
+    const store = createComposerDraftStore(storage)
+    store.setDraft('t1', {
+      prompt: 'one',
+      inlineTokens: [{ kind: 'slashCommand', name: 'teach' }],
+      contextAttachments: [],
+      images: [],
+      nonPersistedImageIds: [],
+    })
+
+    expect(store.getSnapshot('t1')).toBe(store.getSnapshot('t1'))
+  })
 })
 
 describe('lazy migration from text-only v1 drafts', () => {

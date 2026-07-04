@@ -9,9 +9,9 @@
  * keyboard wiring.
  *
  * Trigger rule: the popover is active only for a `/`-prefixed token at the START
- * of the input (input start, or the start of a line after a newline), with the
- * caret inside or after that token. A closed token — one the caret has moved past
- * a whitespace of — does not qualify, matching a shell's "first word" feel.
+ * of the prompt, with the caret inside or after that token. A closed token — one
+ * the caret has moved past a whitespace of — does not qualify, matching a shell's
+ * "first word" feel.
  */
 
 import type { AcpCommand } from './reducer'
@@ -35,26 +35,24 @@ const NO_TRIGGER: CommandTrigger = { active: false, query: '', start: -1 }
 const TOKEN_WHITESPACE = /\s/
 
 /**
- * Detect a `/`-command trigger at the caret. Active only when the `/` sits at the
- * start of the caret's line (input start or just after a `\n`) and the text from
- * the `/` up to the caret contains no whitespace (the token is still open). Returns
- * the query (text after `/`, up to the caret) and the `/`'s index on a hit.
+ * Detect a `/`-command trigger at the caret. Active only when the `/` sits at index
+ * 0 and the text from the `/` up to the caret contains no whitespace (the token is
+ * still open). Returns the query (text after `/`, up to the caret) and the `/`'s
+ * index on a hit.
  *
  * `caret` is clamped defensively — a caller may hand us a DOM `selectionStart` that
  * a controlled re-render has momentarily desynced from `value`.
  */
 export function getCommandQuery(value: string, caret: number): CommandTrigger {
   const pos = Math.max(0, Math.min(caret, value.length))
-  // Start of the caret's line: one past the last newline at/before the caret, or 0.
-  const lineStart = value.lastIndexOf('\n', pos - 1) + 1
-  // The token must open with a `/` at the line start, and the caret must sit AFTER
+  // The token must open with a `/` at prompt start, and the caret must sit AFTER
   // that `/` (a caret resting on the `/` itself isn't inside the token yet).
-  if (value[lineStart] !== '/' || pos <= lineStart) return NO_TRIGGER
-  const query = value.slice(lineStart + 1, pos)
+  if (value[0] !== '/' || pos <= 0) return NO_TRIGGER
+  const query = value.slice(1, pos)
   // A whitespace before the caret means the token closed — the caret is on a later
   // word (e.g. `/init ` with the caret past the space), so the popover must not show.
   if (TOKEN_WHITESPACE.test(query)) return NO_TRIGGER
-  return { active: true, query, start: lineStart }
+  return { active: true, query, start: 0 }
 }
 
 /**

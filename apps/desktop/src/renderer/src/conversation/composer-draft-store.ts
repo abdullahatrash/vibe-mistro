@@ -1,4 +1,5 @@
 import { useCallback, useSyncExternalStore } from 'react'
+import { coerceInlineTokens, type ComposerInlineToken } from './composer-inline-tokens'
 
 /**
  * Per-Thread composer drafts (#60): the unsent text in a Thread's composer, kept
@@ -32,7 +33,7 @@ export interface DraftStorage {
 
 export interface ComposerDraft {
   prompt: string
-  inlineTokens: unknown[]
+  inlineTokens: ComposerInlineToken[]
   contextAttachments: unknown[]
   images: unknown[]
   nonPersistedImageIds: string[]
@@ -48,7 +49,7 @@ interface PersistedComposerDrafts {
 
 const EMPTY_COMPOSER_DRAFT: ComposerDraft = Object.freeze({
   prompt: '',
-  inlineTokens: Object.freeze([]) as unknown as unknown[],
+  inlineTokens: Object.freeze([]) as unknown as ComposerInlineToken[],
   contextAttachments: Object.freeze([]) as unknown as unknown[],
   images: Object.freeze([]) as unknown as unknown[],
   nonPersistedImageIds: Object.freeze([]) as unknown as string[],
@@ -79,7 +80,7 @@ function coerceDraft(value: unknown): ComposerDraft | null {
   const draft = value as Partial<ComposerDraft>
   return {
     prompt: typeof draft.prompt === 'string' ? draft.prompt : '',
-    inlineTokens: Array.isArray(draft.inlineTokens) ? draft.inlineTokens : [],
+    inlineTokens: Array.isArray(draft.inlineTokens) ? coerceInlineTokens(draft.inlineTokens) : [],
     contextAttachments: Array.isArray(draft.contextAttachments) ? draft.contextAttachments : [],
     images: Array.isArray(draft.images) ? draft.images : [],
     nonPersistedImageIds: Array.isArray(draft.nonPersistedImageIds)
@@ -224,8 +225,9 @@ export function setDraft(
   threadId: string,
   text: string,
 ): void {
+  const current = getComposerDraft(storage, threadId)
   setComposerDraft(storage, threadId, {
-    ...emptyComposerDraft(),
+    ...current,
     prompt: text,
   })
 }
@@ -253,8 +255,19 @@ export interface ComposerDraftStore {
 
 export function createComposerDraftStore(storage: DraftStorage | null | undefined): ComposerDraftStore {
   const listeners = new Set<() => void>()
+  const snapshotCache = new Map<string, ComposerDraft>()
   function notify(): void {
     for (const listener of listeners) listener()
+  }
+  function snapshot(threadId: string): ComposerDraft {
+    const cached = snapshotCache.get(threadId)
+    if (cached) return cached
+    const next = getComposerDraft(storage, threadId)
+    snapshotCache.set(threadId, next)
+    return next
+  }
+  function invalidate(threadId: string): void {
+    snapshotCache.delete(threadId)
   }
   return {
     subscribe(listener) {
@@ -264,21 +277,24 @@ export function createComposerDraftStore(storage: DraftStorage | null | undefine
       }
     },
     getSnapshot(threadId) {
-      return getComposerDraft(storage, threadId)
+      return snapshot(threadId)
     },
     getTextSnapshot(threadId) {
-      return getDraft(storage, threadId)
+      return snapshot(threadId).prompt
     },
     setDraft(threadId, draft) {
       setComposerDraft(storage, threadId, draft)
+      invalidate(threadId)
       notify()
     },
     setText(threadId, text) {
       setDraft(storage, threadId, text)
+      invalidate(threadId)
       notify()
     },
     clear(threadId) {
       clearDraft(storage, threadId)
+      invalidate(threadId)
       notify()
     },
   }
@@ -305,4 +321,28 @@ export function useComposerDraftText(
   )
   const clear = useCallback(() => composerDraftStore.clear(threadId), [threadId])
   return [prompt, setText, clear]
+}
+
+export function useComposerDraft(
+  threadId: string,
+): [
+  ComposerDraft,
+  (draft: ComposerDraft | ((current: ComposerDraft) => ComposerDraft)) => void,
+  () => void,
+] {
+  const draft = useSyncExternalStore(composerDraftStore.subscribe, () =>
+    composerDraftStore.getSnapshot(threadId),
+  )
+  const setStructuredDraft = useCallback(
+    (nextDraft: ComposerDraft | ((current: ComposerDraft) => ComposerDraft)) => {
+      const next =
+        typeof nextDraft === 'function'
+          ? nextDraft(composerDraftStore.getSnapshot(threadId))
+          : nextDraft
+      composerDraftStore.setDraft(threadId, next)
+    },
+    [threadId],
+  )
+  const clear = useCallback(() => composerDraftStore.clear(threadId), [threadId])
+  return [draft, setStructuredDraft, clear]
 }
