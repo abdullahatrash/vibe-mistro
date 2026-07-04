@@ -48,8 +48,8 @@ export interface CompletionSource<Row = unknown> {
     caret: number,
     row: Row,
   ): { value: string; caret: number; context?: PendingContext; inlineToken?: ComposerInlineToken }
-  /** Whether accepting this row CLOSES the popover. False re-derives the trigger to drill in
-   *  (a directory reopens on its new fragment). */
+  /** Whether accepting this row CLOSES the popover. False re-derives the trigger for
+   *  source-specific continuation flows. */
   closeOnAccept(row: Row): boolean
   /** Fired once this source's token becomes active — the lazy `@` listing fetch hooks here. */
   onOpen?(): void
@@ -136,8 +136,8 @@ export function useComposerAutocomplete(
   // Accept a completion: splice the row in over its token, keep the composer value (+ its
   // persisted draft, via `setValue`) in lockstep, then restore focus and drop the caret
   // just past the insertion (rAF, so React's controlled value doesn't stomp the DOM caret).
-  // A source that DOESN'T close on accept (a directory) re-derives the trigger so completion
-  // drills into the new fragment; otherwise the token's latch is cleared and the popover shuts.
+  // A source that DOESN'T close on accept re-derives the trigger for source-specific
+  // continuation flows; otherwise the token's latch is cleared and the popover shuts.
   function accept(row: unknown): void {
     if (!trigger) return
     const source = sources[trigger.sourceIndex]
