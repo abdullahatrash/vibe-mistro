@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useCallback,
   useMemo,
   useRef,
   useState,
@@ -20,7 +21,7 @@ import { AgentControls } from './AgentControls'
 import { Card } from '../ui/card'
 import { IconButton } from '../ui/icon-button'
 import type { AcpCommand } from './reducer'
-import { useComposerDraft } from './composer-draft-store'
+import { useComposerDraft, type ComposerDraftImage } from './composer-draft-store'
 import {
   appendText,
   subscribeComposerInsert,
@@ -112,18 +113,6 @@ function chipTitle(context: PendingContext): string | undefined {
 const IMAGE_ACCEPT = ACCEPTED_IMAGE_TYPES.join(',')
 
 /**
- * An image staged in the composer before send (#100). `data` is BARE base64 (sent
- * to the agent); `previewUrl` is the full data URL (thumbnail + echoed user turn).
- */
-interface PendingImage {
-  id: string
-  data: string
-  mimeType: string
-  name: string
-  previewUrl: string
-}
-
-/**
  * The composer: the Thread's input surface (quality-review slice 4 split from Conversation).
  * Owns its own renderer-only state — the per-Thread persisted draft (#60), the staged images
  * awaiting send (#100), and the unified `/`+`@` autocomplete (#95/#190) — plus the queued
@@ -178,14 +167,8 @@ export function Composer({
   const [composerDraft, setComposerDraft, clearPersistedDraft] = useComposerDraft(threadId)
   const draft = composerDraft.prompt
   const slashCommandToken = getSlashCommandInlineToken(composerDraft.inlineTokens)
-  // Images staged in the composer, awaiting send (#100). Renderer-only, ephemeral:
-  // this view remounts on a Thread switch (keyed by threadId), so the strip starts
-  // empty per Thread. Kept on a failed send so the user can retry / switch model.
-  const [pendingImages, setPendingImages] = useState<PendingImage[]>([])
-  // Pending-context chips (#229): structured attachments staged BESIDE the draft
-  // text. Same lifecycle as staged images: ephemeral, cleared on send/enqueue,
-  // kept on failure. Slash commands live in the structured draft's Inline tokens.
-  const [pendingContexts, setPendingContexts] = useState<PendingContext[]>([])
+  const pendingImages = composerDraft.images
+  const pendingContexts = composerDraft.contextAttachments
   const liveComposerStateRef = useRef({
     prompt: draft,
     inlineTokens: composerDraft.inlineTokens,
@@ -234,6 +217,25 @@ export function Composer({
     }))
   }
 
+  const setPendingContexts = useCallback((
+    next: PendingContext[] | ((current: PendingContext[]) => PendingContext[]),
+  ): void => {
+    setComposerDraft((current) => ({
+      ...current,
+      contextAttachments:
+        typeof next === 'function' ? next(current.contextAttachments) : next,
+    }))
+  }, [setComposerDraft])
+
+  const setPendingImages = useCallback((
+    next: ComposerDraftImage[] | ((current: ComposerDraftImage[]) => ComposerDraftImage[]),
+  ): void => {
+    setComposerDraft((current) => ({
+      ...current,
+      images: typeof next === 'function' ? next(current.images) : next,
+    }))
+  }, [setComposerDraft])
+
   function setSlashCommandToken(command: AcpCommand | null): void {
     setComposerDraft((current) => ({
       ...current,
@@ -264,15 +266,14 @@ export function Composer({
 
   // Insert from the Files preview's action (#189): the side panel is a sibling of this
   // view, so it reaches the composer through the module-level `composer-insert` channel
-  // keyed by threadId. The path stages as a pending-context FILE chip (#230) — same as an
-  // `@` autocomplete accept — and is re-serialized to a plain-text `@path` mention at send
-  // (the agent expands it itself, ADR-0002).
+  // keyed by threadId. The path stages as a prompt-level file chip and is serialized
+  // into the legacy trailing <attached_files> block at send.
   useEffect(() => {
     return subscribeComposerInsert(threadId, (relativePath) => {
       setPendingContexts((prev) => addContext(prev, { kind: 'file', path: relativePath }))
       inputRef.current?.focus()
     })
-  }, [threadId])
+  }, [setPendingContexts, threadId])
 
   // Insert RAW text from the Terminal Surface's "Add to chat" (ADR-0014 slice 4): the
   // terminal is a side-panel sibling, so its selection reaches the composer through the
@@ -293,7 +294,7 @@ export function Composer({
       setPendingImages((prev) => [...prev, { id: `img:${imageSeq++}`, ...image }])
       inputRef.current?.focus()
     })
-  }, [threadId])
+  }, [setPendingImages, threadId])
 
   // Stage a Browser Surface element pick (#224/#231): the ONE payload — element metadata
   // + optional pre-split screenshot — arrives through the module-level channel keyed by
@@ -311,7 +312,7 @@ export function Composer({
       )
       inputRef.current?.focus()
     })
-  }, [threadId])
+  }, [setPendingContexts, setPendingImages, threadId])
 
   // Stage a Review Surface diff comment (#239): file + located line range + note +
   // verbatim diff excerpt arrive through the module-level channel keyed by threadId;
@@ -322,7 +323,7 @@ export function Composer({
       setPendingContexts((prev) => addContext(prev, { kind: 'review', id: `rc:${reviewSeq++}`, ...comment }))
       inputRef.current?.focus()
     })
-  }, [threadId])
+  }, [setPendingContexts, threadId])
 
   // Read a pasted/picked image blob to a data URL (DOM: FileReader lives here, not
   // in the pure module), split it into bare base64 + mime via `parseDataUrl`, and
@@ -397,10 +398,7 @@ export function Composer({
       // a concurrent prompt) and clear the composer so the user can compose the next
       // follow-up. It auto-flushes on the next turn end.
       followUps.enqueue(createQueuedFollowUp(nextQueueId(), snapshot))
-      writeDraft('')
       clearPersistedDraft()
-      setPendingImages([])
-      setPendingContexts([])
       return
     }
     // Idle: send now, clearing the composer OPTIMISTICALLY — `submitPrompt` resolves
@@ -409,9 +407,6 @@ export function Composer({
     // response. The echo is already in the transcript; on a FAILED outcome we RESTORE
     // the payload for retry (#100's keep-on-failure, e.g. switching to a vision model
     // after -31008) — unless the user started composing something new meanwhile.
-    setPendingImages([])
-    setPendingContexts([])
-    writeDraft('')
     clearPersistedDraft()
     const ok = await submitPrompt(snapshot.text, snapshot.images)
     if (!ok) {
@@ -422,9 +417,9 @@ export function Composer({
         ...current,
         prompt: restored.prompt,
         inlineTokens: restored.inlineTokens,
+        contextAttachments: restored.contexts,
+        images: restored.images,
       }))
-      setPendingImages(restored.images)
-      setPendingContexts(restored.contexts)
     }
   }
 

@@ -73,6 +73,81 @@ export type PendingContext =
   | ReviewCommentContext
   | PastedTextContext
 
+function stringOrNull(value: unknown): string | null {
+  return typeof value === 'string' ? value : null
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function coercePendingContext(value: unknown): PendingContext | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const context = value as Record<string, unknown>
+  switch (context.kind) {
+    case 'skill': {
+      if (typeof context.name !== 'string' || context.name.length === 0) return null
+      return {
+        kind: 'skill',
+        name: context.name,
+        description: typeof context.description === 'string' ? context.description : undefined,
+      }
+    }
+    case 'file':
+      return typeof context.path === 'string' && context.path.length > 0
+        ? { kind: 'file', path: context.path }
+        : null
+    case 'element': {
+      const id = stringOrNull(context.id)
+      const tagName = stringOrNull(context.tagName)
+      const text = stringOrNull(context.text)
+      const pageUrl = stringOrNull(context.pageUrl)
+      if (!id || !tagName || text === null || !pageUrl) return null
+      return {
+        kind: 'element',
+        id,
+        tagName,
+        selector: stringOrNull(context.selector),
+        text,
+        pageUrl,
+        imageId: stringOrNull(context.imageId),
+      }
+    }
+    case 'review': {
+      const id = stringOrNull(context.id)
+      const filePath = stringOrNull(context.filePath)
+      const note = stringOrNull(context.note)
+      const excerpt = stringOrNull(context.excerpt)
+      if (!id || !filePath || note === null || excerpt === null) return null
+      return {
+        kind: 'review',
+        id,
+        filePath,
+        startLine: numberOrNull(context.startLine),
+        endLine: numberOrNull(context.endLine),
+        note,
+        excerpt,
+      }
+    }
+    case 'pasted': {
+      const id = stringOrNull(context.id)
+      const text = stringOrNull(context.text)
+      return id && text !== null ? { kind: 'pasted', id, text } : null
+    }
+    default:
+      return null
+  }
+}
+
+export function coercePendingContexts(values: unknown[]): PendingContext[] {
+  const contexts: PendingContext[] = []
+  for (const value of values) {
+    const context = coercePendingContext(value)
+    if (context) contexts.push(context)
+  }
+  return contexts
+}
+
 /** A paste is compressed into a chip past EITHER bound — enough characters to balloon
  *  the textarea, or enough lines to push the controls off-screen. */
 export const LONG_PASTE_CHARS = 1000

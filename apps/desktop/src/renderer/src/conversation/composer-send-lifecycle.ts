@@ -4,14 +4,7 @@ import {
   serializeInlineTokensForSend,
   type ComposerInlineToken,
 } from './composer-inline-tokens'
-
-export interface ComposerDraftImage {
-  id: string
-  data: string
-  mimeType: string
-  name: string
-  previewUrl: string
-}
+import type { ComposerDraftImage } from './composer-draft-store'
 
 export interface ComposerSendImage {
   data: string

@@ -52,6 +52,63 @@ describe('getDraft / setDraft round-trip', () => {
     })
   })
 
+  it('round-trips structured context attachments and images', () => {
+    const storage = fakeStorage()
+    setComposerDraft(storage, 't1', {
+      prompt: 'review this',
+      inlineTokens: [],
+      contextAttachments: [
+        {
+          kind: 'review',
+          id: 'rc:1',
+          filePath: 'src/app.ts',
+          startLine: 4,
+          endLine: 6,
+          note: 'check this',
+          excerpt: '+const x = 1',
+        },
+        { kind: 'pasted', id: 'paste:1', text: 'long\npaste' },
+      ],
+      images: [
+        {
+          id: 'img:1',
+          data: 'abc',
+          mimeType: 'image/png',
+          name: 'screen.png',
+          previewUrl: 'data:image/png;base64,abc',
+        },
+      ],
+      nonPersistedImageIds: [],
+    })
+
+    expect(getComposerDraft(storage, 't1')).toEqual({
+      prompt: 'review this',
+      inlineTokens: [],
+      contextAttachments: [
+        {
+          kind: 'review',
+          id: 'rc:1',
+          filePath: 'src/app.ts',
+          startLine: 4,
+          endLine: 6,
+          note: 'check this',
+          excerpt: '+const x = 1',
+        },
+        { kind: 'pasted', id: 'paste:1', text: 'long\npaste' },
+      ],
+      images: [
+        {
+          id: 'img:1',
+          data: 'abc',
+          mimeType: 'image/png',
+          name: 'screen.png',
+          previewUrl: 'data:image/png;base64,abc',
+        },
+      ],
+      nonPersistedImageIds: [],
+    })
+  })
+
   it('stores and reads back a draft keyed by threadId', () => {
     const storage = fakeStorage()
     setDraft(storage, 't1', 'hello world')
@@ -294,6 +351,54 @@ describe('malformed / missing tolerance (never throws into render)', () => {
     const storage = fakeStorage()
     storage.map.set(COMPOSER_DRAFT_STORAGE_KEY, JSON.stringify({ t1: 42 }))
     expect(getDraft(storage, 't1')).toBe('')
+  })
+
+  it('drops malformed context attachments and images from persisted structured drafts', () => {
+    const storage = fakeStorage()
+    storage.map.set(
+      COMPOSER_DRAFT_STORAGE_KEY,
+      JSON.stringify({
+        schemaVersion: 1,
+        drafts: {
+          t1: {
+            prompt: 'keep',
+            inlineTokens: [],
+            contextAttachments: [
+              { kind: 'file', path: 'src/app.ts' },
+              { kind: 'review', id: 'missing-fields' },
+              null,
+            ],
+            images: [
+              {
+                id: 'img:1',
+                data: 'abc',
+                mimeType: 'image/png',
+                name: 'screen.png',
+                previewUrl: 'data:image/png;base64,abc',
+              },
+              { id: 'bad' },
+            ],
+            nonPersistedImageIds: [],
+          },
+        },
+      }),
+    )
+
+    expect(getComposerDraft(storage, 't1')).toEqual({
+      prompt: 'keep',
+      inlineTokens: [],
+      contextAttachments: [{ kind: 'file', path: 'src/app.ts' }],
+      images: [
+        {
+          id: 'img:1',
+          data: 'abc',
+          mimeType: 'image/png',
+          name: 'screen.png',
+          previewUrl: 'data:image/png;base64,abc',
+        },
+      ],
+      nonPersistedImageIds: [],
+    })
   })
 
   it('returns "" for an absent key', () => {

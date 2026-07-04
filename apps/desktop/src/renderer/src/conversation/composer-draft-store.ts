@@ -1,5 +1,6 @@
 import { useCallback, useSyncExternalStore } from 'react'
 import { coerceInlineTokens, type ComposerInlineToken } from './composer-inline-tokens'
+import { coercePendingContexts, type PendingContext } from './pending-contexts'
 
 /**
  * Per-Thread composer drafts (#60): the unsent text in a Thread's composer, kept
@@ -34,9 +35,17 @@ export interface DraftStorage {
 export interface ComposerDraft {
   prompt: string
   inlineTokens: ComposerInlineToken[]
-  contextAttachments: unknown[]
-  images: unknown[]
+  contextAttachments: PendingContext[]
+  images: ComposerDraftImage[]
   nonPersistedImageIds: string[]
+}
+
+export interface ComposerDraftImage {
+  id: string
+  data: string
+  mimeType: string
+  name: string
+  previewUrl: string
 }
 
 /** The persisted shape: a thread id -> structured draft map. */
@@ -50,8 +59,8 @@ interface PersistedComposerDrafts {
 const EMPTY_COMPOSER_DRAFT: ComposerDraft = Object.freeze({
   prompt: '',
   inlineTokens: Object.freeze([]) as unknown as ComposerInlineToken[],
-  contextAttachments: Object.freeze([]) as unknown as unknown[],
-  images: Object.freeze([]) as unknown as unknown[],
+  contextAttachments: Object.freeze([]) as unknown as PendingContext[],
+  images: Object.freeze([]) as unknown as ComposerDraftImage[],
   nonPersistedImageIds: Object.freeze([]) as unknown as string[],
 })
 
@@ -63,6 +72,31 @@ function emptyComposerDraft(): ComposerDraft {
     images: [],
     nonPersistedImageIds: [],
   }
+}
+
+function coerceImages(values: unknown[]): ComposerDraftImage[] {
+  const images: ComposerDraftImage[] = []
+  for (const value of values) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) continue
+    const image = value as Partial<ComposerDraftImage>
+    if (
+      typeof image.id !== 'string' ||
+      typeof image.data !== 'string' ||
+      typeof image.mimeType !== 'string' ||
+      typeof image.name !== 'string' ||
+      typeof image.previewUrl !== 'string'
+    ) {
+      continue
+    }
+    images.push({
+      id: image.id,
+      data: image.data,
+      mimeType: image.mimeType,
+      name: image.name,
+      previewUrl: image.previewUrl,
+    })
+  }
+  return images
 }
 
 function isEmptyDraft(draft: ComposerDraft): boolean {
@@ -81,8 +115,10 @@ function coerceDraft(value: unknown): ComposerDraft | null {
   return {
     prompt: typeof draft.prompt === 'string' ? draft.prompt : '',
     inlineTokens: Array.isArray(draft.inlineTokens) ? coerceInlineTokens(draft.inlineTokens) : [],
-    contextAttachments: Array.isArray(draft.contextAttachments) ? draft.contextAttachments : [],
-    images: Array.isArray(draft.images) ? draft.images : [],
+    contextAttachments: Array.isArray(draft.contextAttachments)
+      ? coercePendingContexts(draft.contextAttachments)
+      : [],
+    images: Array.isArray(draft.images) ? coerceImages(draft.images) : [],
     nonPersistedImageIds: Array.isArray(draft.nonPersistedImageIds)
       ? draft.nonPersistedImageIds.filter((id): id is string => typeof id === 'string')
       : [],
