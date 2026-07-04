@@ -145,6 +145,35 @@ describe('getDraft / setDraft round-trip', () => {
     expect(getComposerDraft(storage, 't1').images).toEqual([image('img:1')])
   })
 
+  it('persists terminal inline tokens with their supporting output', () => {
+    const storage = fakeStorage()
+    setComposerDraft(storage, 't1', {
+      prompt: 'inspect [terminal:term-1:1]',
+      inlineTokens: [
+        {
+          kind: 'terminal',
+          id: 'terminal:1',
+          source: 'term-1',
+          reference: '[terminal:term-1:1]',
+          output: 'error: boom',
+        },
+      ],
+      contextAttachments: [],
+      images: [],
+      nonPersistedImageIds: [],
+    })
+
+    expect(getComposerDraft(storage, 't1').inlineTokens).toEqual([
+      {
+        kind: 'terminal',
+        id: 'terminal:1',
+        source: 'term-1',
+        reference: '[terminal:term-1:1]',
+        output: 'error: boom',
+      },
+    ])
+  })
+
   it('stores and reads back a draft keyed by threadId', () => {
     const storage = fakeStorage()
     setDraft(storage, 't1', 'hello world')

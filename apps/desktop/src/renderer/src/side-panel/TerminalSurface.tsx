@@ -5,7 +5,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { cn } from '../lib/utils'
-import { emitComposerInsertText } from '../conversation/composer-insert'
+import { emitComposerInsertTerminal } from '../conversation/composer-insert'
 
 /**
  * The Terminal Surface (ADR-0014): an xterm.js view over the Workspace's shell
@@ -174,12 +174,12 @@ export function TerminalSurface({
       })
   }
 
-  // Add to chat: append the current selection to the active Thread's composer draft
-  // (raw text, no `@`). A no-op with no selection or no mounted composer.
+  // Add to chat: insert a positional Terminal Inline token into the active Thread's
+  // composer while carrying the full selection as supporting context.
   function onAddToChat(): void {
     const selection = terminalRef.current?.getSelection()
     if (!selection || !activeThreadId) return
-    emitComposerInsertText(activeThreadId, selection)
+    emitComposerInsertTerminal(activeThreadId, { source: terminalId, output: selection })
   }
 
   return (

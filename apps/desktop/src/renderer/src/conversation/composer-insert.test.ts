@@ -4,10 +4,12 @@ import {
   emitComposerInsert,
   emitComposerInsertElement,
   emitComposerInsertImage,
+  emitComposerInsertTerminal,
   emitComposerInsertText,
   subscribeComposerInsert,
   subscribeComposerInsertElement,
   subscribeComposerInsertImage,
+  subscribeComposerInsertTerminal,
   subscribeComposerInsertText,
   type ComposerInsertElement,
   type ComposerInsertImage,
@@ -70,12 +72,12 @@ describe('composer-insert ELEMENT channel (#231 pick-to-chat)', () => {
   })
 })
 
-describe('appendText (Terminal "Add to chat")', () => {
+describe('appendText (raw composer annotations)', () => {
   it('inserts verbatim into an empty draft — no `@`, no forced trailing space', () => {
     expect(appendText('', 'error: boom')).toBe('error: boom')
   })
 
-  it('separates from prior draft with a newline (terminal selections are often multi-line)', () => {
+  it('separates from prior draft with a newline', () => {
     expect(appendText('look at this', 'Traceback\n  line 1')).toBe('look at this\nTraceback\n  line 1')
   })
 
@@ -106,6 +108,33 @@ describe('composer-insert TEXT channel (raw)', () => {
     const off = subscribeComposerInsertText('thread-a', listener)
     off()
     emitComposerInsertText('thread-a', 'x')
+    expect(listener).not.toHaveBeenCalled()
+  })
+})
+
+describe('composer-insert TERMINAL channel', () => {
+  it('delivers structured terminal selection context to the Thread subscriber', () => {
+    const terminal = vi.fn()
+    const text = vi.fn()
+    const offTerminal = subscribeComposerInsertTerminal('thread-a', terminal)
+    const offText = subscribeComposerInsertText('thread-a', text)
+
+    emitComposerInsertTerminal('thread-a', { source: 'term-1', output: 'error: boom' })
+    expect(terminal).toHaveBeenCalledWith({ source: 'term-1', output: 'error: boom' })
+    expect(text).not.toHaveBeenCalled()
+
+    offTerminal()
+    offText()
+  })
+
+  it('is a no-op with no subscriber, and stops after unsubscribe', () => {
+    expect(() =>
+      emitComposerInsertTerminal('nobody', { source: 'term-1', output: 'x' }),
+    ).not.toThrow()
+    const listener = vi.fn()
+    const off = subscribeComposerInsertTerminal('thread-a', listener)
+    off()
+    emitComposerInsertTerminal('thread-a', { source: 'term-1', output: 'x' })
     expect(listener).not.toHaveBeenCalled()
   })
 })

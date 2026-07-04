@@ -28,6 +28,7 @@ import {
   subscribeComposerInsertElement,
   subscribeComposerInsertImage,
   subscribeComposerInsertReviewComment,
+  subscribeComposerInsertTerminal,
   subscribeComposerInsertText,
 } from './composer-insert'
 import { ACCEPTED_IMAGE_TYPES, isAcceptedImageType, parseDataUrl } from './image-attach'
@@ -49,13 +50,20 @@ import {
 } from './composer-send-lifecycle'
 import { ComposerPromptEditor } from './ComposerPromptEditor'
 import type { ComposerEditorHandle } from './composer-editor-handle'
-import { getSlashCommandInlineToken, setSlashCommandInlineToken } from './composer-inline-tokens'
+import {
+  createTerminalInlineToken,
+  getSlashCommandInlineToken,
+  insertTerminalInlineTokenAt,
+  pruneInactiveInlineTokens,
+  setSlashCommandInlineToken,
+} from './composer-inline-tokens'
 
 /** Process-local counters for unique pending-image / element / review / paste-chip ids (not Math.random/Date). */
 let imageSeq = 0
 let elementSeq = 0
 let reviewSeq = 0
 let pasteSeq = 0
+let terminalSeq = 0
 
 /** A review chip's compact line-range suffix, e.g. `:10-12` / `:7` — empty when unlocated. */
 function reviewRange(context: { startLine: number | null; endLine: number | null }): string {
@@ -215,10 +223,14 @@ export function Composer({
   // autocomplete hook calls this when it accepts a completion; the textarea's onChange
   // and the composer-insert subscription use it too.
   function writeDraft(next: string | ((current: string) => string)): void {
-    setComposerDraft((current) => ({
-      ...current,
-      prompt: typeof next === 'function' ? next(current.prompt) : next,
-    }))
+    setComposerDraft((current) => {
+      const prompt = typeof next === 'function' ? next(current.prompt) : next
+      return {
+        ...current,
+        prompt,
+        inlineTokens: pruneInactiveInlineTokens(prompt, current.inlineTokens),
+      }
+    })
   }
 
   const setPendingContexts = useCallback((
@@ -279,9 +291,8 @@ export function Composer({
     })
   }, [setPendingContexts, threadId])
 
-  // Insert RAW text from the Terminal Surface's "Add to chat" (ADR-0014 slice 4): the
-  // terminal is a side-panel sibling, so its selection reaches the composer through the
-  // same module-level channel keyed by threadId — appended verbatim (no `@`).
+  // Insert raw text annotations from sibling surfaces that still use plain text (for
+  // example Browser Surface screenshot notes), keyed by Thread id.
   useEffect(() => {
     return subscribeComposerInsertText(threadId, (text) => {
       writeDraft((current) => appendText(current, text))
@@ -289,6 +300,36 @@ export function Composer({
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId])
+
+  // Insert a Terminal selection as a positional Inline token (#313): the visible
+  // reference lands at the current caret, while the full terminal output stays in
+  // structured draft metadata and serializes as supporting context at send.
+  useEffect(() => {
+    return subscribeComposerInsertTerminal(threadId, ({ source, output }) => {
+      const token = createTerminalInlineToken({
+        id: `terminal:${terminalSeq++}`,
+        source,
+        output,
+      })
+      let nextCaret: number | null = null
+      setComposerDraft((current) => {
+        const caret = inputRef.current?.getSelectionStart() ?? current.prompt.length
+        const inserted = insertTerminalInlineTokenAt(current.prompt, caret, token)
+        nextCaret = inserted.caret
+        return {
+          ...current,
+          prompt: inserted.value,
+          inlineTokens: [...pruneInactiveInlineTokens(inserted.value, current.inlineTokens), token],
+        }
+      })
+      requestAnimationFrame(() => {
+        const input = inputRef.current
+        if (!input || nextCaret === null) return
+        input.focus()
+        input.setSelectionRange(nextCaret, nextCaret)
+      })
+    })
+  }, [setComposerDraft, threadId])
 
   // Stage a STANDALONE image from the Browser Surface (#226 page screenshot): a plain
   // attachment with no structured pick behind it — arrives pre-split through the

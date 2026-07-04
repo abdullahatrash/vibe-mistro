@@ -42,6 +42,13 @@ type ElementListener = (payload: ComposerInsertElement) => void
 
 type ImageListener = (image: ComposerInsertImage) => void
 
+export interface ComposerInsertTerminal {
+  source: string
+  output: string
+}
+
+type TerminalListener = (payload: ComposerInsertTerminal) => void
+
 /**
  * A Review Surface diff comment to stage in a Thread's composer (#239): the file, the
  * located new-file line range (null when the selection couldn't be mapped), the user's
@@ -62,6 +69,7 @@ const textListenersByThread = new Map<string, Set<InsertListener>>()
 const imageListenersByThread = new Map<string, Set<ImageListener>>()
 const elementListenersByThread = new Map<string, Set<ElementListener>>()
 const reviewListenersByThread = new Map<string, Set<ReviewCommentListener>>()
+const terminalListenersByThread = new Map<string, Set<TerminalListener>>()
 
 /** Subscribe a Thread's composer to review-comment payloads (#239); returns an unsubscribe. */
 export function subscribeComposerInsertReviewComment(
@@ -170,11 +178,10 @@ export function emitComposerInsert(threadId: string, relativePath: string): void
 }
 
 /**
- * Append RAW text to `draft` (the Terminal Surface's "Add to chat", ADR-0014 slice 4):
- * no `@` prefix, no chip, no forced trailing space — the selection is inserted verbatim
- * (deliberately NOT a pending-context chip, #230). A newline separates it from prior draft content
- * (terminal selections are often multi-line), unless the draft is empty or already ends
- * in whitespace. Pure — the composer writes state + persisted draft together with the result.
+ * Append RAW text to `draft` for sibling surfaces that still send plain annotations:
+ * no `@` prefix, no chip, no forced trailing space. A newline separates it from prior
+ * draft content unless the draft is empty or already ends in whitespace. Pure — the
+ * composer writes state + persisted draft together with the result.
  */
 export function appendText(draft: string, text: string): string {
   if (draft.length === 0) return text
@@ -205,3 +212,31 @@ export function emitComposerInsertText(threadId: string, text: string): void {
   for (const listener of set) listener(text)
 }
 
+/** Subscribe a Thread's composer to Terminal selection context payloads; returns an unsubscribe. */
+export function subscribeComposerInsertTerminal(
+  threadId: string,
+  listener: TerminalListener,
+): () => void {
+  let set = terminalListenersByThread.get(threadId)
+  if (!set) {
+    set = new Set()
+    terminalListenersByThread.set(threadId, set)
+  }
+  set.add(listener)
+  return () => {
+    const current = terminalListenersByThread.get(threadId)
+    if (!current) return
+    current.delete(listener)
+    if (current.size === 0) terminalListenersByThread.delete(threadId)
+  }
+}
+
+/** Request the given Thread's composer insert a positional Terminal Inline token. */
+export function emitComposerInsertTerminal(
+  threadId: string,
+  payload: ComposerInsertTerminal,
+): void {
+  const set = terminalListenersByThread.get(threadId)
+  if (!set) return
+  for (const listener of set) listener(payload)
+}
