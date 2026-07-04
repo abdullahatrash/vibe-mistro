@@ -10,6 +10,7 @@ import { cn } from '../lib/utils'
 import { moveSelection } from './command-autocomplete'
 import { resolveAutocomplete, type ActiveTrigger, type Detection } from './autocomplete-machine'
 import type { PendingContext } from './pending-contexts'
+import type { ComposerEditorHandle } from './composer-editor-handle'
 
 /**
  * One completion mechanism for the composer (quality-review slice 4a): the `/` command
@@ -71,7 +72,7 @@ export interface ComposerAutocomplete {
   onInput(value: string, caret: number | null): void
   /** Popover-open key interception (nav + accept + Esc). Returns true when it handled the
    *  key, so the composer skips Enter's send / Tab's focus move. */
-  onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): boolean
+  onKeyDown(e: KeyboardEvent<HTMLElement>): boolean
   /** Accept a row (mouse click on a popover row). */
   accept(row: unknown): void
 }
@@ -87,7 +88,7 @@ export function useComposerAutocomplete(
   sources: readonly CompletionSource[],
   value: string,
   setValue: (next: string) => void,
-  inputRef: RefObject<HTMLTextAreaElement | null>,
+  inputRef: RefObject<ComposerEditorHandle | null>,
   /** Receives the pending-context chip when an accepted row stages one (#229). */
   onContext?: (context: PendingContext) => void,
 ): ComposerAutocomplete {
@@ -139,7 +140,7 @@ export function useComposerAutocomplete(
     if (!trigger) return
     const source = sources[trigger.sourceIndex]
     const node = inputRef.current
-    const caret = node ? node.selectionStart : value.length
+    const caret = node?.getSelectionStart() ?? value.length
     const next = source.apply(value, trigger.start, caret, row)
     setValue(next.value)
     if (next.context) onContext?.(next.context)
@@ -158,7 +159,7 @@ export function useComposerAutocomplete(
     })
   }
 
-  function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
+  function onKeyDown(e: KeyboardEvent<HTMLElement>): boolean {
     // Popover-open key interception: navigation + accept must win over Enter's send and
     // Tab's focus move. When closed, this returns false and every key falls through.
     if (!open || !trigger) return false
