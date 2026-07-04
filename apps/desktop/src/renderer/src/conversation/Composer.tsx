@@ -21,7 +21,7 @@ import { Card } from '../ui/card'
 import { IconButton } from '../ui/icon-button'
 import { Textarea } from '../ui/textarea'
 import type { AcpCommand } from './reducer'
-import { getDraft, setDraft as persistDraft, clearDraft } from './composer-draft-store'
+import { useComposerDraftText } from './composer-draft-store'
 import {
   appendText,
   subscribeComposerInsert,
@@ -169,7 +169,7 @@ export function Composer({
   // REMOUNTS on a Thread switch — the lazy initializer seeds THAT Thread's stored
   // draft fresh, with no stale carry-over (no re-seed effect needed). Reading here
   // must not write, so we only persist on change/send below.
-  const [draft, setDraft] = useState(() => getDraft(window.localStorage, threadId))
+  const [draft, setDraft, clearPersistedDraft] = useComposerDraftText(threadId)
   // Images staged in the composer, awaiting send (#100). Renderer-only, ephemeral:
   // this view remounts on a Thread switch (keyed by threadId), so the strip starts
   // empty per Thread. Kept on a failed send so the user can retry / switch model.
@@ -207,9 +207,8 @@ export function Composer({
   // Write-through: keep React state and the persisted draft (#60) in lockstep. The
   // autocomplete hook calls this when it accepts a completion; the textarea's onChange
   // and the composer-insert subscription use it too.
-  function writeDraft(next: string): void {
+  function writeDraft(next: string | ((current: string) => string)): void {
     setDraft(next)
-    persistDraft(window.localStorage, threadId, next)
   }
 
   // The `/` (#95) and `@` (#190) autocompletes, unified into ONE state machine over two
@@ -243,7 +242,7 @@ export function Composer({
   // same module-level channel keyed by threadId — appended verbatim (no `@`).
   useEffect(() => {
     return subscribeComposerInsertText(threadId, (text) => {
-      writeDraft(appendText(getDraft(window.localStorage, threadId), text))
+      writeDraft((current) => appendText(current, text))
       inputRef.current?.focus()
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -365,7 +364,7 @@ export function Composer({
       // follow-up. It auto-flushes on the next turn end.
       followUps.enqueue({ id: nextQueueId(), text, images })
       setDraft('')
-      clearDraft(window.localStorage, threadId)
+      clearPersistedDraft()
       setPendingImages([])
       setPendingContexts([])
       return
@@ -382,14 +381,13 @@ export function Composer({
     setPendingImages([])
     setPendingContexts([])
     setDraft('')
-    clearDraft(window.localStorage, threadId)
+    clearPersistedDraft()
     const ok = await submitPrompt(text, images)
     if (!ok) {
       // Restore the PRE-serialize prose + chips (not the flattened wire text), so a
       // retry re-serializes cleanly instead of double-prepending the invocation.
       setDraft((current) => {
         if (current.length > 0) return current
-        persistDraft(window.localStorage, threadId, proseBefore)
         return proseBefore
       })
       setPendingImages((current) => (current.length > 0 ? current : staged))

@@ -1,8 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import {
   COMPOSER_DRAFT_STORAGE_KEY,
+  LEGACY_COMPOSER_DRAFT_STORAGE_KEY,
   clearDraft,
+  createComposerDraftStore,
+  getComposerDraft,
   getDraft,
+  setComposerDraft,
   setDraft,
   type DraftStorage,
 } from './composer-draft-store'
@@ -30,10 +34,45 @@ function fakeStorage(): DraftStorage & { map: Map<string, string> } {
 }
 
 describe('getDraft / setDraft round-trip', () => {
+  it('stores and reads back a structured draft keyed by threadId', () => {
+    const storage = fakeStorage()
+    setComposerDraft(storage, 't1', {
+      prompt: 'hello world',
+      inlineTokens: [],
+      contextAttachments: [],
+      images: [],
+      nonPersistedImageIds: [],
+    })
+    expect(getComposerDraft(storage, 't1')).toEqual({
+      prompt: 'hello world',
+      inlineTokens: [],
+      contextAttachments: [],
+      images: [],
+      nonPersistedImageIds: [],
+    })
+  })
+
   it('stores and reads back a draft keyed by threadId', () => {
     const storage = fakeStorage()
     setDraft(storage, 't1', 'hello world')
     expect(getDraft(storage, 't1')).toBe('hello world')
+  })
+
+  it('persists structured drafts behind explicit schema metadata', () => {
+    const storage = fakeStorage()
+    setDraft(storage, 't1', 'hello world')
+    expect(JSON.parse(storage.map.get(COMPOSER_DRAFT_STORAGE_KEY) ?? '{}')).toEqual({
+      schemaVersion: 1,
+      drafts: {
+        t1: {
+          prompt: 'hello world',
+          inlineTokens: [],
+          contextAttachments: [],
+          images: [],
+          nonPersistedImageIds: [],
+        },
+      },
+    })
   })
 
   it('returns "" for an absent thread', () => {
@@ -136,6 +175,85 @@ describe('per-Thread isolation', () => {
     setDraft(storage, 't1', '')
     expect(getDraft(storage, 't1')).toBe('')
     expect(getDraft(storage, 't2')).toBe('two')
+  })
+})
+
+describe('composer draft external store', () => {
+  it('notifies subscribers when a Thread draft changes and exposes per-Thread snapshots', () => {
+    const storage = fakeStorage()
+    const store = createComposerDraftStore(storage)
+    let notifications = 0
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1
+    })
+
+    store.setText('t1', 'one')
+
+    expect(notifications).toBe(1)
+    expect(store.getSnapshot('t1').prompt).toBe('one')
+    expect(store.getTextSnapshot('t1')).toBe('one')
+    expect(store.getSnapshot('t2').prompt).toBe('')
+
+    unsubscribe()
+    store.setText('t1', 'two')
+    expect(notifications).toBe(1)
+    expect(store.getSnapshot('t1').prompt).toBe('two')
+  })
+})
+
+describe('lazy migration from text-only v1 drafts', () => {
+  it('migrates text-only drafts to structured drafts and removes the legacy key after writing v2', () => {
+    const storage = fakeStorage()
+    storage.map.set(
+      LEGACY_COMPOSER_DRAFT_STORAGE_KEY,
+      JSON.stringify({
+        t1: 'keep this\n\n<attached_files>\n@src/main.ts\n</attached_files>',
+        t2: 'second',
+      }),
+    )
+
+    expect(getComposerDraft(storage, 't1')).toEqual({
+      prompt: 'keep this\n\n<attached_files>\n@src/main.ts\n</attached_files>',
+      inlineTokens: [],
+      contextAttachments: [],
+      images: [],
+      nonPersistedImageIds: [],
+    })
+    expect(getDraft(storage, 't2')).toBe('second')
+    expect(storage.map.has(LEGACY_COMPOSER_DRAFT_STORAGE_KEY)).toBe(false)
+    expect(JSON.parse(storage.map.get(COMPOSER_DRAFT_STORAGE_KEY) ?? '{}')).toEqual({
+      schemaVersion: 1,
+      drafts: {
+        t1: {
+          prompt: 'keep this\n\n<attached_files>\n@src/main.ts\n</attached_files>',
+          inlineTokens: [],
+          contextAttachments: [],
+          images: [],
+          nonPersistedImageIds: [],
+        },
+        t2: {
+          prompt: 'second',
+          inlineTokens: [],
+          contextAttachments: [],
+          images: [],
+          nonPersistedImageIds: [],
+        },
+      },
+    })
+  })
+
+  it('keeps the legacy key and still returns the text draft when the v2 migration write fails', () => {
+    const storage = fakeStorage()
+    storage.map.set(LEGACY_COMPOSER_DRAFT_STORAGE_KEY, JSON.stringify({ t1: 'local only' }))
+    const originalSetItem = storage.setItem
+    storage.setItem = (key, value) => {
+      if (key === COMPOSER_DRAFT_STORAGE_KEY) throw new Error('quota exceeded')
+      originalSetItem(key, value)
+    }
+
+    expect(getDraft(storage, 't1')).toBe('local only')
+    expect(storage.map.has(LEGACY_COMPOSER_DRAFT_STORAGE_KEY)).toBe(true)
+    expect(storage.map.has(COMPOSER_DRAFT_STORAGE_KEY)).toBe(false)
   })
 })
 
