@@ -169,6 +169,10 @@ export function Composer({
   const slashCommandToken = getSlashCommandInlineToken(composerDraft.inlineTokens)
   const pendingImages = composerDraft.images
   const pendingContexts = composerDraft.contextAttachments
+  const nonPersistedImageIds = useMemo(
+    () => new Set(composerDraft.nonPersistedImageIds),
+    [composerDraft.nonPersistedImageIds],
+  )
   const liveComposerStateRef = useRef({
     prompt: draft,
     inlineTokens: composerDraft.inlineTokens,
@@ -546,23 +550,35 @@ export function Composer({
           {pendingImages.length > 0 && (
             // Staged-image strip (#100): thumbnails with a ✕ remove, above the input.
             <div className="mb-3 flex flex-wrap gap-2">
-              {pendingImages.map((img) => (
-                <div key={img.id} className="relative size-14">
-                  <img
-                    className="size-14 rounded-lg border border-border object-cover"
-                    src={img.previewUrl}
-                    alt={img.name}
-                  />
-                  <button
-                    type="button"
-                    aria-label={`Remove ${img.name}`}
-                    onClick={() => removeImage(img.id)}
-                    className="absolute -top-1.5 -right-1.5 inline-flex size-[18px] items-center justify-center rounded-full border border-border bg-panel text-text outline-none"
+              {pendingImages.map((img) => {
+                const sessionOnly = nonPersistedImageIds.has(img.id)
+                return (
+                  <div
+                    key={img.id}
+                    className="relative size-14"
+                    title={sessionOnly ? `${img.name} is current-session-only` : img.name}
                   >
-                    <X className="size-3" aria-hidden />
-                  </button>
-                </div>
-              ))}
+                    <img
+                      className="size-14 rounded-lg border border-border object-cover"
+                      src={img.previewUrl}
+                      alt={img.name}
+                    />
+                    {sessionOnly && (
+                      <span className="absolute bottom-0 left-0 max-w-full rounded-tr-md rounded-bl-lg bg-panel/95 px-1 py-0.5 text-[9px] leading-none text-muted">
+                        Session only
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      aria-label={`Remove ${img.name}`}
+                      onClick={() => removeImage(img.id)}
+                      className="absolute -top-1.5 -right-1.5 inline-flex size-[18px] items-center justify-center rounded-full border border-border bg-panel text-text outline-none"
+                    >
+                      <X className="size-3" aria-hidden />
+                    </button>
+                  </div>
+                )
+              })}
             </div>
           )}
 

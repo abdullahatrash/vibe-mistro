@@ -1,5 +1,6 @@
 import { useCallback, useSyncExternalStore } from 'react'
 import { coerceInlineTokens, type ComposerInlineToken } from './composer-inline-tokens'
+import { parseDataUrl } from './image-attach'
 import { coercePendingContexts, type PendingContext } from './pending-contexts'
 
 /**
@@ -24,6 +25,8 @@ export const LEGACY_COMPOSER_DRAFT_STORAGE_KEY = 'vibe-mistro:composer-drafts:v1
 /** The versioned localStorage key holding the structured `threadId -> draft` map. */
 export const COMPOSER_DRAFT_STORAGE_KEY = 'vibe-mistro:composer-drafts:v2'
 export const COMPOSER_DRAFT_SCHEMA_VERSION = 1
+export const COMPOSER_DRAFT_IMAGE_MAX_COUNT = 4
+export const COMPOSER_DRAFT_IMAGE_MAX_DATA_URL_CHARS = 1_500_000
 
 /** The slice of the Web Storage API we depend on — `window.localStorage` satisfies it. */
 export interface DraftStorage {
@@ -44,6 +47,12 @@ export interface ComposerDraftImage {
   id: string
   data: string
   mimeType: string
+  name: string
+  previewUrl: string
+}
+
+interface PersistedComposerDraftImage {
+  id: string
   name: string
   previewUrl: string
 }
@@ -79,24 +88,63 @@ function coerceImages(values: unknown[]): ComposerDraftImage[] {
   for (const value of values) {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) continue
     const image = value as Partial<ComposerDraftImage>
+    const parsedPreview = typeof image.previewUrl === 'string' ? parseDataUrl(image.previewUrl) : null
     if (
       typeof image.id !== 'string' ||
-      typeof image.data !== 'string' ||
-      typeof image.mimeType !== 'string' ||
       typeof image.name !== 'string' ||
-      typeof image.previewUrl !== 'string'
+      typeof image.previewUrl !== 'string' ||
+      !parsedPreview
     ) {
       continue
     }
     images.push({
       id: image.id,
-      data: image.data,
-      mimeType: image.mimeType,
+      data: parsedPreview.data,
+      mimeType: parsedPreview.mimeType,
       name: image.name,
       previewUrl: image.previewUrl,
     })
   }
   return images
+}
+
+function persistedImageRecords(draft: ComposerDraft): {
+  images: PersistedComposerDraftImage[]
+  nonPersistedImageIds: string[]
+} {
+  const images: PersistedComposerDraftImage[] = []
+  const nonPersistedImageIds: string[] = []
+  for (const image of draft.images) {
+    if (
+      images.length < COMPOSER_DRAFT_IMAGE_MAX_COUNT &&
+      image.previewUrl.length <= COMPOSER_DRAFT_IMAGE_MAX_DATA_URL_CHARS
+    ) {
+      images.push({
+        id: image.id,
+        name: image.name,
+        previewUrl: image.previewUrl,
+      })
+    } else {
+      nonPersistedImageIds.push(image.id)
+    }
+  }
+  return { images, nonPersistedImageIds }
+}
+
+function sessionDraft(draft: ComposerDraft): ComposerDraft {
+  return {
+    ...draft,
+    nonPersistedImageIds: persistedImageRecords(draft).nonPersistedImageIds,
+  }
+}
+
+function persistedDraft(draft: ComposerDraft): ComposerDraft {
+  const persisted = persistedImageRecords(draft)
+  return {
+    ...draft,
+    images: persisted.images as unknown as ComposerDraftImage[],
+    nonPersistedImageIds: [],
+  }
 }
 
 function isEmptyDraft(draft: ComposerDraft): boolean {
@@ -194,9 +242,18 @@ function writeMap(storage: DraftStorage, map: DraftMap): boolean {
       storage.removeItem(COMPOSER_DRAFT_STORAGE_KEY)
       return true
     }
+    const persistedMap: DraftMap = {}
+    for (const [threadId, draft] of Object.entries(map)) {
+      const next = persistedDraft(draft)
+      if (!isEmptyDraft(next)) persistedMap[threadId] = next
+    }
+    if (Object.keys(persistedMap).length === 0) {
+      storage.removeItem(COMPOSER_DRAFT_STORAGE_KEY)
+      return true
+    }
     storage.setItem(
       COMPOSER_DRAFT_STORAGE_KEY,
-      JSON.stringify({ schemaVersion: COMPOSER_DRAFT_SCHEMA_VERSION, drafts: map }),
+      JSON.stringify({ schemaVersion: COMPOSER_DRAFT_SCHEMA_VERSION, drafts: persistedMap }),
     )
     return true
   } catch {
@@ -319,13 +376,18 @@ export function createComposerDraftStore(storage: DraftStorage | null | undefine
       return snapshot(threadId).prompt
     },
     setDraft(threadId, draft) {
-      setComposerDraft(storage, threadId, draft)
-      invalidate(threadId)
+      const next = sessionDraft(draft)
+      setComposerDraft(storage, threadId, next)
+      snapshotCache.set(threadId, next)
       notify()
     },
     setText(threadId, text) {
-      setDraft(storage, threadId, text)
-      invalidate(threadId)
+      const next = {
+        ...snapshot(threadId),
+        prompt: text,
+      }
+      setComposerDraft(storage, threadId, next)
+      snapshotCache.set(threadId, sessionDraft(next))
       notify()
     },
     clear(threadId) {
