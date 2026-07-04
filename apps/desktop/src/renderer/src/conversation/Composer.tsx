@@ -37,12 +37,16 @@ import {
   isLongPaste,
   pastedLabel,
   removeContext,
-  serializeForSend,
   type PendingContext,
 } from './pending-contexts'
 import { nextQueueId, type FollowUpQueue } from './follow-up-queue'
 import { useComposerAutocomplete, CompletionPopover } from './use-composer-autocomplete'
 import { createCommandSource, createPathSource } from './composer-sources'
+import {
+  createComposerSendSnapshot,
+  createQueuedFollowUp,
+  restoreFailedSendSnapshot,
+} from './composer-send-lifecycle'
 
 /** Process-local counters for unique pending-image / element / review / paste-chip ids (not Math.random/Date). */
 let imageSeq = 0
@@ -178,6 +182,8 @@ export function Composer({
   // text — a `/` accept stages a skill chip here instead of splicing text in. Same
   // lifecycle as staged images: ephemeral, cleared on send/enqueue, kept on failure.
   const [pendingContexts, setPendingContexts] = useState<PendingContext[]>([])
+  const liveComposerStateRef = useRef({ prompt: draft, contexts: pendingContexts, images: pendingImages })
+  liveComposerStateRef.current = { prompt: draft, contexts: pendingContexts, images: pendingImages }
   const inputRef = useRef<HTMLTextAreaElement>(null)
   // The hidden file picker behind the 📎 button (#100).
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -347,22 +353,18 @@ export function Composer({
   // end); when idle we send immediately, preserving #100's clear-on-success /
   // keep-on-failure UX (a failed send keeps the text + staged images for retry).
   async function send(): Promise<void> {
-    // Flatten the staged context chips into the wire text (#229): the skill chip
-    // becomes the leading `/name` invocation the agent parses server-side.
-    const text = serializeForSend(draft, pendingContexts)
-    const hasContent = text.length > 0 || pendingImages.length > 0
-    if (!hasContent) return
-    const images = pendingImages.map(({ data, mimeType, previewUrl }) => ({
-      data,
-      mimeType,
-      previewUrl,
-    }))
+    const snapshot = createComposerSendSnapshot({
+      prompt: draft,
+      contexts: pendingContexts,
+      images: pendingImages,
+    })
+    if (!snapshot.hasContent) return
     if (followUps.sending) {
       // A turn is live for this Thread (authoritative module latch, not the per-
       // instance reducer snapshot which lags on a remount) — queue it (protocol forbids
       // a concurrent prompt) and clear the composer so the user can compose the next
       // follow-up. It auto-flushes on the next turn end.
-      followUps.enqueue({ id: nextQueueId(), text, images })
+      followUps.enqueue(createQueuedFollowUp(nextQueueId(), snapshot))
       setDraft('')
       clearPersistedDraft()
       setPendingImages([])
@@ -375,23 +377,18 @@ export function Composer({
     // response. The echo is already in the transcript; on a FAILED outcome we RESTORE
     // the payload for retry (#100's keep-on-failure, e.g. switching to a vision model
     // after -31008) — unless the user started composing something new meanwhile.
-    const staged = pendingImages
-    const stagedContexts = pendingContexts
-    const proseBefore = draft
     setPendingImages([])
     setPendingContexts([])
     setDraft('')
     clearPersistedDraft()
-    const ok = await submitPrompt(text, images)
+    const ok = await submitPrompt(snapshot.text, snapshot.images)
     if (!ok) {
       // Restore the PRE-serialize prose + chips (not the flattened wire text), so a
       // retry re-serializes cleanly instead of double-prepending the invocation.
-      setDraft((current) => {
-        if (current.length > 0) return current
-        return proseBefore
-      })
-      setPendingImages((current) => (current.length > 0 ? current : staged))
-      setPendingContexts((current) => (current.length > 0 ? current : stagedContexts))
+      const restored = restoreFailedSendSnapshot(snapshot, liveComposerStateRef.current)
+      setDraft(restored.prompt)
+      setPendingImages(restored.images)
+      setPendingContexts(restored.contexts)
     }
   }
 
