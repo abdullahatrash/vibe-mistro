@@ -12,8 +12,10 @@ import { ReviewSelectionLayer } from './ReviewSelectionLayer'
  * collapsible section with a sticky header in ONE scroll, replacing #85's one-file
  * viewer (the changes list is now a table of contents: a row click scrolls to its
  * section). One `gitFullDiff` invoke returns per-file entries, each individually
- * capped + hashed; each section renders its own memoized `PatchDiff` (parsing in the
- * shared worker pool), so an unchanged file skips re-parse/re-render across refetches.
+ * capped + hashed; each section renders its own memoized `FileDiff`, parsed with a
+ * content-hash `cacheKey` (#389) into the shared worker pool's parsed-AST LRU, so an
+ * unchanged file skips re-parse/re-render across refetches — even across a collapse/
+ * expand remount, since the cache lives in the pool, not the component.
  *
  * Refetches when the changed set / churn changes (`diffRequestKey` over the LIVE
  * files — the streamed status is the trigger, like the old per-file churn dep) and on

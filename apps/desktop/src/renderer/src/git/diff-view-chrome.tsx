@@ -1,10 +1,12 @@
 import { memo, useMemo, type JSX } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { PatchDiff } from '@pierre/diffs/react'
+import { FileDiff } from '@pierre/diffs/react'
+import { parsePatchFiles } from '@pierre/diffs'
 import type { GitFileDiff } from '../../../shared/ipc'
 import { cn } from '../lib/utils'
 import { glyphClass } from './status-view'
 import type { DiffPrefs } from './diff-prefs-store'
+import { buildPatchCacheKey } from './patch-cache-key'
 
 /**
  * Shared chrome for the multi-file diff views (#235/#237): the per-file collapsible
@@ -16,7 +18,7 @@ import type { DiffPrefs } from './diff-prefs-store'
 
 /**
  * One file's collapsible section: a STICKY header (optional status glyph + path +
- * churn + truncated marker + collapse chevron) over its own `PatchDiff`. Memoized so a
+ * churn + truncated marker + collapse chevron) over its own `FileDiff`. Memoized so a
  * sibling section's collapse or an unchanged refetch (same `diffHash`) doesn't
  * re-render this one — per-file memoization is the whole point of per-file hashes.
  * `meta` (glyph + churn) comes from the streamed status in the working-tree view and
@@ -48,9 +50,20 @@ export const DiffFileSection = memo(
     const diffHash = entry?.diffHash ?? ''
     const rendered = useMemo(() => {
       if (!patch) return null
+      // Parse with a content-hash `cacheKey` (#389) instead of `PatchDiff` (which parses
+      // internally with no cache key at all — verified in node_modules/@pierre/diffs) so an
+      // unchanged file re-render hits the worker pool's parsed-AST cache instead of
+      // re-parsing. `FileDiff` renders an already-parsed `FileDiffMetadata` and is otherwise
+      // identical to `PatchDiff` (same underlying render hook).
+      const [parsedPatch] = parsePatchFiles(patch, buildPatchCacheKey(patch))
+      const fileDiff = parsedPatch?.files[0]
+      if (!fileDiff) {
+        console.error('DiffFileSection: patch did not parse to exactly one file diff', patch)
+        return null
+      }
       return (
-        <PatchDiff
-          patch={patch}
+        <FileDiff
+          fileDiff={fileDiff}
           options={{
             diffStyle,
             theme: 'pierre-light',
