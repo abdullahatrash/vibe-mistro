@@ -1,7 +1,7 @@
 {
   "name": "vibe-mistro",
   "private": true,
-  "version": "0.1.5",
+  "version": "0.1.6",
   "type": "module",
   "description": "Desktop orchestrator for Mistral Vibe coding agents, driven over the Agent Client Protocol (ACP).",
   "main": "./out/main/index.js",
