@@ -1,8 +1,7 @@
-import { useState, type JSX, type KeyboardEvent } from 'react'
+import { useState, type JSX } from 'react'
 import {
   Brain,
   Check,
-  ChevronDown,
   Circle,
   Eye,
   Globe,
@@ -20,6 +19,8 @@ import { cn } from '../../lib/utils'
 import { describeToolStatus, type ToolStatusGlyph as ToolStatusGlyphName } from '../tool-status'
 import { toolKindIcon, type ToolIconName } from '../tool-icon'
 import { toolDetail, toolPreview } from '../tool-detail'
+import { useRowStreaming } from '../timeline-context'
+import { FoldChevron, FoldableRow } from './foldable-row'
 import type { ToolItem } from '../reducer'
 
 /** The leading tone-icon lookup: resolved tool-kind name (pure `tool-icon.ts`) → lucide. */
@@ -56,13 +57,15 @@ function ToolStatusGlyph({ glyph }: { glyph: ToolStatusGlyphName }): JSX.Element
   return <Icon className={className} aria-hidden />
 }
 
-export function ToolRow({ item, streaming }: { item: ToolItem; streaming: boolean }): JSX.Element {
-  // Tool call (#115, adapted from t3code SimpleWorkEntryRow): a compact row —
-  // leading tone-icon (kind→lucide) + heading + dimmed preview + a rotating chevron
-  // (only when there's detail) + a right status glyph (ACP status→display). Clicking
-  // an expandable row toggles an indented `<pre>` of the raw input/output/content.
-  // `streaming` (#164) settles a non-terminal status to a static dot once this
-  // Thread's turn ends, so a missing terminal `tool_call_update` doesn't spin forever.
+export function ToolRow({ item, index }: { item: ToolItem; index: number }): JSX.Element {
+  // Tool call (#115, adapted from the reference implementation's work-entry row): a
+  // compact row — leading tone-icon (kind→lucide) + heading + dimmed preview + a
+  // rotating chevron (only when there's detail) + a right status glyph (ACP status→
+  // display). Container-zone fold (#386): the whole row toggles an indented `<pre>`
+  // of the raw input/output/content. `streaming` (#164, activity context) settles a
+  // non-terminal status to a static dot once this Thread's turn ends, so a missing
+  // terminal `tool_call_update` doesn't spin forever.
+  const streaming = useRowStreaming(index)
   const [expanded, setExpanded] = useState(false)
   const status = describeToolStatus(item.status, streaming)
   const heading = item.title ?? item.toolKind ?? 'tool'
@@ -70,60 +73,40 @@ export function ToolRow({ item, streaming }: { item: ToolItem; streaming: boolea
   const detail = toolDetail(item)
   const canExpand = detail !== null
 
-  const toggleProps = canExpand
-    ? {
-        role: 'button' as const,
-        tabIndex: 0,
-        'aria-expanded': expanded,
-        onClick: () => setExpanded((v) => !v),
-        onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault()
-            setExpanded((v) => !v)
-          }
-        },
-      }
-    : {}
-
   return (
-    <div
+    <FoldableRow
+      open={expanded}
+      onOpenChange={setExpanded}
+      canExpand={canExpand}
+      toggleZone="container"
       className={cn(
         'flex flex-col rounded-md px-0.5 py-0.5 transition-colors',
         canExpand && 'cursor-pointer hover:bg-accent/10 focus-visible:bg-accent/10 outline-none',
       )}
-      {...toggleProps}
-    >
-      <div className="flex items-center gap-1.5 select-none">
-        <span className="flex size-5 shrink-0 items-center justify-center text-muted">
-          <ToolKindIcon name={toolKindIcon(item.toolKind)} className="size-3.5 shrink-0 stroke-[1.8]" />
-        </span>
-        <p className="flex min-w-0 flex-1 items-baseline gap-1.5 text-[13px] leading-5">
-          <span className="min-w-0 shrink truncate font-medium text-text-body">{heading}</span>
-          {preview && <span className="min-w-0 flex-1 truncate text-muted">{preview}</span>}
-        </p>
-        <span className="flex shrink-0 items-center gap-px">
-          {canExpand && (
-            <ChevronDown
-              className={cn(
-                'size-3.5 shrink-0 text-muted opacity-70 transition-transform duration-200',
-                expanded && 'rotate-180',
-              )}
-              aria-hidden
-            />
-          )}
-          <span className="flex size-4 shrink-0 items-center justify-center">
-            <ToolStatusGlyph glyph={status.glyph} />
+      headerClassName="flex items-center gap-1.5 select-none"
+      header={
+        <>
+          <span className="flex size-5 shrink-0 items-center justify-center text-muted">
+            <ToolKindIcon name={toolKindIcon(item.toolKind)} className="size-3.5 shrink-0 stroke-[1.8]" />
           </span>
-        </span>
-      </div>
-      {expanded && detail && (
-        <pre
-          className="mt-1 ms-7 max-h-64 cursor-default overflow-auto border-s border-border ps-3 font-mono text-[11px] whitespace-pre-wrap"
-          onClick={(e) => e.stopPropagation()}
-        >
+          <p className="flex min-w-0 flex-1 items-baseline gap-1.5 text-[13px] leading-5">
+            <span className="min-w-0 shrink truncate font-medium text-text-body">{heading}</span>
+            {preview && <span className="min-w-0 flex-1 truncate text-muted">{preview}</span>}
+          </p>
+          <span className="flex shrink-0 items-center gap-px">
+            {canExpand && <FoldChevron open={expanded} className="text-muted" />}
+            <span className="flex size-4 shrink-0 items-center justify-center">
+              <ToolStatusGlyph glyph={status.glyph} />
+            </span>
+          </span>
+        </>
+      }
+    >
+      {detail && (
+        <pre className="mt-1 ms-7 max-h-64 cursor-default overflow-auto border-s border-border ps-3 font-mono text-[11px] whitespace-pre-wrap">
           {detail}
         </pre>
       )}
-    </div>
+    </FoldableRow>
   )
 }

@@ -1,7 +1,12 @@
-import { useEffect, useRef, useState, type JSX } from 'react'
+import { useEffect, useMemo, useRef, useState, type JSX } from 'react'
 import type { ThreadMeta } from '../../../shared/ipc'
 import { Item } from './items/Item'
 import { UsageBar } from './items/UsageBar'
+import {
+  SETTLED_ACTIVITY,
+  TimelineActivityProvider,
+  TimelineHandlersProvider,
+} from './timeline-context'
 import {
   initialConversationState,
   REDUCER_SCHEMA_VERSION,
@@ -105,6 +110,18 @@ export function ColdThread({
   const view = state ?? initialConversationState
   const title = view.title ?? thread.title ?? 'Untitled thread'
 
+  // Read-only timeline contexts (#386): permissions already replayed as resolved
+  // (the no-op relay never fires), and the retroactive skill chip (PR #213) matches
+  // against the Workspace-level commands cache (#241) — computed ONCE per Workspace
+  // now, not per item. `SETTLED_ACTIVITY` keeps every row's `streaming` false.
+  const timelineHandlers = useMemo(
+    () => ({
+      onPermission: noPermission,
+      availableCommands: getWorkspaceCommands(window.localStorage, thread.workspaceId),
+    }),
+    [thread.workspaceId],
+  )
+
   // Land a Search jump (#174 slice 3) once the replay has rendered its items.
   const convRef = useRef<HTMLDivElement | null>(null)
   useJumpToItem(thread.id, state !== null && view.items.length > 0, convRef)
@@ -133,20 +150,14 @@ export function ColdThread({
           ) : view.items.length === 0 ? (
             <p className="hint">This thread has no saved conversation yet.</p>
           ) : (
-            view.items.map((item) => (
-              // Read-only reopened history: no live turn, so reasoning renders collapsed.
-              // The retroactive skill chip (PR #213) matches against the Workspace-level
-              // commands cache (#241) — no agent runs here, so there is no session list.
-              // The data-item-id wrapper is the Search jump anchor (#174 slice 3).
-              <div key={item.id} data-item-id={item.id} className="rounded-lg">
-                <Item
-                  item={item}
-                  streaming={false}
-                  onPermission={noPermission}
-                  availableCommands={getWorkspaceCommands(window.localStorage, thread.workspaceId)}
-                />
-              </div>
-            ))
+            // Read-only reopened history: no live turn, so reasoning renders collapsed.
+            <TimelineHandlersProvider value={timelineHandlers}>
+              <TimelineActivityProvider value={SETTLED_ACTIVITY}>
+                {view.items.map((item, idx) => (
+                  <Item key={item.id} item={item} index={idx} />
+                ))}
+              </TimelineActivityProvider>
+            </TimelineHandlersProvider>
           )}
         </div>
       </div>

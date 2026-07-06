@@ -5,16 +5,13 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../../
 import { Response } from '../Response'
 import { matchInvokedCommand } from '../command-autocomplete'
 import { extractPromptContexts, pastedLabel } from '../pending-contexts'
-import type { AcpCommand, AssistantItem, UserItem } from '../reducer'
+import { useRowStreaming, useTimelineHandlers } from '../timeline-context'
+import type { AssistantItem, UserItem } from '../reducer'
 
-export function UserRow({
-  item,
-  availableCommands,
-}: {
-  item: UserItem
-  /** The session's slash commands/skills — a leading `/name` match renders a chip. */
-  availableCommands?: readonly AcpCommand[]
-}): JSX.Element {
+export function UserRow({ item }: { item: UserItem }): JSX.Element {
+  // The session's slash commands/skills (context, #386) — a leading `/name` match
+  // renders a chip.
+  const { availableCommands } = useTimelineHandlers()
   // Context extraction (#230/#231): a prompt sent with pending chips carries trailing
   // `<attached_files>` / `<element_context>` marker blocks; strip them back into chips at
   // RENDER time so the bubble shows the clean prose — live and on JSONL replay, which
@@ -25,7 +22,7 @@ export function UserRow({
   // match ourselves. Matched at RENDER time against the CURRENT list (not stamped
   // at send): a draft's first prompt is sent before `available_commands_update`
   // streams, so the chip appears retroactively once the list arrives.
-  const command = matchInvokedCommand(cleanText, availableCommands ?? [])
+  const command = matchInvokedCommand(cleanText, availableCommands)
   // User turn (#114): a right-aligned rounded bubble, capped so long prose wraps
   // instead of spanning the pane. Echoed attachments (#100) re-home into the bubble.
   return (
@@ -122,7 +119,9 @@ export function UserRow({
   )
 }
 
-export function AssistantRow({ item, streaming }: { item: AssistantItem; streaming: boolean }): JSX.Element {
+export function AssistantRow({ item, index }: { item: AssistantItem; index: number }): JSX.Element {
+  // True while this row belongs to the streaming turn (activity context, #386).
+  const streaming = useRowStreaming(index)
   // Assistant turn (#114): no bubble — full-width flowing markdown via the Response
   // primitive (streamdown), so tables/code/lists get room to breathe. Wrapped in a
   // `group` so the #116 actions bar reveals on hover of the whole answer.

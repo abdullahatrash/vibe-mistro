@@ -2,15 +2,12 @@ import type { JSX } from 'react'
 import { Check, ShieldAlert } from 'lucide-react'
 import { Button } from '../../ui/button'
 import { isRejectOption } from '../permission-option'
-import type { PermissionItem, PermissionOption } from '../reducer'
+import { useTimelineHandlers } from '../timeline-context'
+import type { PermissionItem } from '../reducer'
 
-export function PermissionRow({
-  item,
-  onPermission,
-}: {
-  item: PermissionItem
-  onPermission: (item: PermissionItem, option: PermissionOption) => void
-}): JSX.Element {
+export function PermissionRow({ item }: { item: PermissionItem }): JSX.Element {
+  // The answer relay (context, #386) — identity-stable so the memoized Item bails.
+  const { onPermission } = useTimelineHandlers()
   // Permission request (#116): kept INLINE in the transcript (not the composer footer),
   // restyled onto the Button primitive over the accent-tint card. Allow actions read as
   // the primary (default) Button; reject actions (kind starts with `reject`) as an

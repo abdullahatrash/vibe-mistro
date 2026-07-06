@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore, type JSX } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type JSX,
+} from 'react'
 import type {
   AuthMethod,
   ThreadAgentControls,
@@ -26,6 +35,7 @@ import {
 } from './replay'
 import { replayCache } from './replay-cache'
 import { peekPendingJump } from '../search/jump-store'
+import { TimelineActivityProvider, TimelineHandlersProvider } from './timeline-context'
 import { useJumpToItem } from './use-jump-to-item'
 import { MessageScroller } from './MessageScroller'
 import { Item } from './items/Item'
@@ -379,21 +389,26 @@ export function Conversation({
   )
 
   // Answer a pending permission request: relay the choice to the agent and mark
-  // the prompt resolved so it stops asking (state stays renderer-owned).
-  function respondPermission(item: PermissionItem, option: PermissionOption): void {
-    void window.api.respondPermission({
-      agentId: thread.agentId,
-      threadId: thread.threadId,
-      requestId: item.requestId,
-      optionId: option.optionId,
-    })
-    dispatch({
-      type: 'resolve-permission',
-      requestId: item.requestId,
-      optionId: option.optionId,
-      name: option.name,
-    })
-  }
+  // the prompt resolved so it stops asking (state stays renderer-owned). Memoized
+  // (#386): it rides the stable timeline-handlers context, whose identity must not
+  // churn per render or the memoized rows would re-render on every streamed chunk.
+  const respondPermission = useCallback(
+    (item: PermissionItem, option: PermissionOption): void => {
+      void window.api.respondPermission({
+        agentId: thread.agentId,
+        threadId: thread.threadId,
+        requestId: item.requestId,
+        optionId: option.optionId,
+      })
+      dispatch({
+        type: 'resolve-permission',
+        requestId: item.requestId,
+        optionId: option.optionId,
+        name: option.name,
+      })
+    },
+    [thread.agentId, thread.threadId],
+  )
 
   // Escape hatch for a wedged turn: deny any still-pending permission (so the
   // agent stops blocking and `session/prompt` can resolve) before re-enabling
@@ -434,6 +449,18 @@ export function Conversation({
   const availableCommands =
     state.availableCommands.length > 0 ? state.availableCommands : workspaceCommands
 
+  // The two timeline contexts (#386), memoized so the rows' render-bailout holds:
+  // handlers churn only when the command list changes; activity flips on turn
+  // open/close and per sent prompt — NEVER per streamed chunk.
+  const timelineHandlers = useMemo(
+    () => ({ onPermission: respondPermission, availableCommands }),
+    [respondPermission, availableCommands],
+  )
+  const timelineActivity = useMemo(
+    () => ({ isProcessing: state.isProcessing, lastUserIndex }),
+    [state.isProcessing, lastUserIndex],
+  )
+
   // Land a Search jump (#174 slice 3) once this Thread's items are rendered.
   // `hadJumpPending` is captured at MOUNT so the scroller's initial bottom-pin
   // is suppressed for exactly the open that carries a jump (state can't flip later).
@@ -458,20 +485,16 @@ export function Conversation({
           {state.items.length === 0 && (
             <p className="hint">Send a prompt to start the conversation.</p>
           )}
-          {state.items.map((item, idx) => (
-            // The data-item-id wrapper is the Search jump anchor (#174 slice 3).
-            <div key={item.id} data-item-id={item.id} className="rounded-lg">
-              <Item
-                item={item}
-                // Auto-open reasoning only for the CURRENT turn — items AFTER the last
-                // user message — so sending a new prompt doesn't re-expand the whole
-                // history's "Thinking" blocks (they belong to prior, settled turns).
-                streaming={state.isProcessing && idx > lastUserIndex}
-                onPermission={respondPermission}
-                availableCommands={availableCommands}
-              />
-            </div>
-          ))}
+          {/* Rows subscribe to the two timeline contexts (#386); each memoized Item
+              gets only its item + index, so a streamed chunk re-renders exactly the
+              row it touches — settled rows bail on the reducer's preserved identity. */}
+          <TimelineHandlersProvider value={timelineHandlers}>
+            <TimelineActivityProvider value={timelineActivity}>
+              {state.items.map((item, idx) => (
+                <Item key={item.id} item={item} index={idx} />
+              ))}
+            </TimelineActivityProvider>
+          </TimelineHandlersProvider>
           {/* Working indicator (#115): while a turn is in flight, a self-ticking
               "Working for …" row after the transcript. It mounts when the turn opens
               and unmounts on completion, so its timer starts at turn start. */}
