@@ -36,8 +36,8 @@ export function MenuContent({
 }): JSX.Element {
   return (
     <BaseMenu.Portal>
-      <BaseMenu.Positioner sideOffset={sideOffset} align={align}>
-        <BaseMenu.Popup className={cn('min-w-32 p-1', menuSurfaceClass, className)} {...props} />
+      <BaseMenu.Positioner sideOffset={sideOffset} align={align} className="z-50">
+        <BaseMenu.Popup className={cn('z-50 min-w-32 p-1', menuSurfaceClass, className)} {...props} />
       </BaseMenu.Positioner>
     </BaseMenu.Portal>
   )
