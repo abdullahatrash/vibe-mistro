@@ -4,14 +4,15 @@ import type { GitBranch, GitRangeDiffResult } from '../../../shared/ipc'
 import { Input, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '../ui'
 import { readDiffPrefs, writeDiffPrefs, type DiffPrefs } from './diff-prefs-store'
 import { buildBaseRefChoices, filterRefChoices } from './branch-scope'
-import { DiffFileSection, DiffToggles } from './diff-view-chrome'
-import { ReviewSelectionLayer } from './ReviewSelectionLayer'
+import { DiffToggles } from './diff-view-chrome'
+import { ReviewDiffViewer } from './ReviewDiffViewer'
 
 /**
  * The BRANCH-CHANGES scope (#237, PRD #233): `base...HEAD` — what this branch adds
- * relative to where it forked — as the same collapsible per-file sections as #235's
- * working-tree view (shared `diff-view-chrome`). Review keeps working after commits
- * land. Refreshes ON DEMAND — base change, whitespace toggle, the panel's manual
+ * relative to where it forked — through the SAME single virtualized `ReviewDiffViewer`
+ * (#388, PRD #387) as #235's working-tree view, so both scopes scale identically and
+ * FEEL like one surface. Review keeps working after commits land. Refreshes ON
+ * DEMAND — base change, whitespace toggle, the panel's manual
  * refresh (`refreshKey`) — never from the fs watcher (a range over commits doesn't
  * move when the working tree does). The `head → base` row opens a searchable base-ref
  * picker over the #87 branches list; "Automatic" (baseRef null) lets main resolve the
@@ -41,7 +42,6 @@ export function BranchDiffView({
   const [prefs, setPrefs] = useState<DiffPrefs>(() => readDiffPrefs(window.localStorage))
   const [result, setResult] = useState<GitRangeDiffResult | null>(null)
   const [loading, setLoading] = useState(true)
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const [choices, setChoices] = useState<GitBranch[]>([])
   const [query, setQuery] = useState('')
 
@@ -143,44 +143,21 @@ export function BranchDiffView({
       <DiffToggles prefs={prefs} onChange={updatePrefs} />
 
       {/* Review comments work in BOTH scopes (#239): whatever the diff shows is quotable. */}
-      <ReviewSelectionLayer
-        threadId={activeThreadId}
-        getPatch={(path) => (result?.ok ? result.files.find((f) => f.path === path)?.patch : undefined)}
-      >
-        {loading && !result ? (
-          <p className="px-3 py-3 text-[13px] text-muted">Loading branch diff…</p>
-        ) : result && !result.ok ? (
-          // Friendly copy, raw git reason preserved in the tooltip (never a crash).
-          <p className="px-3 py-3 text-[13px] text-muted" title={result.error} role="alert">
-            Can’t compare against {baseRef ?? 'the default branch'} — pick another base ref.
-          </p>
-        ) : result && result.files.length === 0 ? (
-          <p className="px-3 py-3 text-[13px] text-muted">
-            No changes against {result.baseRef}
-            {prefs.ignoreWhitespace ? ' (whitespace-only changes hidden)' : ''}.
-          </p>
-        ) : (
-          (result?.ok ? result.files : []).map((file) => (
-            <DiffFileSection
-              key={file.path}
-              path={file.path}
-              entry={file}
-              collapsed={collapsed.has(file.path)}
-              onToggle={() =>
-                setCollapsed((prev) => {
-                  const next = new Set(prev)
-                  if (next.has(file.path)) next.delete(file.path)
-                  else next.add(file.path)
-                  return next
-                })
-              }
-              diffStyle={prefs.diffStyle}
-              wrap={prefs.wrap}
-              ignoreWhitespace={prefs.ignoreWhitespace}
-            />
-          ))
-        )}
-      </ReviewSelectionLayer>
+      {loading && !result ? (
+        <p className="px-3 py-3 text-[13px] text-muted">Loading branch diff…</p>
+      ) : result && !result.ok ? (
+        // Friendly copy, raw git reason preserved in the tooltip (never a crash).
+        <p className="px-3 py-3 text-[13px] text-muted" title={result.error} role="alert">
+          Can’t compare against {baseRef ?? 'the default branch'} — pick another base ref.
+        </p>
+      ) : result && result.files.length === 0 ? (
+        <p className="px-3 py-3 text-[13px] text-muted">
+          No changes against {result.baseRef}
+          {prefs.ignoreWhitespace ? ' (whitespace-only changes hidden)' : ''}.
+        </p>
+      ) : (
+        <ReviewDiffViewer files={result?.ok ? result.files : []} prefs={prefs} threadId={activeThreadId} />
+      )}
     </div>
   )
 }
