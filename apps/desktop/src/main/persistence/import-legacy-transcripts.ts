@@ -1,4 +1,4 @@
-import { readdir, readFile, rename } from 'node:fs/promises'
+import { readdir, readFile, rename, rmdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseTranscript } from './transcript'
 import type { SqliteTranscriptStore } from './sqlite-transcript-store'
@@ -22,6 +22,14 @@ import type { SqliteTranscriptStore } from './sqlite-transcript-store'
  * `transcripts.bak` — kept, never deleted, as the rollback path. Any per-file
  * failure leaves the dir in place; the next launch retries just the files that
  * didn't land (the per-Thread `hasEntries` gate skips the ones that did).
+ *
+ * Post-migration husks: a pre-SQLite build launched against a migrated profile
+ * recreates an EMPTY `transcripts/` beside the `.bak` tombstone. The rename can
+ * then never succeed (POSIX rename over a non-empty destination dir is
+ * ENOTEMPTY), which used to log a "retried next launch" error on every launch
+ * forever. An empty dir is now `rmdir`ed instead (rmdir refuses non-empty dirs,
+ * so this can never drop data), and a rename that loses to an existing `.bak`
+ * logs as an expected outcome, not an error promising an impossible retry.
  */
 
 export interface ImportLegacyTranscriptsResult {
@@ -40,6 +48,7 @@ export interface ImportLegacyTranscriptsDeps {
   readdirDir?: (dir: string) => Promise<string[]>
   readFileAt?: (path: string) => Promise<string>
   renameDir?: (from: string, to: string) => Promise<void>
+  removeDir?: (dir: string) => Promise<void>
 }
 
 export async function importLegacyTranscripts(
@@ -48,11 +57,25 @@ export async function importLegacyTranscripts(
   const readdirDir = deps.readdirDir ?? ((dir: string) => readdir(dir))
   const readFileAt = deps.readFileAt ?? ((path: string) => readFile(path, 'utf8'))
   const renameDir = deps.renameDir ?? rename
+  const removeDir = deps.removeDir ?? rmdir
 
   let names: string[]
   try {
     names = await readdirDir(deps.dir)
   } catch {
+    return { outcome: 'skipped-absent', imported: 0, skipped: 0, orphans: 0, failures: 0 }
+  }
+
+  if (names.length === 0) {
+    // An empty husk (see the module doc): nothing to import, nothing to
+    // preserve — remove it so the steady state returns to "dir absent".
+    // Best-effort: a failure just means this same path runs again next launch.
+    try {
+      await removeDir(deps.dir)
+      console.log(`[import-legacy-transcripts] removed empty legacy dir ${deps.dir}`)
+    } catch (err) {
+      console.error(`[import-legacy-transcripts] could not remove empty ${deps.dir}:`, err)
+    }
     return { outcome: 'skipped-absent', imported: 0, skipped: 0, orphans: 0, failures: 0 }
   }
 
@@ -92,9 +115,20 @@ export async function importLegacyTranscripts(
   try {
     await renameDir(deps.dir, `${deps.dir}.bak`)
   } catch (err) {
-    // Everything imported; only the tombstone rename failed. Next launch skips
-    // every file via the per-Thread gate and retries the rename here.
-    console.error(`[import-legacy-transcripts] rename to .bak failed (retried next launch):`, err)
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ENOTEMPTY' || code === 'EEXIST') {
+      // A `.bak` tombstone from an earlier completed migration already holds
+      // the originals, so this rename can NEVER succeed — expected, not an
+      // error. Every entry above was handled (imported/skipped/orphaned) and
+      // the dir's bytes stay in place untouched.
+      console.log(
+        `[import-legacy-transcripts] ${deps.dir}.bak already exists — keeping ${deps.dir} as is`,
+      )
+    } else {
+      // Everything imported; only the tombstone rename failed. Next launch
+      // skips every file via the per-Thread gate and retries the rename here.
+      console.error(`[import-legacy-transcripts] rename to .bak failed (retried next launch):`, err)
+    }
   }
   if (imported + skipped + orphans > 0) {
     console.log(

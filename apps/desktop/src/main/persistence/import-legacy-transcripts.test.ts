@@ -156,4 +156,33 @@ describe('importLegacyTranscripts', () => {
     expect(result).toMatchObject({ outcome: 'imported', imported: 0 })
     expect(existsSync(join(`${dir}.bak`, '.DS_Store'))).toBe(true)
   })
+
+  it('removes an EMPTY dir instead of renaming (the post-migration husk a pre-SQLite build leaves)', async () => {
+    const dir = freshDir() // created empty, nothing written into it
+    const { store } = await fixture()
+
+    const result = await importLegacyTranscripts({ dir, store })
+
+    expect(result.outcome).toBe('skipped-absent')
+    expect(existsSync(dir)).toBe(false) // rmdir'ed — steady state restored
+    expect(existsSync(`${dir}.bak`)).toBe(false) // no tombstone invented
+  })
+
+  it('keeps the dir without an error-promising retry when the .bak tombstone already exists', async () => {
+    const dir = freshDir()
+    const { meta, store } = await fixture()
+    await boundThread(meta, 't1')
+    writeJsonl(dir, 't1', [JSON.stringify(userPromptEntry('u1', 'recreated after migration'))])
+    // A completed earlier migration left a NON-EMPTY .bak — the rename can never win.
+    mkdirSync(`${dir}.bak`, { recursive: true })
+    writeFileSync(join(`${dir}.bak`, 'old.jsonl'), 'tombstoned bytes')
+
+    const result = await importLegacyTranscripts({ dir, store })
+
+    // The content was still fully handled; both dirs stay, nothing clobbered.
+    expect(result).toMatchObject({ outcome: 'imported', imported: 1, failures: 0 })
+    expect(await store.read('t1')).toEqual([userPromptEntry('u1', 'recreated after migration')])
+    expect(existsSync(join(dir, 't1.jsonl'))).toBe(true)
+    expect(readFileSync(join(`${dir}.bak`, 'old.jsonl'), 'utf8')).toBe('tombstoned bytes')
+  })
 })
