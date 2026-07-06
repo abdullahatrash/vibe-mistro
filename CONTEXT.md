@@ -102,6 +102,24 @@ _Avoid_: thinking (the ACP wire term), effort (reserve to avoid clashing with re
 The umbrella for Mode + Model + Reasoning effort together — the composer surface that sets them.
 _Avoid_: config options, settings.
 
+## Composer
+
+**Inline token**:
+A user-placed reference that lives inside the prompt text at the cursor position, such as a file
+mention or skill invocation. Its position is part of the user's message.
+_Avoid_: inline chip, tag, pill.
+
+**Context attachment**:
+Structured context staged with a prompt but applying to the whole prompt rather than a specific
+cursor position, such as an element pick, review comment, pasted text, or image.
+_Avoid_: inline token, attachment (unqualified), prompt text.
+
+**Terminal context**:
+A terminal selection referenced from the prompt by an Inline token, with the selected output carried
+as supporting context for the prompt. The visible token marks where the user meant to refer to it;
+the full terminal text remains supporting context.
+_Avoid_: terminal paste, console dump, raw terminal text.
+
 ## Distribution
 
 **Release**:

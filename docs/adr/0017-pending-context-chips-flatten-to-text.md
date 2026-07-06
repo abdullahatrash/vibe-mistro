@@ -1,5 +1,8 @@
 # Pending-context chips: structured composer attachments, flattened to plain text at send
 
+**Status: SUPERSEDED IN PART by ADR-0020** (2026-07-04): whole-prompt Context attachments still
+follow this ADR, but Inline tokens now use a Lexical editor and structured renderer drafts.
+
 **Status: ACCEPTED** (2026-07-03). Builds on **ADR-0002** (thin orchestrator — no client-side
 expansion, no new wire shapes), **ADR-0009** (queue payload unchanged), **ADR-0013** decision 2
 (Files-preview insert channel), **ADR-0016** (element picker — its output re-homed here). PRD

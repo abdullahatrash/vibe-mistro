@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## What this is
 
@@ -186,17 +186,3 @@ durable fold snapshot + fold only the entry tail → full fold through the same 
 decisions; 0018 = distribution/releases), `CONTEXT.md` (domain glossary), `HANDOFF.md` (latest
 session handoff / current state), `docs/acp-capture.md` (verbatim `vibe-acp` protocol capture — the
 backend contract).
-
-## Agent skills
-
-### Issue tracker
-
-Issues and PRDs live in GitHub Issues for this repo. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-The repo uses the default five-label triage vocabulary. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-This is a single-context repo with one root `CONTEXT.md` and root `docs/adr/`. See `docs/agents/domain.md`.
