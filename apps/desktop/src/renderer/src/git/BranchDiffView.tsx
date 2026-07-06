@@ -4,7 +4,7 @@ import type { GitBranch, GitRangeDiffResult } from '../../../shared/ipc'
 import { Input, Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '../ui'
 import { readDiffPrefs, writeDiffPrefs, type DiffPrefs } from './diff-prefs-store'
 import { buildBaseRefChoices, filterRefChoices } from './branch-scope'
-import { DiffFileSection, DiffToggles } from './diff-view-chrome'
+import { DiffFileSection, DiffToggles, DiffTruncationBanner } from './diff-view-chrome'
 import { ReviewSelectionLayer } from './ReviewSelectionLayer'
 
 /**
@@ -141,6 +141,9 @@ export function BranchDiffView({
       </div>
 
       <DiffToggles prefs={prefs} onChange={updatePrefs} />
+
+      {/* Aggregate-truncation banner (#390): the read hit the payload budget, some files omitted. */}
+      {result?.ok && result.truncated && <DiffTruncationBanner />}
 
       {/* Review comments work in BOTH scopes (#239): whatever the diff shows is quotable. */}
       <ReviewSelectionLayer

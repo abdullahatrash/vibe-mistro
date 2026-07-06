@@ -118,6 +118,22 @@ export const DiffFileSection = memo(
     prev.meta?.glyph === next.meta?.glyph,
 )
 
+/**
+ * The AGGREGATE-truncation banner (#390, PRD #387): shown once, above the file list, when
+ * a diff read hit the ~10 MB payload budget so some LATER files came back empty. Honesty
+ * over completeness — a reviewer must never sign off believing they saw everything when
+ * the read was capped. Distinct from a single file's per-section `truncated` marker (that
+ * one file was too big); this is "the whole diff is too big, files are omitted". Shared by
+ * both views so working-tree and branch-range truncation read identically.
+ */
+export function DiffTruncationBanner(): JSX.Element {
+  return (
+    <p role="alert" className="border-b border-border-muted bg-accent/5 px-3 py-2 text-[13px] text-muted">
+      Diff truncated — this change is too large to show in full. Some later files are omitted.
+    </p>
+  )
+}
+
 /** The rendering-prefs row shared by both views: Stacked/Split + Wrap + Ignore whitespace. */
 export function DiffToggles({
   prefs,

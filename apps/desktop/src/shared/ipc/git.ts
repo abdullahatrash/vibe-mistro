@@ -137,10 +137,15 @@ export interface GitFileDiff extends GitDiffResult {
 /**
  * The `gitFullDiff` reply (#235). Entries preserve the caller's order; each is
  * INDIVIDUALLY capped + hashed, so one oversized generated file truncates itself —
- * flagged on ITS section — without hiding its siblings.
+ * flagged on ITS section — without hiding its siblings. `truncated` (#390, PRD #387) is
+ * the AGGREGATE flag: the whole read hit the ~10 MB payload budget, so some LATER files
+ * arrive with an empty patch (and their own `truncated`) rather than bloating the IPC
+ * message — the Review surface renders a whole-diff "truncated" banner. Additive: an
+ * untruncated read is `truncated:false` with every file's patch present as before.
  */
 export interface GitFullDiffResult {
   files: GitFileDiff[]
+  truncated: boolean
 }
 
 /**
@@ -159,13 +164,15 @@ export interface GitRangeDiffArgs {
 /**
  * The `gitRangeDiff` reply (#237). `{ok:true}` carries the RESOLVED base (so
  * "Automatic" shows what it compared against) + per-file entries, individually
- * capped + hashed like {@link GitFullDiffResult}. Unlike the working-tree reads, a
- * bad RANGE is a meaningful state — an unknown base, an unresolvable default, a
- * detached HEAD — so it surfaces as `{ok:false, error}` (git's actual reason; the
- * renderer wraps it in friendly copy) instead of degrading to an empty diff.
+ * capped + hashed like {@link GitFullDiffResult}, plus the AGGREGATE `truncated` flag
+ * (#390 — the ~10 MB budget was hit, later files omitted; renders a whole-diff banner).
+ * Unlike the working-tree reads, a bad RANGE is a meaningful state — an unknown base, an
+ * unresolvable default, a detached HEAD — so it surfaces as `{ok:false, error}` (git's
+ * actual reason; the renderer wraps it in friendly copy) instead of degrading to an empty
+ * diff.
  */
 export type GitRangeDiffResult =
-  | { ok: true; baseRef: string; files: GitFileDiff[] }
+  | { ok: true; baseRef: string; files: GitFileDiff[]; truncated: boolean }
   | { ok: false; error: string }
 
 /**

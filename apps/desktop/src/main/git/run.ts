@@ -1,4 +1,4 @@
-import { execFile, type ExecFileException } from 'node:child_process'
+import { execFile, spawn, type ExecFileException } from 'node:child_process'
 import { getShellEnv } from '../shell-env'
 
 /**
@@ -43,6 +43,85 @@ export function makeCommandRunner(
 }
 
 export const defaultGitRun: GitRun = makeCommandRunner('git', { maxBuffer: 64 * 1024 * 1024 })
+
+/**
+ * A STREAMING git read (#390, PRD #387): the diff-body seam for the Review surface,
+ * where a buffered `execFile` (which reads the whole subprocess output into memory
+ * before we can slice it) is exactly wrong — a pathological diff would balloon main's
+ * heap before we ever cap it. `capBytes` is the byte budget for THIS invocation: the
+ * runner reads stdout incrementally and STOPS consuming past `capBytes` (destroying the
+ * pipe + killing the child), so a 2 GB generated file costs us `capBytes`, not 2 GB.
+ * `truncated` reports whether the cap cut the output short. `capBytes = Infinity` reads
+ * to completion (used for the small enumeration / base-resolution calls). Resolve-never
+ * -reject like {@link GitRun}: a spawn failure resolves `{code:1}` with empty output.
+ */
+export interface GitStreamResult {
+  stdout: string
+  stderr: string
+  code: number
+  truncated: boolean
+}
+
+/** The injectable streaming-read seam (#390) — the diff-body analogue of {@link GitRun}. */
+export type GitStreamRun = (args: string[], cwd: string, capBytes: number) => Promise<GitStreamResult>
+
+/** Cap on captured STDERR (a failing git puts its reason here) — small; we only need the message. */
+const STDERR_CAP_BYTES = 64 * 1024
+
+/**
+ * The default streaming git runner (#390). Spawns `git` with the resolved shell-env PATH
+ * (like every other git call) and reads stdout by chunk, cutting off at `capBytes`. When
+ * the cap is hit we set `truncated`, `destroy()` the stdout pipe, and `kill()` the child
+ * — SIGPIPE would eventually stop it anyway, but killing is prompt and deterministic —
+ * then resolve `code:0` (a cap-hit means we got a full cap-worth of real diff output; a
+ * genuine git error yields little stdout + a stderr reason, never a cap hit). Guards a
+ * double-resolve so the later `close` after our `kill` is a no-op.
+ */
+export const defaultGitStreamRun: GitStreamRun = (args, cwd, capBytes) =>
+  new Promise((resolve) => {
+    const out: Buffer[] = []
+    let outLen = 0
+    let truncated = false
+    const err: Buffer[] = []
+    let errLen = 0
+    let settled = false
+
+    function finish(code: number): void {
+      if (settled) return
+      settled = true
+      const full = Buffer.concat(out)
+      const stdout = (truncated && Number.isFinite(capBytes) ? full.subarray(0, capBytes) : full).toString('utf8')
+      resolve({ stdout, stderr: Buffer.concat(err).toString('utf8'), code, truncated })
+    }
+
+    let child
+    try {
+      child = spawn('git', args, { cwd, env: getShellEnv() })
+    } catch {
+      resolve({ stdout: '', stderr: '', code: 1, truncated: false })
+      return
+    }
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      if (settled) return
+      out.push(chunk)
+      outLen += chunk.byteLength
+      if (outLen >= capBytes) {
+        truncated = true
+        child.stdout?.destroy()
+        child.kill()
+        finish(0)
+      }
+    })
+    child.stderr?.on('data', (chunk: Buffer) => {
+      if (errLen >= STDERR_CAP_BYTES) return
+      err.push(chunk)
+      errLen += chunk.byteLength
+    })
+    // A spawn failure (ENOENT etc.) degrades to the empty result — never a throw.
+    child.on('error', () => finish(1))
+    child.on('close', (code) => finish(code ?? 0))
+  })
 
 /**
  * The failure reason of a non-zero step. git/gh put refusals, hook failures, and lock

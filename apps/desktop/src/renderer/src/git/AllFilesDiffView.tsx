@@ -4,7 +4,7 @@ import type { GitFullDiffResult } from '../../../shared/ipc'
 import { Button } from '../ui'
 import { readDiffPrefs, writeDiffPrefs, type DiffPrefs } from './diff-prefs-store'
 import { diffRequestKey, type GitFileView } from './status-view'
-import { DiffFileSection, DiffToggles } from './diff-view-chrome'
+import { DiffFileSection, DiffToggles, DiffTruncationBanner } from './diff-view-chrome'
 import { ReviewSelectionLayer } from './ReviewSelectionLayer'
 
 /**
@@ -110,6 +110,9 @@ export function AllFilesDiffView({
       </div>
 
       <DiffToggles prefs={prefs} onChange={updatePrefs} />
+
+      {/* Aggregate-truncation banner (#390): the read hit the payload budget, some files omitted. */}
+      {result?.truncated && <DiffTruncationBanner />}
 
       {/* Review comments (#239): select lines in any section → floating Comment →
           note editor → a pending-context chip in the active Thread's composer. */}
