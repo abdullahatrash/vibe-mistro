@@ -1,12 +1,14 @@
-# Packaging config for the desktop Release (ADR-0018): signed + notarized arm64-only
-# DMG (what the download button serves) + ZIP (what electron-updater consumes on macOS).
+# Packaging config for the desktop Release (ADR-0018):
+#   macOS  — signed + notarized arm64 DMG (download button) + ZIP (electron-updater).
+#   Linux  — x64 AppImage (download button + self-update via latest-linux.yml) + .deb
+#            (apt users; no self-update). Built unsigned on ubuntu-latest.
 appId: com.abdullahatrash.vibe-mistro
 productName: Vibe Mistro
 
 # Versionless on purpose: the marketing page's download button is the permanent
 # `releases/latest/download/Vibe-Mistro-arm64.dmg` redirect, so the asset name must
 # be stable across Releases. The update feed doesn't care (latest-mac.yml pins
-# per-Release URLs + sha512).
+# per-Release URLs + sha512). Linux overrides this per-platform (see `linux.artifactName`).
 artifactName: Vibe-Mistro-${arch}.${ext}
 
 directories:
@@ -15,16 +17,20 @@ directories:
 files:
   - out/**
 
-# node-pty ships prebuilds that already run under Electron in dev (the terminal
-# works there), so skip the native rebuild — it would demand a node-gyp toolchain
-# for no gain and replace known-good binaries.
+# @lydell/node-pty ships a prebuilt N-API binary per platform (darwin/linux/win,
+# x64/arm64) as separate optionalDependency packages — one `pty.node` that runs
+# under both Node and Electron with NO rebuild. So skip npmRebuild on every
+# platform: there's nothing to compile, and each build's `bun install` already
+# pulled the binary matching its host.
 npmRebuild: false
 
 asar: true
-# node-pty's pty.node and spawn-helper must live on the real filesystem —
-# posix_spawnp can't exec a helper inside an asar archive.
+# The pty.node binary and (on darwin) its spawn-helper must live on the real
+# filesystem — posix_spawnp can't exec a helper inside an asar archive. This
+# covers both the `@lydell/node-pty` loader and the per-platform binary package
+# (`@lydell/node-pty-<platform>-<arch>`).
 asarUnpack:
-  - "**/node_modules/node-pty/**"
+  - "**/node_modules/@lydell/node-pty*/**"
 
 # Embeds app-update.yml in the bundle — electron-updater (#270) reads the same
 # GitHub Releases feed the button downloads from.
@@ -55,3 +61,36 @@ mac:
   # env (APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER, or APPLE_ID +
   # APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID); unsigned local builds skip it.
   notarize: true
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  # Linux needs a PNG icon (never .icns); electron-builder generates the size set
+  # from a single ≥256px source. resources/icon.png is 1024².
+  icon: icon.png
+  # freedesktop.org menu category — devtools apps use Development.
+  category: Development
+  # deb metadata requires a maintainer contact; without one electron-builder warns
+  # and falls back to package.json author.
+  maintainer: Abdullah Atrash <abodi1987@gmail.com>
+  synopsis: Orchestrate your Mistral Vibe coding agents
+  description: >-
+    Vibe Mistro runs and orchestrates Mistral Vibe coding agents across your local
+    projects — parallel workspaces, streamed tool calls, approvals, git, and a
+    terminal, in one window.
+  # A stable, space-free binary name; also the default WM_CLASS Electron reports.
+  # StartupWMClass must match it so GNOME/KDE/Wayland associate the running window
+  # with its .desktop launcher (otherwise the taskbar shows a generic icon).
+  executableName: vibe-mistro
+  desktop:
+    entry:
+      StartupWMClass: vibe-mistro
+  # Single-arch (x64) lets the download-button filename stay versionless AND
+  # arch-less: Vibe-Mistro.AppImage (the button + electron-updater feed) and
+  # Vibe-Mistro.deb. Overrides the top-level `${arch}` template for Linux only.
+  artifactName: Vibe-Mistro.${ext}

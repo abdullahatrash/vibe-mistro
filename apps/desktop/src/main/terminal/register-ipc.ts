@@ -1,5 +1,5 @@
 import { BrowserWindow, ipcMain } from 'electron'
-import { spawn } from 'node-pty'
+import { spawn } from '@lydell/node-pty'
 import {
   IPC,
   type TerminalClearArgs,

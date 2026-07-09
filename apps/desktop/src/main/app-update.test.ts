@@ -75,18 +75,39 @@ describe('sameStatus', () => {
 
 describe('resolveUpdaterMode', () => {
   it('packaged builds run against the embedded feed', () => {
-    expect(resolveUpdaterMode({ isPackaged: true, feedUrlOverride: undefined })).toEqual({
+    expect(
+      resolveUpdaterMode({
+        isPackaged: true,
+        feedUrlOverride: undefined,
+        platform: 'darwin',
+        isAppImage: false,
+      }),
+    ).toEqual({
       enabled: true,
       feedUrl: null,
     })
   })
 
   it('dev runs are updater-off', () => {
-    expect(resolveUpdaterMode({ isPackaged: false, feedUrlOverride: undefined })).toEqual({
+    expect(
+      resolveUpdaterMode({
+        isPackaged: false,
+        feedUrlOverride: undefined,
+        platform: 'darwin',
+        isAppImage: false,
+      }),
+    ).toEqual({
       enabled: false,
       feedUrl: null,
     })
-    expect(resolveUpdaterMode({ isPackaged: false, feedUrlOverride: '   ' })).toEqual({
+    expect(
+      resolveUpdaterMode({
+        isPackaged: false,
+        feedUrlOverride: '   ',
+        platform: 'darwin',
+        isAppImage: false,
+      }),
+    ).toEqual({
       enabled: false,
       feedUrl: null,
     })
@@ -94,10 +115,50 @@ describe('resolveUpdaterMode', () => {
 
   it('the mock-feed env forces the updater on with a generic feed (dev AND packaged)', () => {
     expect(
-      resolveUpdaterMode({ isPackaged: false, feedUrlOverride: 'http://localhost:8099' }),
+      resolveUpdaterMode({
+        isPackaged: false,
+        feedUrlOverride: 'http://localhost:8099',
+        platform: 'darwin',
+        isAppImage: false,
+      }),
     ).toEqual({ enabled: true, feedUrl: 'http://localhost:8099' })
     expect(
-      resolveUpdaterMode({ isPackaged: true, feedUrlOverride: 'http://localhost:8099 ' }),
+      resolveUpdaterMode({
+        isPackaged: true,
+        feedUrlOverride: 'http://localhost:8099 ',
+        platform: 'darwin',
+        isAppImage: false,
+      }),
+    ).toEqual({ enabled: true, feedUrl: 'http://localhost:8099' })
+  })
+
+  it('packaged Linux runs the updater ONLY for an AppImage (deb/rpm defer to apt)', () => {
+    // AppImage self-updates via latest-linux.yml.
+    expect(
+      resolveUpdaterMode({
+        isPackaged: true,
+        feedUrlOverride: undefined,
+        platform: 'linux',
+        isAppImage: true,
+      }),
+    ).toEqual({ enabled: true, feedUrl: null })
+    // A .deb/.rpm install cannot self-update — updater stays off.
+    expect(
+      resolveUpdaterMode({
+        isPackaged: true,
+        feedUrlOverride: undefined,
+        platform: 'linux',
+        isAppImage: false,
+      }),
+    ).toEqual({ enabled: false, feedUrl: null })
+    // The mock-feed override still forces it on for a non-AppImage Linux run.
+    expect(
+      resolveUpdaterMode({
+        isPackaged: true,
+        feedUrlOverride: 'http://localhost:8099',
+        platform: 'linux',
+        isAppImage: false,
+      }),
     ).toEqual({ enabled: true, feedUrl: 'http://localhost:8099' })
   })
 })

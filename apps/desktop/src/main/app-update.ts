@@ -68,13 +68,26 @@ export interface UpdaterMode {
  * embedded feed; a dev/unpackaged run is updater-OFF unless the mock-feed env
  * (`VIBE_MISTRO_UPDATE_URL`) forces it — the seam the #270 demo and any local
  * end-to-end run drive (a static feed claiming a higher version).
+ *
+ * Linux exception: only the AppImage can self-update (electron-updater consumes
+ * `latest-linux.yml`); a `.deb`/`.rpm` install defers to the system package
+ * manager, and arming the updater there just yields a spurious "cannot update"
+ * error every check. So on packaged Linux the updater runs ONLY for an AppImage
+ * (electron-updater sets `process.env.APPIMAGE`, surfaced here as `isAppImage`).
+ * The mock-feed override still forces it on for local end-to-end runs.
  */
 export function resolveUpdaterMode(input: {
   isPackaged: boolean
   feedUrlOverride: string | undefined
+  platform: NodeJS.Platform
+  isAppImage: boolean
 }): UpdaterMode {
   const feedUrl = input.feedUrlOverride?.trim() ? input.feedUrlOverride.trim() : null
-  return { enabled: input.isPackaged || feedUrl !== null, feedUrl }
+  if (feedUrl !== null) return { enabled: true, feedUrl }
+  if (input.isPackaged && input.platform === 'linux' && !input.isAppImage) {
+    return { enabled: false, feedUrl: null }
+  }
+  return { enabled: input.isPackaged, feedUrl: null }
 }
 
 /** Background re-check cadence after the launch check (passive; no UI ticker). */

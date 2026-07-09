@@ -1,12 +1,18 @@
-# The Release pipeline (#269, ADR-0018): push a v*.*.* tag → build, sign,
-# notarize, and publish the arm64 DMG + ZIP + latest-mac.yml to a GitHub
-# Release — the single stable channel serving both the marketing page's
-# download button and electron-updater's feed. workflow_dispatch is the re-run
+# The Release pipeline (#269, ADR-0018): push a v*.*.* tag → build and publish to
+# ONE GitHub Release — the single stable channel serving both the marketing page's
+# download buttons and electron-updater's feed. workflow_dispatch is the re-run
 # escape hatch (run it ON the tag's ref from the Actions UI).
 #
-# Releases are ALWAYS signed + notarized — an unsigned Release would be
-# Gatekeeper-blocked for every downloader and rejected by the updater, so the
-# workflow fails loudly when secrets are missing instead of shipping one.
+# Two jobs land assets on the same tagged Release:
+#   `release`        macOS arm64 — signed + notarized DMG + ZIP + latest-mac.yml.
+#   `release-linux`  Linux x64 — unsigned AppImage + .deb + latest-linux.yml. Runs
+#                    after `release` so the Release exists before it appends (no
+#                    create-race) and Linux never blocks on Apple credentials.
+#
+# The macOS Release is ALWAYS signed + notarized — an unsigned macOS Release would
+# be Gatekeeper-blocked for every downloader and rejected by the updater, so the
+# job fails loudly when secrets are missing instead of shipping one. Linux ships
+# unsigned (the platform norm); its AppImage self-updates, the .deb defers to apt.
 #
 # Repository secrets (the Apple-ID notarization route — matches the user's
 # prior notarized app; no App Store Connect API key involved):
@@ -89,3 +95,39 @@ jobs:
       - name: Gatekeeper assessment of the published app
         run: |
           spctl -a -vv "apps/desktop/dist/mac-arm64/Vibe Mistro.app"
+
+  release-linux:
+    name: Build, publish (Linux x64)
+    runs-on: ubuntu-latest
+    # Sequenced after macOS so the tagged Release already exists — the Linux job
+    # appends its assets instead of racing to create the Release. No native build
+    # step: @lydell/node-pty ships a prebuilt linux-x64 binary (pulled by this
+    # job's `bun install`), so packaging is pure electron-builder.
+    needs: release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Guard — tag matches apps/desktop package.json version
+        if: github.ref_type == 'tag'
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          pkg_version="$(node -p "require('./apps/desktop/package.json').version")"
+          if [[ "$tag_version" != "$pkg_version" ]]; then
+            echo "Tag v$tag_version does not match apps/desktop/package.json version $pkg_version." >&2
+            echo "Bump the version in a release commit, then re-tag." >&2
+            exit 1
+          fi
+
+      - name: Build, publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun run --cwd apps/desktop release:linux

@@ -9,6 +9,10 @@ import '@fontsource-variable/geist-mono'
 
 const DOWNLOAD_URL =
   'https://github.com/abdullahatrash/vibe-mistro/releases/latest/download/Vibe-Mistro-arm64.dmg'
+const DOWNLOAD_URL_LINUX =
+  'https://github.com/abdullahatrash/vibe-mistro/releases/latest/download/Vibe-Mistro.AppImage'
+const DOWNLOAD_URL_LINUX_DEB =
+  'https://github.com/abdullahatrash/vibe-mistro/releases/latest/download/Vibe-Mistro.deb'
 const REPO_URL = 'https://github.com/abdullahatrash/vibe-mistro'
 const VIBE_CLI_URL = 'https://docs.mistral.ai/vibe/code/cli/install-setup'
 ---
@@ -21,13 +25,13 @@ const VIBE_CLI_URL = 'https://docs.mistral.ai/vibe/code/cli/install-setup'
     <title>Vibe Mistro — orchestrate your Mistral Vibe coding agents</title>
     <meta
       name="description"
-      content="Vibe Mistro is a macOS desktop app that runs and orchestrates Mistral Vibe coding agents across your local projects — parallel workspaces, streamed tool calls, approvals, git, and terminal."
+      content="Vibe Mistro is a macOS &amp; Linux desktop app that runs and orchestrates Mistral Vibe coding agents across your local projects — parallel workspaces, streamed tool calls, approvals, git, and terminal."
     />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta property="og:title" content="Vibe Mistro" />
     <meta
       property="og:description"
-      content="A desktop conductor for Mistral Vibe coding agents. macOS, beta."
+      content="A desktop conductor for Mistral Vibe coding agents. macOS &amp; Linux, beta."
     />
   </head>
   <body>
@@ -67,21 +71,33 @@ const VIBE_CLI_URL = 'https://docs.mistral.ai/vibe/code/cli/install-setup'
             Conduct your <span class="flame">Mistral&nbsp;Vibe</span> agents.
           </h1>
           <p class="pitch">
-            Vibe Mistro is a macOS desktop app that runs and orchestrates Mistral Vibe coding
-            agents across your local projects — parallel workspaces, streamed tool calls,
+            Vibe Mistro is a macOS &amp; Linux desktop app that runs and orchestrates Mistral Vibe
+            coding agents across your local projects — parallel workspaces, streamed tool calls,
             approvals, git, and a terminal, all in one calm window.
           </p>
           <div class="cta">
-            <a class="download" href={DOWNLOAD_URL}>
-              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="apple">
-                <path
-                  d="M17.05 20.28c-.98.95-2.05.86-3.08.38-1.09-.5-2.08-.53-3.2 0-1.44.62-2.2.44-3.06-.38C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.08ZM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25Z"
-                ></path>
-              </svg>
-              Download for macOS
-            </a>
+            <div class="download-row">
+              <a class="download" href={DOWNLOAD_URL}>
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="glyph">
+                  <path
+                    d="M17.05 20.28c-.98.95-2.05.86-3.08.38-1.09-.5-2.08-.53-3.2 0-1.44.62-2.2.44-3.06-.38C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.08ZM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25Z"
+                  ></path>
+                </svg>
+                Download for macOS
+              </a>
+              <a class="download secondary" href={DOWNLOAD_URL_LINUX}>
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="glyph">
+                  <path
+                    d="M12 2c-1.7 0-2.9 1.6-2.9 3.6 0 1 .2 1.7.2 2.5 0 .8-.7 1.5-1.4 2.6-.8 1.2-1.7 2.6-2 4.4-.2 1-.1 1.7.1 2.2-.5.4-.8.9-.8 1.4 0 .8.7 1.2 1.6 1.5.9.3 1.7.6 2 1.2.3.5.9.8 1.5.8.7 0 1.4-.3 1.7-.9.3-.5 1.1-.8 2-1.1.9-.3 1.6-.7 1.6-1.5 0-.5-.3-1-.8-1.4.2-.5.3-1.2.1-2.2-.3-1.8-1.2-3.2-2-4.4-.7-1.1-1.4-1.8-1.4-2.6 0-.8.2-1.5.2-2.5C14.9 3.6 13.7 2 12 2Zm-1 4.2c.3 0 .5.3.5.7s-.2.7-.5.7-.5-.3-.5-.7.2-.7.5-.7Zm2 0c.3 0 .5.3.5.7s-.2.7-.5.7-.5-.3-.5-.7.2-.7.5-.7Z"
+                  ></path>
+                </svg>
+                Download for Linux
+              </a>
+            </div>
             <p class="cta-note">
-              Apple&nbsp;Silicon · free &amp; open source · requires the{' '}<a
+              macOS Apple&nbsp;Silicon (.dmg) · Linux x64 AppImage or{' '}<a
+                href={DOWNLOAD_URL_LINUX_DEB}>.deb</a
+              > · free &amp; open source · requires the{' '}<a
                 href={VIBE_CLI_URL}
                 target="_blank"
                 rel="noreferrer">Mistral Vibe CLI</a
@@ -275,6 +291,12 @@ const VIBE_CLI_URL = 'https://docs.mistral.ai/vibe/code/cli/install-setup'
         margin-top: 2.2rem;
       }
 
+      .download-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.8rem;
+      }
+
       .download {
         display: inline-flex;
         align-items: center;
@@ -306,7 +328,21 @@ const VIBE_CLI_URL = 'https://docs.mistral.ai/vibe/code/cli/install-setup'
         filter: brightness(0.97);
       }
 
-      .apple {
+      /* Linux gets equal billing but a quieter, outlined treatment so the mac
+         download stays the visual primary. */
+      .download.secondary {
+        color: var(--text-body);
+        background: var(--sidebar);
+        border: 1px solid var(--border);
+        box-shadow: 0 1px 2px rgba(28, 28, 28, 0.06);
+      }
+      .download.secondary:hover {
+        filter: none;
+        background: var(--bg);
+        box-shadow: 0 2px 8px -4px rgba(28, 28, 28, 0.18);
+      }
+
+      .glyph {
         width: 1.15em;
         height: 1.15em;
         margin-top: -0.1em;

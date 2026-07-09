@@ -244,6 +244,10 @@ function startAppUpdater(): void {
   const mode = resolveUpdaterMode({
     isPackaged: app.isPackaged,
     feedUrlOverride: process.env.VIBE_MISTRO_UPDATE_URL,
+    platform: process.platform,
+    // electron-updater sets APPIMAGE when the app runs as an AppImage — the only
+    // Linux format that can self-update. A .deb install leaves it unset.
+    isAppImage: Boolean(process.env.APPIMAGE),
   })
   if (!mode.enabled) return
   appUpdaterEnabled = true

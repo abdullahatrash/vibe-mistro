@@ -1,0 +1,45 @@
+# Test-build the Linux desktop app WITHOUT publishing a Release. Runs
+# automatically on every push to the `linux-support` branch, and can be re-run
+# by hand from the Actions tab (workflow_dispatch). It packages the AppImage +
+# .deb with `--publish never` and uploads them as a downloadable workflow
+# artifact — so a Linux machine (e.g. Arch) can grab the AppImage from the
+# browser and smoke-test it before we ever cut a public Release.
+#
+# No signing, no Apple/GitHub-release secrets, no native compile: @lydell/node-pty
+# ships a prebuilt linux-x64 binary that this job's `bun install` pulls directly.
+name: Build Linux artifact
+
+on:
+  push:
+    branches:
+      - linux-support
+  workflow_dispatch:
+
+jobs:
+  build-linux-artifact:
+    name: Build Linux x64 (AppImage + deb, no publish)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build (electron-vite) + package (electron-builder, no publish)
+        run: bun run --cwd apps/desktop dist:linux
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vibe-mistro-linux-x64
+          # The AppImage is the one to run on Arch (the .deb is Debian/Ubuntu-only).
+          path: |
+            apps/desktop/dist/Vibe-Mistro.AppImage
+            apps/desktop/dist/Vibe-Mistro.deb
+          if-no-files-found: error
