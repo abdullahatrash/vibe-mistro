@@ -142,3 +142,39 @@ test('live: terminal keeps readable colors in the built renderer', async () => {
     await app.close()
   }
 })
+
+test('live: opened files render numbered code rows', async () => {
+  const userData = await seedProfile({
+    thread: false,
+    files: { 'numbered.ts': 'const first = 1\nconst second = 2\n' },
+  })
+  const { app, page } = await launch(userData, FAKE_ENV)
+  try {
+    await page.getByText('seeded-project').hover()
+    await page.getByLabel('New thread in seeded-project').click()
+    await expect(page.getByText('connected')).toBeVisible()
+
+    await page.getByLabel('Open side panel').click()
+    await page.getByRole('button', { name: /Files/ }).click()
+    const fileTree = page.locator('file-tree-container')
+    await expect
+      .poll(() =>
+        fileTree.evaluate(
+          (tree) => tree.shadowRoot?.querySelector('[data-item-path="numbered.ts"]') !== null,
+        ),
+      )
+      .toBe(true)
+    await fileTree.evaluate((tree) => {
+      const row = tree.shadowRoot?.querySelector('[data-item-path="numbered.ts"]') as {
+        click(): void
+      } | null
+      row?.click()
+    })
+
+    const preview = page.locator('diffs-container')
+    await expect(preview.locator('[data-column-number="1"]')).toBeVisible()
+    await expect(preview.locator('[data-column-number="2"]')).toBeVisible()
+  } finally {
+    await app.close()
+  }
+})
