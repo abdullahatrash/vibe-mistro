@@ -94,6 +94,7 @@ export function ConnectedWorkspace({
               agentId: connection.agentId,
               threadId: activeThread.id,
               workspaceId: connection.workspaceId,
+              workspaceDir: connection.workspaceDir,
               sessionId: seedSessionId,
               title: activeThread.title,
             }}

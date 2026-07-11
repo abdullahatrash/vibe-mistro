@@ -22,6 +22,10 @@ export interface TimelineHandlers {
   onPermission: (item: PermissionItem, option: PermissionOption) => void
   /** The session's slash commands/skills — user rows chip a leading `/name` match. */
   availableCommands: readonly AcpCommand[]
+  /** Open an agent-touched Workspace file in the read-only Files surface. */
+  onOpenToolFile: ((path: string) => void) | null
+  /** Reveal an agent-touched Workspace file in the OS file manager. */
+  onRevealToolFile: ((path: string) => void) | null
 }
 
 /** The live-turn state rows derive `streaming` from (see `isRowStreaming`). */

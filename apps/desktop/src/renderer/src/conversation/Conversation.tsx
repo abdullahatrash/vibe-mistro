@@ -43,6 +43,8 @@ import { UsageBar } from './items/UsageBar'
 import { WorkingRow } from './items/WorkingRow'
 import { Composer } from './Composer'
 import { isSending, useFollowUpQueue } from './follow-up-queue'
+import { workspaceRelativePath } from './file-change'
+import { openWorkspaceFileSurface } from '../side-panel/side-panel-store'
 import {
   foldCommandsEvent,
   getWorkspaceCommands,
@@ -65,6 +67,8 @@ export interface LiveThread {
   agentId: string
   threadId: string
   workspaceId: string
+  /** Absolute Workspace root, used only to map ACP file paths into Files-surface paths. */
+  workspaceDir: string
   sessionId: string | null
   title: string | null
 }
@@ -388,6 +392,22 @@ export function Conversation({
     [thread.agentId],
   )
 
+  // Structured Vibe edit cards offer two explicit destinations. The Files surface needs
+  // a Workspace-relative path, while Finder keeps using main's confined reveal handler.
+  const openToolFile = useCallback(
+    (path: string): void => {
+      const relativePath = workspaceRelativePath(path, thread.workspaceDir)
+      if (relativePath) openWorkspaceFileSurface(thread.workspaceId, relativePath)
+    },
+    [thread.workspaceDir, thread.workspaceId],
+  )
+  const revealToolFile = useCallback(
+    (path: string): void => {
+      void window.api.revealPath({ agentId: thread.agentId, path })
+    },
+    [thread.agentId],
+  )
+
   // Answer a pending permission request: relay the choice to the agent and mark
   // the prompt resolved so it stops asking (state stays renderer-owned). Memoized
   // (#386): it rides the stable timeline-handlers context, whose identity must not
@@ -453,8 +473,13 @@ export function Conversation({
   // handlers churn only when the command list changes; activity flips on turn
   // open/close and per sent prompt — NEVER per streamed chunk.
   const timelineHandlers = useMemo(
-    () => ({ onPermission: respondPermission, availableCommands }),
-    [respondPermission, availableCommands],
+    () => ({
+      onPermission: respondPermission,
+      availableCommands,
+      onOpenToolFile: openToolFile,
+      onRevealToolFile: revealToolFile,
+    }),
+    [respondPermission, availableCommands, openToolFile, revealToolFile],
   )
   const timelineActivity = useMemo(
     () => ({ isProcessing: state.isProcessing, lastUserIndex }),

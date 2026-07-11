@@ -118,6 +118,10 @@ export function ColdThread({
     () => ({
       onPermission: noPermission,
       availableCommands: getWorkspaceCommands(window.localStorage, thread.workspaceId),
+      // A cold Thread has no warm agent handle or connected Workspace path. Its historical
+      // file-change cards remain inspectable, but local actions appear only after Continue.
+      onOpenToolFile: null,
+      onRevealToolFile: null,
     }),
     [thread.workspaceId],
   )
