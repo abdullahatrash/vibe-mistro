@@ -49,6 +49,8 @@ export type Surface =
       lifecycle: 'draft' | 'durable'
     }
 
+export type SideThreadLifecycle = Extract<Surface, { kind: 'thread' }>['lifecycle']
+
 /** One Workspace's panel state: open flag + ordered Surfaces + which is active. */
 export interface WorkspacePanelState {
   isOpen: boolean

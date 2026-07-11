@@ -39,6 +39,7 @@ import {
   type StartThreadArgs,
   type StartThreadResult,
   type ThreadConnection,
+  type ThreadConfigAxis,
   type ThreadStatusEvent,
   type ThreadTitleEvent,
   type AppUpdateStatusEvent,
@@ -635,21 +636,24 @@ async function runPromptTurn(
     sessionId = bound.sessionId
     rebound = bound.rebound
     const reportedControls = bound.controls
-    const actualControls =
-      reportedControls && args.controlIntent
-        ? await applyPendingThreadControls(
-            agent,
-            sessionId,
-            args.controlIntent,
-            reportedControls,
-            (error) => {
-              console.error(
-                `[vibe-mistro:controls] pre-prompt apply failed (${args.threadId}): ` +
-                  `${error instanceof Error ? error.message : String(error)}`,
-              )
-            },
+    let actualControls = reportedControls
+    let controlFailures: ThreadConfigAxis[] = []
+    if (reportedControls && args.controlIntent) {
+      const applied = await applyPendingThreadControls(
+        agent,
+        sessionId,
+        args.controlIntent,
+        reportedControls,
+        (axis, error) => {
+          console.error(
+            `[vibe-mistro:controls] pre-prompt ${axis} apply failed (${args.threadId}): ` +
+              `${error instanceof Error ? error.message : String(error)}`,
           )
-        : reportedControls
+        },
+      )
+      actualControls = applied.controls
+      controlFailures = applied.failedAxes
+    }
     // Tell the renderer this Thread is now bound after any validated pending Side
     // Draft controls have been awaited, and BEFORE `agent.prompt` streams below
     // (same webContents, so ordered ahead of those `acp:event`s). This binds the
@@ -668,7 +672,13 @@ async function runPromptTurn(
     // ADR-0007). For a Side Draft's first bind, `actualControls` instead reflects
     // only successfully applied ids that this newly bound session advertised.
     if (actualControls && !sender.isDestroyed()) {
-      sender.send(IPC.threadBound, { threadId: args.threadId, sessionId, rebound, controls: actualControls })
+      sender.send(IPC.threadBound, {
+        threadId: args.threadId,
+        sessionId,
+        rebound,
+        controls: actualControls,
+        controlFailures: controlFailures.length > 0 ? controlFailures : undefined,
+      })
     }
   } catch (err) {
     if (err instanceof WorkspaceAgentError && err.authState === 'not-signed-in') {

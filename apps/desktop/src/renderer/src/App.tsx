@@ -66,6 +66,7 @@ import {
   toggleWorkspacePanelVisibility,
   toggleWorkspaceTerminalSurface,
   useWorkspacePanel,
+  type SideThreadLifecycle,
 } from './side-panel/side-panel-store'
 import { deriveUnifiedThreads, workspaceFlags, type UnifiedThreadRow } from './shell/unified-threads'
 import { EmptyState } from './shell/EmptyState'
@@ -676,7 +677,7 @@ export function App(): JSX.Element {
       openWorkspaceSideThreadSurface(conn.workspaceId, threadId)
     }
 
-    function renderSideThread(threadId: string): ReactNode {
+    function renderSideThread(threadId: string, lifecycle: SideThreadLifecycle): ReactNode {
       const sideThreadMeta = cold.find((thread) => thread.id === threadId)
       const sideThreadTitle = sideThreadMeta?.title ?? 'Side Thread'
       const sideControls = resolveActiveControls(
@@ -716,6 +717,7 @@ export function App(): JSX.Element {
           onAskInSideThread={openSideThread}
           controlIntent={controlIntent}
           autoFocusComposer
+          skipInitialHydration={lifecycle === 'draft'}
         />
       )
     }

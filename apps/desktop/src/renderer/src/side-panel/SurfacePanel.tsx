@@ -44,6 +44,7 @@ import {
   toggleWorkspaceTerminalSurface,
   useWorkspacePanel,
   type SingletonKind,
+  type SideThreadLifecycle,
   type Surface,
 } from './side-panel-store'
 import {
@@ -94,7 +95,7 @@ export function SurfacePanel({
   /** The live Thread whose composer a file preview's Insert-@path targets (#189); null when none. */
   activeThreadId: string | null
   /** Render a Side Thread conversation without changing the primary Thread selection. */
-  renderSideThread: (threadId: string) => ReactNode
+  renderSideThread: (threadId: string, lifecycle: SideThreadLifecycle) => ReactNode
   /** Resolve a bound Side Thread's latest Vibe-generated title for its tab. */
   getSideThreadTitle: (threadId: string) => string | null
   /** Main-authored status for every live Thread, including unmounted Side Threads. */
@@ -204,7 +205,7 @@ function PanelBody({
   workspaceDir: string
   agentId: string
   activeThreadId: string | null
-  renderSideThread: (threadId: string) => ReactNode
+  renderSideThread: (threadId: string, lifecycle: SideThreadLifecycle) => ReactNode
   getSideThreadTitle: (threadId: string) => string | null
   threadStatuses: ThreadStatusMap
   isActive: boolean
@@ -386,7 +387,7 @@ function PanelBody({
                 activeThreadId={activeThreadId}
               />
             )}
-            {active?.kind === 'thread' && renderSideThread(active.threadId)}
+            {active?.kind === 'thread' && renderSideThread(active.threadId, active.lifecycle)}
             {/* The embedded dev-server preview (#216, ADR-0015). Unlike the other
                 surfaces it stays MOUNTED whenever its tab is open — only HIDDEN when
                 another tab is active — because the live page lives in the renderer's

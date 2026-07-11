@@ -80,6 +80,12 @@ export interface ThreadBoundEvent {
    * session (no fresh result — the renderer keeps whatever it already holds).
    */
   controls: ThreadAgentControls | null
+  /**
+   * Advertised pending Side Draft controls whose setter rejected before the first
+   * prompt. The turn still proceeds with `controls` reflecting the agent's actual
+   * fallback state; the renderer surfaces a notice instead of failing silently.
+   */
+  controlFailures?: ThreadConfigAxis[]
 }
 
 /**

@@ -1,4 +1,4 @@
-import type { ThreadAgentControls, ThreadControlIntent } from '../shared/ipc'
+import type { ThreadAgentControls, ThreadConfigAxis, ThreadControlIntent } from '../shared/ipc'
 import {
   controlsWithCurrentValue,
   validatedThreadControlChanges,
@@ -10,6 +10,11 @@ export interface PendingThreadControlAgent {
   setReasoningEffort(sessionId: string, value: string): Promise<void>
 }
 
+export interface PendingThreadControlsResult {
+  controls: ThreadAgentControls
+  failedAxes: ThreadConfigAxis[]
+}
+
 /**
  * Validate pending ids against the newly bound session, apply valid changes in ACP
  * setter order, and return the session state the renderer should display.
@@ -19,9 +24,10 @@ export async function applyPendingThreadControls(
   sessionId: string,
   intent: ThreadControlIntent,
   reported: ThreadAgentControls,
-  onError: (error: unknown) => void = () => {},
-): Promise<ThreadAgentControls> {
+  onError: (axis: ThreadConfigAxis, error: unknown) => void = () => {},
+): Promise<PendingThreadControlsResult> {
   let actual = reported
+  const failedAxes: ThreadConfigAxis[] = []
   for (const change of validatedThreadControlChanges(intent, reported)) {
     try {
       if (change.axis === 'mode') await agent.setMode(sessionId, change.value)
@@ -29,8 +35,9 @@ export async function applyPendingThreadControls(
       else await agent.setReasoningEffort(sessionId, change.value)
       actual = controlsWithCurrentValue(actual, change.axis, change.value)
     } catch (error) {
-      onError(error)
+      failedAxes.push(change.axis)
+      onError(change.axis, error)
     }
   }
-  return actual
+  return { controls: actual, failedAxes }
 }

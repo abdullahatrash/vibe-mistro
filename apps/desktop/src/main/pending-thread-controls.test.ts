@@ -26,7 +26,7 @@ const CONTROLS: ThreadAgentControls = {
 describe('applyPendingThreadControls', () => {
   it('awaits advertised setters in stable order before the caller starts session/prompt', async () => {
     const calls: string[] = []
-    const controls = await applyPendingThreadControls(
+    const result = await applyPendingThreadControls(
       {
         async setMode(_sessionId, value) {
           calls.push(`mode:${value}`)
@@ -45,14 +45,15 @@ describe('applyPendingThreadControls', () => {
     calls.push('prompt')
 
     expect(calls).toEqual(['mode:chat', 'model:small', 'reasoning:low', 'prompt'])
-    expect(controls.modes?.currentModeId).toBe('chat')
-    expect(controls.models?.currentModelId).toBe('small')
-    expect(controls.reasoningEffort?.current).toBe('low')
+    expect(result.controls.modes?.currentModeId).toBe('chat')
+    expect(result.controls.models?.currentModelId).toBe('small')
+    expect(result.controls.reasoningEffort?.current).toBe('low')
+    expect(result.failedAxes).toEqual([])
   })
 
   it('never calls a setter for no-longer-advertised values', async () => {
     const calls: string[] = []
-    const controls = await applyPendingThreadControls(
+    const result = await applyPendingThreadControls(
       {
         async setMode() {
           calls.push('mode')
@@ -70,12 +71,12 @@ describe('applyPendingThreadControls', () => {
     )
 
     expect(calls).toEqual([])
-    expect(controls).toBe(CONTROLS)
+    expect(result).toEqual({ controls: CONTROLS, failedAxes: [] })
   })
 
   it('keeps the reported value when an advertised setter rejects and continues safely', async () => {
     const errors: string[] = []
-    const controls = await applyPendingThreadControls(
+    const result = await applyPendingThreadControls(
       {
         async setMode() {
           throw new Error('mode rejected')
@@ -86,10 +87,12 @@ describe('applyPendingThreadControls', () => {
       'session-1',
       { mode: 'chat' },
       CONTROLS,
-      (error) => errors.push(error instanceof Error ? error.message : String(error)),
+      (axis, error) =>
+        errors.push(`${axis}:${error instanceof Error ? error.message : String(error)}`),
     )
 
-    expect(errors).toEqual(['mode rejected'])
-    expect(controls.modes?.currentModeId).toBe('default')
+    expect(errors).toEqual(['mode:mode rejected'])
+    expect(result.controls.modes?.currentModeId).toBe('default')
+    expect(result.failedAxes).toEqual(['mode'])
   })
 })
