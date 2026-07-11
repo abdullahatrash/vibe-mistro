@@ -24,7 +24,7 @@ import { useSyncExternalStore } from 'react'
 
 /** Every Surface kind the descriptor union accommodates (#189 files, reserved terminal/
  *  browser). Only the SINGLETON kinds have ops this slice. */
-export const SURFACE_KINDS = ['review', 'files', 'file', 'terminal', 'browser'] as const
+export const SURFACE_KINDS = ['review', 'files', 'file', 'terminal', 'browser', 'thread'] as const
 export type SurfaceKind = (typeof SURFACE_KINDS)[number]
 
 /** The kinds with a singleton descriptor + ops NOW (`review`, `files`). ⌘P/⌃⇧G target these. */
@@ -41,6 +41,12 @@ export type Surface =
   | { id: `file:${string}`; kind: 'file'; relativePath: string }
   | { id: `terminal:${string}`; kind: 'terminal'; resourceId: string }
   | { id: `browser:${string}`; kind: 'browser'; resourceId: string; url?: string }
+  | {
+      id: `thread:${string}`
+      kind: 'thread'
+      threadId: string
+      lifecycle: 'draft' | 'durable'
+    }
 
 /** One Workspace's panel state: open flag + ordered Surfaces + which is active. */
 export interface WorkspacePanelState {
@@ -113,6 +119,36 @@ function fileSurface(relativePath: string): Surface {
  */
 export function openFileSurface(state: WorkspacePanelState, relativePath: string): WorkspacePanelState {
   return upsertSurface(state, fileSurface(relativePath))
+}
+
+/** A renderer-only Draft Side Thread Surface, keyed by its already-minted Thread id. */
+function draftSideThreadSurface(threadId: string): Surface {
+  return { id: `thread:${threadId}`, kind: 'thread', threadId, lifecycle: 'draft' }
+}
+
+/** Open or re-activate one Draft Side Thread Surface without involving main or ACP. */
+export function openSideThreadSurface(state: WorkspacePanelState, threadId: string): WorkspacePanelState {
+  return upsertSurface(state, draftSideThreadSurface(threadId))
+}
+
+/** Mark a bound Side Thread durable so its Surface may survive renderer restart. */
+export function promoteSideThreadSurface(
+  state: WorkspacePanelState,
+  threadId: string,
+): WorkspacePanelState {
+  let changed = false
+  const surfaces = state.surfaces.map((surface) => {
+    if (
+      surface.kind !== 'thread' ||
+      surface.threadId !== threadId ||
+      surface.lifecycle === 'durable'
+    ) {
+      return surface
+    }
+    changed = true
+    return { ...surface, lifecycle: 'durable' as const }
+  })
+  return changed ? { ...state, surfaces } : state
 }
 
 /** Max concurrent terminals per Workspace (ADR-0014; t3code's per-group cap). */
@@ -379,6 +415,23 @@ export function coerceSurface(raw: unknown): Surface | null {
     }
     return null
   }
+  if (kind === 'thread') {
+    // Draft Side Threads are deliberately session-only: even a well-formed injected
+    // descriptor must disappear on restart. TB2 promotes a sent Thread to `durable`;
+    // accepting only that lifecycle here keeps the persistence boundary explicit.
+    const threadId = (raw as { threadId?: unknown }).threadId
+    const id = (raw as { id?: unknown }).id
+    const lifecycle = (raw as { lifecycle?: unknown }).lifecycle
+    if (
+      typeof threadId === 'string' &&
+      threadId.length > 0 &&
+      id === `thread:${threadId}` &&
+      lifecycle === 'durable'
+    ) {
+      return { id: `thread:${threadId}`, kind: 'thread', threadId, lifecycle: 'durable' }
+    }
+    return null
+  }
   return null
 }
 
@@ -432,7 +485,35 @@ export function readPanelMap(storage: PanelStorage): PanelStateMap {
 /** Persist the map best-effort; a quota/security exception is swallowed (never traps a toggle). */
 export function writePanelMap(storage: PanelStorage, map: PanelStateMap): void {
   try {
-    storage.setItem(SIDE_PANEL_STORAGE_KEY, JSON.stringify(map))
+    const persisted: PanelStateMap = {}
+    for (const [workspaceId, state] of Object.entries(map)) {
+      // An unprompted Side Thread is renderer-only session state. Keep it in the live
+      // panel map, but never leak its Thread id or descriptor into localStorage. TB2 can
+      // promote the same descriptor to `durable`, at which point it becomes persistable.
+      const isPersistable = (surface: Surface): boolean =>
+        surface.kind !== 'thread' || surface.lifecycle === 'durable'
+      const surfaces = state.surfaces.filter(isPersistable)
+      let activeSurfaceId = surfaces.some((surface) => surface.id === state.activeSurfaceId)
+        ? state.activeSurfaceId
+        : null
+      if (activeSurfaceId === null && state.activeSurfaceId !== null) {
+        const removedActiveIndex = state.surfaces.findIndex(
+          (surface) => surface.id === state.activeSurfaceId,
+        )
+        if (removedActiveIndex >= 0) {
+          // Match closeSurface's neighbour preference after filtering every Draft:
+          // choose the nearest surviving tab to the right, then the nearest to the left.
+          const fallback =
+            state.surfaces.slice(removedActiveIndex + 1).find(isPersistable) ??
+            state.surfaces.slice(0, removedActiveIndex).findLast(isPersistable)
+          activeSurfaceId = fallback?.id ?? null
+        }
+      }
+      if (state.isOpen || activeSurfaceId !== null || surfaces.length > 0) {
+        persisted[workspaceId] = { isOpen: state.isOpen, activeSurfaceId, surfaces }
+      }
+    }
+    storage.setItem(SIDE_PANEL_STORAGE_KEY, JSON.stringify(persisted))
   } catch {
     // Best-effort: a full/blocked storage must never throw from a panel op.
   }
@@ -507,6 +588,8 @@ function bindWorkspaceOp<A extends unknown[]>(
 
 export const openWorkspaceSurface = bindWorkspaceOp(openSurface)
 export const openWorkspaceFileSurface = bindWorkspaceOp(openFileSurface)
+export const openWorkspaceSideThreadSurface = bindWorkspaceOp(openSideThreadSurface)
+export const promoteWorkspaceSideThreadSurface = bindWorkspaceOp(promoteSideThreadSurface)
 export const openWorkspaceTerminalSurface = bindWorkspaceOp(openTerminalSurface)
 export const toggleWorkspaceTerminalSurface = bindWorkspaceOp(toggleTerminalSurface)
 export const openWorkspaceBrowserSurface = bindWorkspaceOp(openBrowserSurface)

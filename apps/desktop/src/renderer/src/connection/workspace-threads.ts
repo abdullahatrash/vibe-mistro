@@ -59,9 +59,9 @@ export type WorkspaceThreadsAction =
   | { type: 'open'; workspaceId: string; threadId: string }
   // Switch which Thread the Workspace is showing (kept mounted when backgrounded).
   | { type: 'select'; workspaceId: string; threadId: string }
-  // A draft's first prompt bound its session (`thread:bound`) — record it, and seed
-  // THIS Thread's controls (#70) from the bind payload (null on a reuse — keep what's
-  // there, don't clobber with null).
+  // A draft's first prompt bound its session (`thread:bound`) — host it live without
+  // changing `active`, record the session, and seed THIS Thread's controls (#70) from
+  // the bind payload (null on a reuse — keep what's there, don't clobber with null).
   | {
       type: 'bind'
       workspaceId: string
@@ -128,17 +128,20 @@ export function workspaceThreadsReducer(
     case 'bind': {
       const cur = state[action.workspaceId]
       if (!cur) return state
+      const liveUnchanged = cur.live.has(action.threadId)
+      const live = liveUnchanged ? cur.live : new Set([...cur.live, action.threadId])
       const boundUnchanged = cur.bound[action.threadId] === action.sessionId
       // Seed this Thread's controls (#70) from the bind payload; a null payload
       // (reuse — no fresh result) leaves any existing entry untouched (no clobber).
       const config = action.controls
         ? { ...cur.config, [action.threadId]: action.controls }
         : cur.config
-      if (boundUnchanged && config === cur.config) return state
+      if (liveUnchanged && boundUnchanged && config === cur.config) return state
       return {
         ...state,
         [action.workspaceId]: {
           ...cur,
+          live,
           bound: boundUnchanged ? cur.bound : { ...cur.bound, [action.threadId]: action.sessionId },
           config,
         },

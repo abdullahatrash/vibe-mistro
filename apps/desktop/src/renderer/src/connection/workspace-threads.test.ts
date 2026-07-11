@@ -144,6 +144,30 @@ describe('workspaceThreadsReducer', () => {
     expect(s.w1.bound).toEqual({ draft: 'sD' })
   })
 
+  it('bind hosts a Side Thread live without changing the primary active Thread or sibling config', () => {
+    let s = workspaceThreadsReducer(initialWorkspaceThreads, {
+      type: 'connect',
+      workspaceId: 'w1',
+      threadId: 'primary',
+      sessionId: 's-primary',
+      controls: controls('default'),
+    })
+
+    s = workspaceThreadsReducer(s, {
+      type: 'bind',
+      workspaceId: 'w1',
+      threadId: 'side-thread',
+      sessionId: 's-side',
+      controls: controls('plan', 'devstral-small'),
+    })
+
+    expect([...s.w1.live]).toEqual(['primary', 'side-thread'])
+    expect(s.w1.active).toBe('primary')
+    expect(s.w1.bound).toEqual({ primary: 's-primary', 'side-thread': 's-side' })
+    expect(s.w1.config['side-thread']?.modes?.currentModeId).toBe('plan')
+    expect(s.w1.config.primary?.modes?.currentModeId).toBe('default')
+  })
+
   it('bind with an unchanged session AND null controls returns the same state reference', () => {
     const s = workspaceThreadsReducer(initialWorkspaceThreads, {
       type: 'connect',

@@ -51,6 +51,8 @@ import {
   subscribeWorkspaceCommands,
 } from './workspace-commands'
 import { buildComposerHistoryEntries } from './composer-history'
+import { MessageSelectionToolbar } from './MessageSelectionToolbar'
+import type { MessageSelection } from './message-selection'
 
 /** Process-local counter for unique echoed-prompt ids. */
 let promptSeq = 0
@@ -99,6 +101,8 @@ export function Conversation({
   onSetConfig,
   onAuthExpired,
   onBound,
+  onAskInSideThread,
+  autoFocusComposer = false,
 }: {
   thread: LiveThread
   /** The connection's current Mode + options (#66) — display-from-session-state. */
@@ -119,6 +123,10 @@ export function Conversation({
    *  null on the `sendPrompt`-result path (the result carries no controls — the
    *  `thread:bound` that fired ahead of the stream already delivered them). */
   onBound?: (sessionId: string, controls: ThreadAgentControls | null) => void
+  /** A verbatim selection from one eligible user/agent Message in this Thread. */
+  onAskInSideThread?: (selection: MessageSelection) => void
+  /** Focus the composer once when this presentation mounts (Side Threads only). */
+  autoFocusComposer?: boolean
 }): JSX.Element {
   const [state, dispatch] = useReducer(conversationReducer, initialConversationState)
   // The session this Thread is bound to — null until a draft's first prompt binds
@@ -545,7 +553,12 @@ export function Conversation({
           <TimelineHandlersProvider value={timelineHandlers}>
             <TimelineActivityProvider value={timelineActivity}>
               {state.items.map((item, idx) => (
-                <Item key={item.id} item={item} index={idx} />
+                <Item
+                  key={item.id}
+                  item={item}
+                  index={idx}
+                  selectable={onAskInSideThread !== undefined}
+                />
               ))}
             </TimelineActivityProvider>
           </TimelineHandlersProvider>
@@ -554,6 +567,14 @@ export function Conversation({
               and unmounts on completion, so its timer starts at turn start. */}
           {state.isProcessing && <WorkingRow />}
         </MessageScroller>
+
+        {onAskInSideThread && (
+          <MessageSelectionToolbar
+            conversationRef={convRef}
+            thread={{ id: thread.threadId, title }}
+            onAskInSideThread={onAskInSideThread}
+          />
+        )}
 
         {state.isProcessing && (
           // Escape hatch: if a turn wedges (e.g. a permission prompt is dismissed
@@ -578,6 +599,7 @@ export function Conversation({
           models={models}
           reasoningEffort={reasoningEffort}
           onSetConfig={onSetConfig}
+          autoFocusComposer={autoFocusComposer}
         />
       </div>
     </FileOpenProvider>

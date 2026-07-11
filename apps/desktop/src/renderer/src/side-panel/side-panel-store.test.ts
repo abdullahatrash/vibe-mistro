@@ -7,6 +7,7 @@ import {
   closeSurface,
   closeSurfacesToRight,
   closePanel,
+  closeWorkspaceSurface,
   coercePanelState,
   coerceSurface,
   EMPTY_PANEL_STATE,
@@ -16,12 +17,16 @@ import {
   setBrowserSurfaceUrl,
   toggleBrowserSurface,
   openFileSurface,
+  openSideThreadSurface,
   openSurface,
   openTerminalSurface,
   terminalSurfaceCount,
   toggleTerminalSurface,
   openWorkspaceFileSurface,
+  openWorkspaceSideThreadSurface,
   openWorkspaceSurface,
+  promoteSideThreadSurface,
+  promoteWorkspaceSideThreadSurface,
   readPanelMap,
   removeWorkspacePanel,
   showPanel,
@@ -114,6 +119,54 @@ describe('openFileSurface', () => {
     const withFile = openFileSurface(withReview, 'src/app.ts')
     expect(withFile.surfaces).toEqual([REVIEW, APP])
     expect(withFile.activeSurfaceId).toBe('file:src/app.ts')
+  })
+})
+
+describe('openSideThreadSurface', () => {
+  it('opens and activates a Draft Side Thread Surface keyed by its Thread id', () => {
+    expect(openSideThreadSurface(empty(), 'thread-1')).toEqual({
+      isOpen: true,
+      activeSurfaceId: 'thread:thread-1',
+      surfaces: [
+        {
+          id: 'thread:thread-1',
+          kind: 'thread',
+          threadId: 'thread-1',
+          lifecycle: 'draft',
+        },
+      ],
+    })
+  })
+
+  it('promotes only the matching Draft Side Thread to durable without disturbing siblings', () => {
+    const first = openSideThreadSurface(empty(), 'thread-1')
+    const both = openSideThreadSurface(first, 'thread-2')
+
+    expect(promoteSideThreadSurface(both, 'thread-1')).toEqual({
+      ...both,
+      surfaces: [
+        {
+          id: 'thread:thread-1',
+          kind: 'thread',
+          threadId: 'thread-1',
+          lifecycle: 'durable',
+        },
+        {
+          id: 'thread:thread-2',
+          kind: 'thread',
+          threadId: 'thread-2',
+          lifecycle: 'draft',
+        },
+      ],
+    })
+  })
+
+  it('promotion is a no-op for an unknown or already-durable Side Thread', () => {
+    const draft = openSideThreadSurface(empty(), 'thread-1')
+    expect(promoteSideThreadSurface(draft, 'missing')).toBe(draft)
+
+    const durable = promoteSideThreadSurface(draft, 'thread-1')
+    expect(promoteSideThreadSurface(durable, 'thread-1')).toBe(durable)
   })
 })
 
@@ -547,6 +600,30 @@ describe('coerceSurface', () => {
     }
   })
 
+  it('never restores a Draft Side Thread descriptor but accepts the durable lifecycle seam', () => {
+    expect(
+      coerceSurface({
+        id: 'thread:thread-1',
+        kind: 'thread',
+        threadId: 'thread-1',
+        lifecycle: 'draft',
+      }),
+    ).toBeNull()
+    expect(
+      coerceSurface({
+        id: 'thread:thread-1',
+        kind: 'thread',
+        threadId: 'thread-1',
+        lifecycle: 'durable',
+      }),
+    ).toEqual({
+      id: 'thread:thread-1',
+      kind: 'thread',
+      threadId: 'thread-1',
+      lifecycle: 'durable',
+    })
+  })
+
   it('drops not-yet-implemented / unknown / malformed descriptors', () => {
     expect(coerceSurface({ kind: 'nope' })).toBeNull()
     expect(coerceSurface(null)).toBeNull()
@@ -613,6 +690,48 @@ describe('readPanelMap / writePanelMap', () => {
     expect(readPanelMap(fakeStorage())).toEqual({})
   })
 
+  it('falls through an active Draft Side Thread to the next surviving Surface on restore', () => {
+    const storage = fakeStorage()
+    const draft: Surface = {
+      id: 'thread:thread-1',
+      kind: 'thread',
+      threadId: 'thread-1',
+      lifecycle: 'draft',
+    }
+    writePanelMap(storage, {
+      'ws-a': {
+        isOpen: true,
+        activeSurfaceId: draft.id,
+        surfaces: [REVIEW, draft, FILES],
+      },
+    })
+
+    expect(readPanelMap(storage)['ws-a']).toEqual({
+      isOpen: true,
+      activeSurfaceId: 'files',
+      surfaces: [REVIEW, FILES],
+    })
+  })
+
+  it('falls back to the previous surviving Surface when an active Draft has no durable neighbour to its right', () => {
+    const storage = fakeStorage()
+    const draft: Surface = {
+      id: 'thread:thread-1',
+      kind: 'thread',
+      threadId: 'thread-1',
+      lifecycle: 'draft',
+    }
+    writePanelMap(storage, {
+      'ws-a': {
+        isOpen: true,
+        activeSurfaceId: draft.id,
+        surfaces: [REVIEW, draft],
+      },
+    })
+
+    expect(readPanelMap(storage)['ws-a']?.activeSurfaceId).toBe('review')
+  })
+
   it('prunes fully-empty entries on read', () => {
     const storage = fakeStorage()
     storage.store.set(
@@ -673,6 +792,65 @@ describe('module singleton', () => {
     openWorkspaceFileSurface('ws-a', 'src/app.ts')
     _resetSidePanelStore(storage)
     expect(getWorkspacePanel('ws-a').surfaces).toHaveLength(1)
+  })
+
+  it('keeps a workspace-scoped Draft Side Thread live but never persists or restores its descriptor', () => {
+    const storage = fakeStorage()
+    _resetSidePanelStore(storage)
+
+    openWorkspaceSideThreadSurface('ws-a', 'thread-1')
+
+    expect(getWorkspacePanel('ws-a').activeSurfaceId).toBe('thread:thread-1')
+    expect(storage.store.get(SIDE_PANEL_STORAGE_KEY)).not.toContain('thread-1')
+
+    _resetSidePanelStore(storage)
+    expect(getWorkspacePanel('ws-a').surfaces).toEqual([])
+    expect(getWorkspacePanel('ws-a').activeSurfaceId).toBeNull()
+  })
+
+  it('uses the standard workspace-scoped activation and close mechanics for Side Drafts', () => {
+    _resetSidePanelStore(null)
+    openWorkspaceSideThreadSurface('ws-a', 'thread-1')
+    openWorkspaceSideThreadSurface('ws-a', 'thread-2')
+
+    activateWorkspaceSurface('ws-a', 'thread:thread-1')
+    expect(getWorkspacePanel('ws-a').activeSurfaceId).toBe('thread:thread-1')
+
+    closeWorkspaceSurface('ws-a', 'thread:thread-1')
+    expect(getWorkspacePanel('ws-a')).toEqual({
+      isOpen: true,
+      activeSurfaceId: 'thread:thread-2',
+      surfaces: [
+        {
+          id: 'thread:thread-2',
+          kind: 'thread',
+          threadId: 'thread-2',
+          lifecycle: 'draft',
+        },
+      ],
+    })
+  })
+
+  it('persists and restores a workspace-scoped Side Thread only after promotion', () => {
+    const storage = fakeStorage()
+    _resetSidePanelStore(storage)
+    openWorkspaceSideThreadSurface('ws-a', 'thread-1')
+
+    promoteWorkspaceSideThreadSurface('ws-a', 'thread-1')
+    _resetSidePanelStore(storage)
+
+    expect(getWorkspacePanel('ws-a')).toEqual({
+      isOpen: true,
+      activeSurfaceId: 'thread:thread-1',
+      surfaces: [
+        {
+          id: 'thread:thread-1',
+          kind: 'thread',
+          threadId: 'thread-1',
+          lifecycle: 'durable',
+        },
+      ],
+    })
   })
 
   it('notifies subscribers on a real change only', () => {

@@ -3,6 +3,8 @@ import type {
   AuthMethod,
   ListMetadataResult,
   StartThreadResult,
+  ThreadAgentControls,
+  ThreadConfigAxis,
   ThreadConnection,
   ThreadMeta,
   VibeDetectResult,
@@ -28,6 +30,12 @@ import { useThreadControls } from './connection/use-thread-controls'
 import { useWorkspaceActions } from './connection/use-workspace-actions'
 import { resolveActiveControls } from './connection/resolve-controls'
 import { setThreadStatus, type ThreadStatusMap } from './conversation/thread-status'
+import { Conversation } from './conversation/Conversation'
+import {
+  promoteComposerDraftToPersistent,
+  stageMessageSelectionContext,
+} from './conversation/composer-draft-store'
+import type { MessageSelection } from './conversation/message-selection'
 import { replayCache, wireReplayCacheInvalidation } from './conversation/replay-cache'
 import { setWorkspaceControls, workspaceControlsKey } from './connection/workspace-controls-store'
 import { ArrowLeft, ArrowRight, PanelLeft, PanelRight, Terminal } from 'lucide-react'
@@ -47,6 +55,8 @@ import {
   setSidebarCollapsed as setSidebarCollapsedStore,
 } from './shell/sidebar-collapsed-store'
 import {
+  openWorkspaceSideThreadSurface,
+  promoteWorkspaceSideThreadSurface,
   toggleWorkspacePanelVisibility,
   toggleWorkspaceTerminalSurface,
   useWorkspacePanel,
@@ -570,6 +580,78 @@ export function App(): JSX.Element {
     const liveIds = wts?.live ?? new Set([conn.threadId])
     const isLive = routeThreadSelection(activeThread, liveIds) === 'live'
     const seed = seedSessionId(activeThread, wts?.bound ?? {})
+
+    function setThreadConfig(
+      threadId: string,
+      axis: ThreadConfigAxis,
+      value: string,
+      sessionId: string | null,
+    ): void {
+      if (sessionId) {
+        controls.changeThreadConfig(conn.workspaceId, conn.agentId, threadId, axis, value, sessionId)
+      } else {
+        controls.preselectDraftConfig(conn.workspaceId, threadId, axis, value)
+      }
+    }
+
+    function recordBoundThread(
+      threadId: string,
+      sessionId: string,
+      boundControls: ThreadAgentControls | null,
+    ): void {
+      wtDispatch({ type: 'bind', workspaceId: conn.workspaceId, threadId, sessionId, controls: boundControls })
+      if (!boundControls) return
+      controls.reassertAfterResume(conn.workspaceId, conn.agentId, threadId, sessionId, boundControls)
+      setWorkspaceControls(
+        window.localStorage,
+        workspaceControlsKey(conn.workspaceId, conn.workspaceDir),
+        boundControls,
+      )
+    }
+
+    function openSideThread(selection: MessageSelection): void {
+      const threadId = crypto.randomUUID()
+      stageMessageSelectionContext(threadId, selection)
+      openWorkspaceSideThreadSurface(conn.workspaceId, threadId)
+    }
+
+    function renderSideThread(threadId: string): ReactNode {
+      const sideThreadTitle = cold.find((thread) => thread.id === threadId)?.title ?? 'Side Thread'
+      const sideControls = resolveActiveControls(
+        workspaceThreads,
+        conn,
+        threadId,
+        window.localStorage,
+      )
+      return (
+        <Conversation
+          key={threadId}
+          thread={{
+            agentId: conn.agentId,
+            threadId,
+            workspaceId: conn.workspaceId,
+            workspaceDir: conn.workspaceDir,
+            sessionId: wts?.bound[threadId] ?? null,
+            title: sideThreadTitle,
+          }}
+          modes={sideControls.modes}
+          models={sideControls.models}
+          reasoningEffort={sideControls.reasoningEffort}
+          onSetConfig={(axis, value, sessionId) => setThreadConfig(threadId, axis, value, sessionId)}
+          onAuthExpired={(authMethods) =>
+            toSignInPanel(conn.workspaceId, conn.agentId, conn.workspaceDir, authMethods)
+          }
+          onBound={(sessionId, boundControls) => {
+            recordBoundThread(threadId, sessionId, boundControls)
+            promoteWorkspaceSideThreadSurface(conn.workspaceId, threadId)
+            promoteComposerDraftToPersistent(threadId)
+          }}
+          onAskInSideThread={openSideThread}
+          autoFocusComposer
+        />
+      )
+    }
+
     return (
       // Key by agentId so per-Workspace state can't bleed across connections.
       // A controlled outlet now (TB3 #48): the sidebar drives selection; this just
@@ -583,31 +665,17 @@ export function App(): JSX.Element {
         busy={busy}
         seedSessionId={seed}
         controls={resolveActiveControls(workspaceThreads, conn, activeThread.id, window.localStorage)}
-        onSetConfig={(axis, value, sessionId) => {
-          // A real session => the bound IPC path (#70); a null session => a draft
-          // pre-pick that only caches (#75), applied to the session on first bind.
-          if (sessionId) {
-            controls.changeThreadConfig(conn.workspaceId, conn.agentId, activeThread.id, axis, value, sessionId)
-          } else {
-            controls.preselectDraftConfig(conn.workspaceId, activeThread.id, axis, value)
-          }
-        }}
-        onBound={(sessionId, boundControls) => {
-          // Seed the displayed config from the bound session's reported values, then
-          // re-assert the user's cached selection over them (#72) — a resume reports
-          // defaults, so this restores a prior non-default Mode/Model/effort.
-          wtDispatch({ type: 'bind', workspaceId: conn.workspaceId, threadId: activeThread.id, sessionId, controls: boundControls })
-          if (boundControls) {
-            controls.reassertAfterResume(conn.workspaceId, conn.agentId, activeThread.id, sessionId, boundControls)
-            // Cache the bound session's option lists per Workspace (#153) so the NEXT
-            // never-bound draft here shows the picker before its own first prompt binds.
-            setWorkspaceControls(
-              window.localStorage,
-              workspaceControlsKey(conn.workspaceId, conn.workspaceDir),
-              boundControls,
-            )
-          }
-        }}
+        onSetConfig={(axis, value, sessionId) =>
+          setThreadConfig(activeThread.id, axis, value, sessionId)
+        }
+        onBound={(sessionId, boundControls) =>
+          recordBoundThread(activeThread.id, sessionId, boundControls)
+        }
+        onAskInSideThread={openSideThread}
+        renderSideThread={renderSideThread}
+        getSideThreadTitle={(threadId) =>
+          cold.find((thread) => thread.id === threadId)?.title ?? null
+        }
         onContinue={() => {
           wtDispatch({ type: 'open', workspaceId: conn.workspaceId, threadId: activeThread.id })
           navDispatch({ type: 'select-thread', workspaceId: conn.workspaceId, threadId: activeThread.id })

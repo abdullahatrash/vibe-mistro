@@ -6,6 +6,8 @@
  * No DOM, no IPC: list operations + the serialize transform, unit-tested as plain data.
  */
 
+import type { MessageSelection } from './message-selection'
+
 /** A skill invocation staged as a chip — at most one (the agent parses only a LEADING `/name`). */
 export interface SkillContext {
   kind: 'skill'
@@ -65,6 +67,16 @@ export interface PastedTextContext {
   text: string
 }
 
+/**
+ * A verbatim excerpt selected from one user or agent Message. The source is kept with
+ * the chip so the user can inspect where it came from before send. Transport encoding
+ * is deliberately owned by the next tracer bullet; this slice only stages the context.
+ */
+export interface MessageSelectionContext extends MessageSelection {
+  kind: 'message-selection'
+  id: string
+}
+
 /** A context chip staged in the composer awaiting send. */
 export type PendingContext =
   | SkillContext
@@ -72,6 +84,7 @@ export type PendingContext =
   | ElementContext
   | ReviewCommentContext
   | PastedTextContext
+  | MessageSelectionContext
 
 function stringOrNull(value: unknown): string | null {
   return typeof value === 'string' ? value : null
@@ -134,6 +147,28 @@ function coercePendingContext(value: unknown): PendingContext | null {
       const text = stringOrNull(context.text)
       return id && text !== null ? { kind: 'pasted', id, text } : null
     }
+    case 'message-selection': {
+      const id = stringOrNull(context.id)
+      const text = stringOrNull(context.text)
+      if (!id || text === null || text.trim().length === 0) return null
+      if (typeof context.source !== 'object' || context.source === null || Array.isArray(context.source)) {
+        return null
+      }
+      const source = context.source as Record<string, unknown>
+      const messageId = stringOrNull(source.messageId)
+      const threadId = stringOrNull(source.threadId)
+      const threadTitle = stringOrNull(source.threadTitle)
+      const role = source.role
+      if (!messageId || !threadId || threadTitle === null || (role !== 'user' && role !== 'agent')) {
+        return null
+      }
+      return {
+        kind: 'message-selection',
+        id,
+        text,
+        source: { messageId, role, threadId, threadTitle },
+      }
+    }
     default:
       return null
   }
@@ -180,6 +215,8 @@ export function contextKey(context: PendingContext): string {
       return `review:${context.id}`
     case 'pasted':
       return `pasted:${context.id}`
+    case 'message-selection':
+      return `message-selection:${context.id}`
   }
 }
 
@@ -226,6 +263,100 @@ const REVIEW_COMMENTS_CLOSE = '</review_comments>'
  *  per chip (pastes are opaque blobs; there is no entry shape to pack several into one). */
 const PASTED_TEXT_OPEN = '<pasted_text>'
 const PASTED_TEXT_CLOSE = '</pasted_text>'
+
+/**
+ * One deterministic trailing block for every staged Message selection. Its JSON
+ * string escapes HTML framing characters, so selected text containing these marker
+ * names can never masquerade as the app-owned outer boundary.
+ */
+const MESSAGE_SELECTIONS_OPEN = '<message_selections>'
+const MESSAGE_SELECTIONS_CLOSE = '</message_selections>'
+const MESSAGE_SELECTIONS_VERSION = 1
+
+interface MessageSelectionsPayload {
+  version: typeof MESSAGE_SELECTIONS_VERSION
+  selections: Array<Pick<MessageSelectionContext, 'text' | 'source'>>
+}
+
+function htmlSafeJson(value: unknown): string {
+  return JSON.stringify(value, null, 2).replace(/[<>&]/g, (char) => {
+    switch (char) {
+      case '<':
+        return '\\u003c'
+      case '>':
+        return '\\u003e'
+      default:
+        return '\\u0026'
+    }
+  })
+}
+
+function formatMessageSelections(selections: readonly MessageSelectionContext[]): string {
+  const payload: MessageSelectionsPayload = {
+    version: MESSAGE_SELECTIONS_VERSION,
+    selections: selections.map(({ text, source }) => ({
+      text,
+      source: {
+        messageId: source.messageId,
+        role: source.role,
+        threadId: source.threadId,
+        threadTitle: source.threadTitle,
+      },
+    })),
+  }
+  return `${MESSAGE_SELECTIONS_OPEN}\n${htmlSafeJson(payload)}\n${MESSAGE_SELECTIONS_CLOSE}`
+}
+
+function extractMessageSelections(text: string): {
+  cleanText: string
+  selections: MessageSelectionContext[]
+} | null {
+  const trimmed = text.trimEnd()
+  if (!trimmed.endsWith(MESSAGE_SELECTIONS_CLOSE)) return null
+  const open = trimmed.lastIndexOf(MESSAGE_SELECTIONS_OPEN)
+  if (open === -1) return null
+  const block = trimmed.slice(open)
+  const payloadStart = MESSAGE_SELECTIONS_OPEN.length + 1
+  const payloadEnd = block.length - MESSAGE_SELECTIONS_CLOSE.length - 1
+  if (
+    block[MESSAGE_SELECTIONS_OPEN.length] !== '\n' ||
+    block[payloadEnd] !== '\n' ||
+    payloadEnd < payloadStart
+  ) {
+    return null
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(block.slice(payloadStart, payloadEnd))
+  } catch {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
+  const payload = parsed as Partial<MessageSelectionsPayload>
+  if (payload.version !== MESSAGE_SELECTIONS_VERSION || !Array.isArray(payload.selections)) return null
+  if (payload.selections.length === 0) return null
+
+  const selections: MessageSelectionContext[] = []
+  for (const [index, entry] of payload.selections.entries()) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return null
+    const context = coercePendingContext({
+      ...entry,
+      kind: 'message-selection',
+      id: `message-selection-extract:${index}`,
+    })
+    if (context?.kind !== 'message-selection') return null
+    selections.push(context)
+  }
+
+  // Only consume the exact canonical shape this app emits. A malformed or merely
+  // marker-shaped hand-written suffix remains ordinary prompt text.
+  if (formatMessageSelections(selections) !== block) return null
+  return {
+    cleanText: trimmed.slice(0, open).replace(/\n+$/, ''),
+    selections,
+  }
+}
 
 /** One review comment's lines inside the block (#239): a head line naming the file +
  *  line range, a single-line `note:` (whitespace-normalized, like element text), then
@@ -345,21 +476,31 @@ export interface ExtractedPromptContexts {
   elements: ElementContext[]
   reviews: ReviewCommentContext[]
   pasted: PastedTextContext[]
+  selections: MessageSelectionContext[]
 }
 
 /**
  * The FULL display mirror of {@link serializeForSend} (#230/#231): strip a trailing
- * `<element_context>` block, then a (now-)trailing `<attached_files>` block, recovering
- * the chips the prompt was sent with. Each stage passes text through untouched when its
- * marker is absent or malformed, so hand-typed prompts are never altered. Extracted
- * element ids are render-local (`el-extract:<n>`) — pairing to a live screenshot exists
- * only pre-send.
+ * Message-selection JSON, `<pasted_text>`, `<review_comments>`, `<element_context>`,
+ * then `<attached_files>` in reverse serialization order, recovering the chips the
+ * prompt was sent with. Each stage passes text through untouched when its marker is
+ * absent or malformed, so hand-typed prompts are never altered. Extracted ids are
+ * render-local — pairing to original live UI state exists only pre-send.
  */
 export function extractPromptContexts(text: string): ExtractedPromptContexts {
   let working = text
   let elements: ElementContext[] = []
   let reviews: ReviewCommentContext[] = []
   const pasted: PastedTextContext[] = []
+  let selections: MessageSelectionContext[] = []
+  // Message selections serialize last, so their injection-safe JSON block strips
+  // first. A malformed lookalike deliberately blocks deeper extraction: it is user
+  // prose, not app framing, and must pass through byte-for-byte.
+  const extractedSelections = extractMessageSelections(working)
+  if (extractedSelections) {
+    working = extractedSelections.cleanText
+    selections = extractedSelections.selections
+  }
   // Pasted-text blocks serialize LAST of all, so they strip FIRST — one block per
   // chip, back-to-front (unshift keeps staged order). The inner slice drops exactly
   // the one newline we added on each side of the verbatim text, so the paste
@@ -418,7 +559,7 @@ export function extractPromptContexts(text: string): ExtractedPromptContexts {
     }
   }
   const { cleanText, files } = extractAttachedFiles(working)
-  return { cleanText, files, elements, reviews, pasted }
+  return { cleanText, files, elements, reviews, pasted, selections }
 }
 
 /**
@@ -433,6 +574,12 @@ export function buildPromptCopyText(contexts: ExtractedPromptContexts): string {
   for (const element of contexts.elements) parts.push(formatElementEntry(element).join('\n'))
   for (const review of contexts.reviews) parts.push(formatReviewEntry(review).join('\n'))
   for (const paste of contexts.pasted) parts.push(paste.text)
+  for (const selection of contexts.selections) {
+    const role = selection.source.role === 'agent' ? 'Agent' : 'User'
+    parts.push(
+      `Selection from ${role} in Thread "${selection.source.threadTitle}":\n${selection.text}`,
+    )
+  }
   return parts.join('\n\n')
 }
 
@@ -442,8 +589,9 @@ export function buildPromptCopyText(contexts: ExtractedPromptContexts): string {
  * a TRAILING `<attached_files>` block of `@path` mentions the agent expands itself
  * (ADR-0002 — plain text, no client-side expansion); element chips become a final
  * `<element_context>` block of descriptive prose; long pastes become trailing
- * `<pasted_text>` blocks, one per chip. The prose itself is trimmed exactly like the
- * send path trims the draft.
+ * `<pasted_text>` blocks, one per chip; Message selections become the final HTML-safe
+ * JSON block with exact text + full provenance. The prose itself is trimmed exactly
+ * like the send path trims the draft.
  */
 export function serializeForSend(text: string, contexts: readonly PendingContext[]): string {
   const prose = text.trim()
@@ -472,5 +620,9 @@ export function serializeForSend(text: string, contexts: readonly PendingContext
     if (paste.kind !== 'pasted') continue
     parts.push(`${PASTED_TEXT_OPEN}\n${paste.text}\n${PASTED_TEXT_CLOSE}`)
   }
+  const selections = contexts.filter(
+    (context): context is MessageSelectionContext => context.kind === 'message-selection',
+  )
+  if (selections.length > 0) parts.push(formatMessageSelections(selections))
   return parts.filter((p) => p.length > 0).join('\n\n')
 }

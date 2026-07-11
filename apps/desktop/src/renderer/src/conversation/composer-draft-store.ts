@@ -1,7 +1,8 @@
 import { useCallback, useSyncExternalStore } from 'react'
 import { coerceInlineTokens, type ComposerInlineToken } from './composer-inline-tokens'
 import { parseDataUrl } from './image-attach'
-import { coercePendingContexts, type PendingContext } from './pending-contexts'
+import { addContext, coercePendingContexts, type PendingContext } from './pending-contexts'
+import type { MessageSelection } from './message-selection'
 
 /**
  * Per-Thread composer drafts (#60): the unsent text in a Thread's composer, kept
@@ -349,6 +350,12 @@ export interface ComposerDraftStore {
   getSnapshot(threadId: string): ComposerDraft
   getTextSnapshot(threadId: string): string
   getPersistenceError(): boolean
+  /** Keep this Thread's live draft out of the localStorage projection. */
+  markSessionOnly(threadId: string): void
+  /** Remove a live draft and its session-only classification (Surface close/delete). */
+  discard(threadId: string): void
+  /** Allow this Thread's current and future drafts into the persistence projection. */
+  promoteToPersistent(threadId: string): void
   setDraft(threadId: string, draft: ComposerDraft): void
   setText(threadId: string, text: string): void
   clear(threadId: string): void
@@ -368,6 +375,7 @@ export function createComposerDraftStore(
   const listeners = new Set<() => void>()
   let drafts = readMap(storage)
   if (storage && Object.keys(drafts).length === 0) drafts = migrateLegacyMap(storage)
+  const sessionOnlyThreadIds = new Set<string>()
   let timer: ReturnType<typeof setTimeout> | null = null
   let dirty = false
   let persistenceError = false
@@ -389,7 +397,10 @@ export function createComposerDraftStore(
       timer = null
     }
     if (!storage || !dirty) return
-    const succeeded = writeMap(storage, drafts, (error) => {
+    const persistedDrafts = Object.fromEntries(
+      Object.entries(drafts).filter(([threadId]) => !sessionOnlyThreadIds.has(threadId)),
+    )
+    const succeeded = writeMap(storage, persistedDrafts, (error) => {
       options.onPersistenceError?.(error)
       setPersistenceError(true)
     })
@@ -437,6 +448,23 @@ export function createComposerDraftStore(
     getPersistenceError() {
       return persistenceError
     },
+    markSessionOnly(threadId) {
+      if (sessionOnlyThreadIds.has(threadId)) return
+      sessionOnlyThreadIds.add(threadId)
+      // Purge an older persisted projection, if one exists. No notification: the
+      // live Composer snapshot itself has not changed.
+      schedulePersistence()
+    },
+    discard(threadId) {
+      const wasSessionOnly = sessionOnlyThreadIds.delete(threadId)
+      const hadDraft = threadId in drafts
+      updateDraft(threadId, EMPTY_COMPOSER_DRAFT)
+      if (wasSessionOnly && !hadDraft) schedulePersistence()
+    },
+    promoteToPersistent(threadId) {
+      if (!sessionOnlyThreadIds.delete(threadId)) return
+      schedulePersistence()
+    },
     setDraft(threadId, draft) {
       updateDraft(threadId, sessionDraft(draft))
     },
@@ -458,15 +486,74 @@ function resolveWindowStorage(): DraftStorage | null {
   return typeof window === 'undefined' ? null : window.localStorage
 }
 
-const composerDraftStore = createComposerDraftStore(resolveWindowStorage(), {
-  persistDelayMs: COMPOSER_DRAFT_PERSIST_DEBOUNCE_MS,
-  onPersistenceError(error) {
-    console.warn('[composer-drafts] Failed to persist draft changes', error)
-  },
-})
+function createRendererComposerDraftStore(
+  storage: DraftStorage | null,
+  persistDelayMs = COMPOSER_DRAFT_PERSIST_DEBOUNCE_MS,
+): ComposerDraftStore {
+  return createComposerDraftStore(storage, {
+    persistDelayMs,
+    onPersistenceError(error) {
+      console.warn('[composer-drafts] Failed to persist draft changes', error)
+    },
+  })
+}
+
+let composerDraftStore = createRendererComposerDraftStore(resolveWindowStorage())
+let messageSelectionSeq = 0
+
+/**
+ * Stage a source-Message excerpt for a renderer-minted Thread before its Composer is
+ * mounted. Updating the shared external store (rather than localStorage directly) gives
+ * the first Composer render the staged chip and notifies any already-mounted subscriber.
+ */
+export function stageMessageSelectionContext(
+  threadId: string,
+  selection: MessageSelection,
+): void {
+  composerDraftStore.markSessionOnly(threadId)
+  const current = composerDraftStore.getSnapshot(threadId)
+  composerDraftStore.setDraft(threadId, {
+    ...current,
+    contextAttachments: addContext(current.contextAttachments, {
+      kind: 'message-selection',
+      id: `message-selection:${messageSelectionSeq++}`,
+      text: selection.text,
+      source: { ...selection.source },
+    }),
+  })
+}
+
+/** Clear a Thread's live composer draft through the shared external store. */
+export function clearComposerDraft(threadId: string): void {
+  composerDraftStore.discard(threadId)
+}
+
+/** Promote a bound Side Thread so its future composer drafts survive app restart. */
+export function promoteComposerDraftToPersistent(threadId: string): void {
+  composerDraftStore.promoteToPersistent(threadId)
+}
+
+/** Test-only reset for focused module-singleton tests. */
+export function _resetComposerDraftStore(
+  storage: DraftStorage | null = null,
+  persistDelayMs = 0,
+): ComposerDraftStore {
+  composerDraftStore.flush()
+  composerDraftStore = createRendererComposerDraftStore(storage, persistDelayMs)
+  messageSelectionSeq = 0
+  return composerDraftStore
+}
+
+/*
+ * Keep the renderer store's pending writes safe across window teardown. The closure
+ * intentionally reads the mutable module binding so test resets cannot leave a stale
+ * instance behind.
+ */
+/* c8 ignore start -- Electron window lifecycle, not exercised in node tests. */
 if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', () => composerDraftStore.flush())
 }
+/* c8 ignore stop */
 
 export function useComposerDraftText(
   threadId: string,
