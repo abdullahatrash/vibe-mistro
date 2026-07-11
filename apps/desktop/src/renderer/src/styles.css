@@ -24,6 +24,15 @@
   --placeholder: #a89f95;
   --faint: #a79f96;
 
+  /* Terminal palette (docs/design-tokens.md). The app shell is light, while the
+     terminal intentionally keeps a familiar dark canvas with readable default
+     input and an explicit ANSI palette. */
+  --terminal-background: #1c1b1a;
+  --terminal-foreground: #d8d2ca;
+  --terminal-green: #7fb56b;
+  --terminal-blue: #6ba0d6;
+  --terminal-gray: #a49c93;
+
   --accent: #df6f38;
   --accent-text: #cf6a3a;
   --accent-emphasis: #e07a3e;

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { Eraser, MessageSquarePlus, RotateCcw } from 'lucide-react'
-import { Terminal, type ITheme } from '@xterm/xterm'
+import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { cn } from '../lib/utils'
 import { emitComposerInsertTerminal } from '../conversation/composer-insert'
+import { buildTerminalTheme } from './terminal-theme'
 
 /**
  * The Terminal Surface (ADR-0014): an xterm.js view over the Workspace's shell
@@ -199,7 +200,10 @@ export function TerminalSurface({
           <RotateCcw aria-hidden />
         </TerminalAction>
       </div>
-      <div ref={containerRef} className="min-h-0 flex-1 px-2 py-1.5" />
+      <div
+        ref={containerRef}
+        className="min-h-0 flex-1 px-2 py-1.5 [background:var(--terminal-background)] [color:var(--terminal-foreground)]"
+      />
       {openError && (
         <div className="absolute inset-0 flex items-center justify-center bg-panel p-6">
           <p className="max-w-sm text-center text-xs leading-relaxed text-muted">{openError}</p>
@@ -209,10 +213,10 @@ export function TerminalSurface({
   )
 }
 
-/** The xterm theme built from the panel's computed design-token colors (re-read on theme flip). */
-function readTerminalTheme(el: HTMLElement): ITheme {
+/** The xterm theme built from inherited design tokens (re-read on a live theme flip). */
+function readTerminalTheme(el: HTMLElement): ReturnType<typeof buildTerminalTheme> {
   const styles = getComputedStyle(el)
-  return { background: styles.backgroundColor, foreground: styles.color }
+  return buildTerminalTheme((name) => styles.getPropertyValue(name))
 }
 
 /** A terminal toolbar icon button — muted, lights on hover (the panel's affordance idiom). */

@@ -81,3 +81,29 @@ test('live: reopening an old thread resumes on the fake agent with history intac
     await app.close()
   }
 })
+
+test('live: terminal keeps readable colors in the built renderer', async () => {
+  const userData = await seedProfile({ thread: false })
+  const { app, page } = await launch(userData, FAKE_ENV)
+  try {
+    await page.getByText('seeded-project').hover()
+    await page.getByLabel('New thread in seeded-project').click()
+    await expect(page.getByText('connected')).toBeVisible()
+
+    await page.getByLabel('Open side panel').click()
+    await page.getByText('Terminal', { exact: true }).click()
+
+    const terminalMount = page.locator('.xterm').locator('..')
+    await expect(terminalMount).toBeVisible()
+    await expect
+      .poll(() =>
+        terminalMount.evaluate((element) => {
+          const styles = getComputedStyle(element)
+          return { background: styles.backgroundColor, foreground: styles.color }
+        }),
+      )
+      .toEqual({ background: 'rgb(28, 27, 26)', foreground: 'rgb(216, 210, 202)' })
+  } finally {
+    await app.close()
+  }
+})
