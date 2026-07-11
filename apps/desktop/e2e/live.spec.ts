@@ -33,7 +33,7 @@ test('live: connect on the fake agent, stream a turn, open the side panel', asyn
     await page.getByText('seeded-project').hover()
     await page.getByLabel('New thread in seeded-project').click()
     await expect(page.getByText('connected')).toBeVisible()
-    const composer = page.getByPlaceholder('Ask anything…')
+    const composer = page.getByRole('textbox', { name: 'Ask anything…' })
     await expect(composer).toBeVisible()
     // Agent controls seeded from the fake's session/new: Default / model / High.
     await expect(page.getByLabel('Mode', { exact: true })).toBeVisible()
@@ -51,6 +51,34 @@ test('live: connect on the fake agent, stream a turn, open the side panel', asyn
     await expect(page.getByText('Fake deterministic thread')).toHaveCount(2)
     await expect(page.getByText('now', { exact: true })).toBeVisible()
     await expect(page).toHaveScreenshot('live-conversation.png')
+
+    // Shell-style per-Thread prompt recall: first Up captures the unsent scratch and recalls the
+    // latest sent prompt; Down past the newest history entry restores that scratch. The user row
+    // now shares the settled-message Copy action with the assistant row.
+    const followUpComposer = page.getByRole('textbox', { name: 'Ask for follow-up changes' })
+    await followUpComposer.fill('unfinished scratch')
+    await followUpComposer.press('ArrowUp')
+    await expect(followUpComposer).toHaveText('Hello fake agent')
+    await followUpComposer.press('ArrowDown')
+    await expect(followUpComposer).toHaveText('unfinished scratch')
+    await expect(page.getByLabel('Copy message')).toHaveCount(2)
+    await followUpComposer.evaluate((editor) => {
+      const card = editor.closest('[data-slot="card"]')
+      if (!card) throw new Error('Composer card not found')
+      const DataTransferCtor = Reflect.get(globalThis, 'DataTransfer') as new () => {
+        items: { add(file: File): void }
+      }
+      const DragEventCtor = Reflect.get(globalThis, 'DragEvent') as new (
+        type: string,
+        init: { bubbles: boolean; dataTransfer: unknown },
+      ) => Event
+      const transfer = new DataTransferCtor()
+      transfer.items.add(new File(['fake png'], 'drop.png', { type: 'image/png' }))
+      card.dispatchEvent(new DragEventCtor('drop', { bubbles: true, dataTransfer: transfer }))
+    })
+    await expect(page.getByAltText('drop.png')).toBeVisible()
+    await page.getByLabel('Remove drop.png').click()
+    await followUpComposer.fill('')
 
     // Side panel over the conversation: launcher grid, and the chat column
     // narrows under the composer's compact breakpoints (icon-only chips,
@@ -73,7 +101,7 @@ test('live: reopening an old thread resumes on the fake agent with history intac
     await page.getByText('seeded-project').click()
     await page.getByText('Sum two numbers').click()
     await expect(page.getByText('connected')).toBeVisible()
-    await expect(page.getByPlaceholder('Ask anything…')).toBeVisible()
+    await expect(page.getByRole('textbox', { name: 'Ask anything…' })).toBeVisible()
     // The Continue-era chrome must NOT be present (resume is first-prompt-lazy).
     await expect(page.getByRole('button', { name: 'Continue' })).toHaveCount(0)
     await expect(page.getByText('history', { exact: true })).toHaveCount(0)
