@@ -6,6 +6,7 @@ import {
   useState,
   type ChangeEvent,
   type ClipboardEvent,
+  type DragEvent,
   type JSX,
   type KeyboardEvent,
 } from 'react'
@@ -20,6 +21,7 @@ import type {
 import { AgentControls } from './AgentControls'
 import { Card } from '../ui/card'
 import { IconButton } from '../ui/icon-button'
+import { cn } from '../lib/utils'
 import type { AcpCommand } from './reducer'
 import { useComposerDraft, type ComposerDraftImage } from './composer-draft-store'
 import {
@@ -57,6 +59,14 @@ import {
   pruneInactiveInlineTokens,
   setSlashCommandInlineToken,
 } from './composer-inline-tokens'
+import {
+  createComposerHistoryState,
+  navigateComposerHistory,
+  reconcileComposerHistoryEdit,
+  resetComposerHistoryState,
+  shouldNavigateComposerHistory,
+  type ComposerHistoryDirection,
+} from './composer-history'
 
 /** Process-local counters for unique pending-image / element / review / paste-chip ids (not Math.random/Date). */
 let imageSeq = 0
@@ -136,6 +146,7 @@ export function Composer({
   isProcessing,
   isEmpty,
   availableCommands,
+  sentPromptHistory,
   followUps,
   submitPrompt,
   modes,
@@ -153,6 +164,8 @@ export function Composer({
   isEmpty: boolean
   /** The Vibe-streamed slash commands for the `/` autocomplete (#95). */
   availableCommands: AcpCommand[]
+  /** Visible text from this Thread's prior sent prompts, chronological. */
+  sentPromptHistory: readonly string[]
   /** This Thread's follow-up queue (#105) — send-vs-queue, the queued strip, drain. */
   followUps: FollowUpQueue
   /** Send ONE message as a fresh turn (owned by the container). Resolves ok/failed. */
@@ -172,7 +185,8 @@ export function Composer({
   // REMOUNTS on a Thread switch — the lazy initializer seeds THAT Thread's stored
   // draft fresh, with no stale carry-over (no re-seed effect needed). Reading here
   // must not write, so we only persist on change/send below.
-  const [composerDraft, setComposerDraft, clearPersistedDraft] = useComposerDraft(threadId)
+  const [composerDraft, setComposerDraft, clearPersistedDraft, draftPersistenceError] =
+    useComposerDraft(threadId)
   const draft = composerDraft.prompt
   const slashCommandToken = getSlashCommandInlineToken(composerDraft.inlineTokens)
   const pendingImages = composerDraft.images
@@ -194,8 +208,15 @@ export function Composer({
     images: pendingImages,
   }
   const inputRef = useRef<ComposerEditorHandle>(null)
+  // Shell-style sent-prompt recall is per mounted Thread. The transcript owns the entries;
+  // only the cursor + current unsent scratch are transient refs, so arrow navigation does not
+  // add render work to the hot editor path.
+  const historyStateRef = useRef(createComposerHistoryState())
+  const historyAppliedValueRef = useRef<string | null>(null)
   // The hidden file picker behind the 📎 button (#100).
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const dragDepthRef = useRef(0)
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false)
   // The shared `files:list` listing (ADR-0013 decision 5), fetched ONCE per composer
   // mount on the first `@` (lazy) and cached here — ranking runs in the renderer, so no
   // per-keystroke IPC. `requestedRef` guards the single fetch; a failed/empty listing is
@@ -222,7 +243,11 @@ export function Composer({
   // Write-through: keep React state and the persisted draft (#60) in lockstep. The
   // autocomplete hook calls this when it accepts a completion; the textarea's onChange
   // and the composer-insert subscription use it too.
-  function writeDraft(next: string | ((current: string) => string)): void {
+  function writeDraft(
+    next: string | ((current: string) => string),
+    options?: { fromHistory?: boolean },
+  ): void {
+    if (!options?.fromHistory) historyStateRef.current = createComposerHistoryState()
     setComposerDraft((current) => {
       const prompt = typeof next === 'function' ? next(current.prompt) : next
       return {
@@ -421,6 +446,35 @@ export function Composer({
     e.target.value = ''
   }
 
+  function onDragEnter(e: DragEvent<HTMLDivElement>): void {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    dragDepthRef.current += 1
+    setIsDraggingFiles(true)
+  }
+
+  function onDragOver(e: DragEvent<HTMLDivElement>): void {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+
+  function onDragLeave(e: DragEvent<HTMLDivElement>): void {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+    if (dragDepthRef.current === 0) setIsDraggingFiles(false)
+  }
+
+  function onDrop(e: DragEvent<HTMLDivElement>): void {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    dragDepthRef.current = 0
+    setIsDraggingFiles(false)
+    for (const file of e.dataTransfer.files) addFile(file, file.name)
+    inputRef.current?.focus()
+  }
+
   function removeImage(id: string): void {
     setPendingImages((prev) => prev.filter((img) => img.id !== id))
   }
@@ -437,6 +491,8 @@ export function Composer({
       images: pendingImages,
     })
     if (!snapshot.hasContent) return
+    historyStateRef.current = resetComposerHistoryState()
+    historyAppliedValueRef.current = null
     if (followUps.sending) {
       // A turn is live for this Thread (authoritative module latch, not the per-
       // instance reducer snapshot which lags on a remount) — queue it (protocol forbids
@@ -472,6 +528,37 @@ export function Composer({
     // The autocomplete intercepts nav/accept/Esc while open; when it doesn't handle the
     // key (closed, or a non-nav key), Enter falls through to send.
     if (autocomplete.onKeyDown(e)) return
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      const direction: ComposerHistoryDirection = e.key === 'ArrowUp' ? 'previous' : 'next'
+      const selection = inputRef.current?.getSelection() ?? null
+      if (
+        selection &&
+        shouldNavigateComposerHistory({
+          direction,
+          autocompleteOpen: autocomplete.open,
+          selectionCollapsed: selection.collapsed,
+          caretLine: selection.caretLine,
+        })
+      ) {
+        const navigation = navigateComposerHistory(
+          sentPromptHistory,
+          historyStateRef.current,
+          draft,
+          direction,
+        )
+        if (navigation) {
+          e.preventDefault()
+          historyStateRef.current = navigation.state
+          historyAppliedValueRef.current = navigation.value
+          writeDraft(navigation.value, { fromHistory: true })
+          requestAnimationFrame(() => {
+            inputRef.current?.focus()
+            inputRef.current?.setSelectionRange(navigation.value.length, navigation.value.length)
+          })
+          return
+        }
+      }
+    }
     if ((e.key === 'Backspace' || e.key === 'Delete') && slashCommandToken) {
       const caret = inputRef.current?.getSelectionStart() ?? draft.length
       if (caret === 0) {
@@ -493,7 +580,16 @@ export function Composer({
     <div className="conv-measure @container">
       {/* shadow-xs: a lighter lift than the Card default — the composer sits over the
           transcript, so the full shadow-sm read as a heavy smudge under it. */}
-      <Card className="gap-0 p-0 shadow-xs">
+      <Card
+        className={cn(
+          'gap-0 p-0 shadow-xs transition-colors',
+          isDraggingFiles && 'border-accent bg-[var(--accent-tint)]',
+        )}
+        onDragEnter={onDragEnter}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+      >
         <div className="flex flex-col px-6 pt-[22px] pb-[14px] @max-[480px]:px-4">
           {followUps.queued.length > 0 && (
             // Queued follow-ups (#105, ADR-0009): messages submitted while a turn
@@ -623,6 +719,12 @@ export function Composer({
             </div>
           )}
 
+          {draftPersistenceError && (
+            <p role="status" className="mb-3 text-xs text-bad">
+              Draft changes are available now but could not be saved for the next app launch.
+            </p>
+          )}
+
           <div className="relative">
             {autocomplete.open && autocomplete.activeSource && (
               <CompletionPopover
@@ -639,8 +741,17 @@ export function Composer({
               placeholder={isEmpty ? 'Ask anything…' : 'Ask for follow-up changes'}
               value={draft}
               onChange={(value, caret) => {
+                // Lexical may echo one controlled history value more than once. Keep its cursor
+                // alive until the value actually DIFFERS; that difference is the real user edit.
+                const reconciled = reconcileComposerHistoryEdit(
+                  historyStateRef.current,
+                  historyAppliedValueRef.current,
+                  value,
+                )
+                historyStateRef.current = reconciled.state
+                historyAppliedValueRef.current = reconciled.appliedValue
                 // Write-through: keep React state and the persisted draft (#60) in lockstep.
-                writeDraft(value)
+                writeDraft(value, { fromHistory: true })
                 // Re-derive the `/` (#95) and `@` (#190) triggers from the new value + caret.
                 autocomplete.onInput(value, caret)
               }}

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import {
   COMPOSER_DRAFT_IMAGE_MAX_COUNT,
   COMPOSER_DRAFT_IMAGE_MAX_DATA_URL_CHARS,
@@ -12,6 +12,8 @@ import {
   setDraft,
   type DraftStorage,
 } from './composer-draft-store'
+
+afterEach(() => vi.useRealTimers())
 
 /**
  * Per-Thread composer drafts (#60): unsent composer text persisted to localStorage
@@ -378,6 +380,66 @@ describe('composer draft external store', () => {
     expect(store.getSnapshot('t1').images).toEqual([oversized])
     expect(store.getSnapshot('t1').nonPersistedImageIds).toEqual(['img:big'])
     expect(storage.map.has(COMPOSER_DRAFT_STORAGE_KEY)).toBe(false)
+  })
+})
+
+describe('debounced draft persistence', () => {
+  it('keeps synchronous read-your-writes while coalescing serialization and storage writes', () => {
+    vi.useFakeTimers()
+    const storage = fakeStorage()
+    const stringify = vi.spyOn(JSON, 'stringify')
+    const store = createComposerDraftStore(storage, { persistDelayMs: 300 })
+    stringify.mockClear()
+
+    store.setText('t1', 'o')
+    store.setText('t1', 'one')
+    store.setText('t2', 'two')
+
+    expect(store.getTextSnapshot('t1')).toBe('one')
+    expect(store.getTextSnapshot('t2')).toBe('two')
+    expect(storage.map.has(COMPOSER_DRAFT_STORAGE_KEY)).toBe(false)
+    expect(stringify).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(299)
+    expect(storage.map.has(COMPOSER_DRAFT_STORAGE_KEY)).toBe(false)
+    vi.advanceTimersByTime(1)
+    expect(stringify).toHaveBeenCalledTimes(1)
+    expect(getDraft(storage, 't1')).toBe('one')
+    expect(getDraft(storage, 't2')).toBe('two')
+  })
+
+  it('flushes a pending write immediately for window unload', () => {
+    vi.useFakeTimers()
+    const storage = fakeStorage()
+    const store = createComposerDraftStore(storage, { persistDelayMs: 300 })
+
+    store.setText('t1', 'leave safely')
+    store.flush()
+
+    expect(getDraft(storage, 't1')).toBe('leave safely')
+    vi.advanceTimersByTime(300)
+    expect(getDraft(storage, 't1')).toBe('leave safely')
+  })
+
+  it('keeps the live draft and surfaces a storage failure for renderer feedback', () => {
+    const failure = new Error('quota exceeded')
+    const storage: DraftStorage = {
+      getItem: () => null,
+      setItem: () => {
+        throw failure
+      },
+      removeItem: () => {
+        throw failure
+      },
+    }
+    const onPersistenceError = vi.fn()
+    const store = createComposerDraftStore(storage, { onPersistenceError })
+
+    store.setText('t1', 'still usable')
+
+    expect(store.getTextSnapshot('t1')).toBe('still usable')
+    expect(store.getPersistenceError()).toBe(true)
+    expect(onPersistenceError).toHaveBeenCalledWith(failure)
   })
 })
 

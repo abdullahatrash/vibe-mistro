@@ -21,6 +21,7 @@ import {
 } from 'react'
 import { cn } from '../lib/utils'
 import type { ComposerEditorHandle } from './composer-editor-handle'
+import type { ComposerCaretLine } from './composer-history'
 
 function editorText(editor: LexicalEditor): string {
   return editor.getEditorState().read(() => $getRoot().getTextContent())
@@ -47,6 +48,48 @@ function domSelectionOffset(root: HTMLElement | null): number | null {
   return before.toString().length
 }
 
+const LINE_TOP_TOLERANCE_PX = 2
+
+function getDistinctLineTops(rects: DOMRect[]): number[] {
+  const tops: number[] = []
+  for (const rect of rects) {
+    if (rect.height <= 0) continue
+    if (tops.every((top) => Math.abs(top - rect.top) > LINE_TOP_TOLERANCE_PX)) {
+      tops.push(rect.top)
+    }
+  }
+  return tops.sort((a, b) => a - b)
+}
+
+/** Resolve the collapsed caret's VISUAL line from DOM range geometry (including soft wraps). */
+function resolveDomCaretLine(root: HTMLElement, range: Range): ComposerCaretLine | null {
+  const text = root.textContent ?? ''
+  if (text.length === 0) return 'only'
+
+  const contentRange = document.createRange()
+  contentRange.selectNodeContents(root)
+  const lineTops = getDistinctLineTops(Array.from(contentRange.getClientRects()))
+  if (lineTops.length <= 1) return 'only'
+
+  const caretRects = Array.from(range.getClientRects())
+  const caretRect = caretRects[0] ?? range.getBoundingClientRect()
+  if (caretRect.height > 0 || caretRect.top !== 0) {
+    const closest = lineTops.reduce((best, top) =>
+      Math.abs(top - caretRect.top) < Math.abs(best - caretRect.top) ? top : best,
+    )
+    if (Math.abs(closest - lineTops[0]) <= LINE_TOP_TOLERANCE_PX) return 'first'
+    if (Math.abs(closest - lineTops[lineTops.length - 1]) <= LINE_TOP_TOLERANCE_PX) return 'last'
+    return 'middle'
+  }
+
+  // Chromium normally gives collapsed ranges a caret rect. Its geometry can be empty at an
+  // extreme boundary, where the text offset is an unambiguous fallback.
+  const offset = domSelectionOffset(root)
+  if (offset === 0) return 'first'
+  if (offset === text.length) return 'last'
+  return null
+}
+
 function EditorBridge({
   value,
   editorRef,
@@ -61,6 +104,17 @@ function EditorBridge({
     editorRef,
     () => ({
       getSelectionStart: () => domSelectionOffset(editor.getRootElement()),
+      getSelection: () => {
+        const root = editor.getRootElement()
+        const selection = window.getSelection()
+        if (!root || !selection || selection.rangeCount === 0) return null
+        const range = selection.getRangeAt(0)
+        if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return null
+        return {
+          collapsed: range.collapsed,
+          caretLine: range.collapsed ? resolveDomCaretLine(root, range) : null,
+        }
+      },
       focus: () => editor.focus(),
       setSelectionRange(start) {
         editor.focus(() => {
