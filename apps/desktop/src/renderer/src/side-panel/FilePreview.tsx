@@ -1,10 +1,10 @@
 import { useEffect, useState, type JSX } from 'react'
-import { getFiletypeFromFileName, getSharedHighlighter } from '@pierre/diffs'
+import { File, Virtualizer } from '@pierre/diffs/react'
 import { AtSign, FolderOpen } from 'lucide-react'
 import type { FilesReadResult } from '../../../shared/ipc'
 import { cn } from '../lib/utils'
-import { basename } from '../lib/paths'
 import { emitComposerInsert } from '../conversation/composer-insert'
+import { DiffWorkerProvider } from '../git/DiffWorkerProvider'
 import { breadcrumbSegments } from './breadcrumb-segments'
 
 /**
@@ -15,26 +15,14 @@ import { breadcrumbSegments } from './breadcrumb-segments'
  * non-interactive BREADCRUMB of the path and two header actions — Reveal in Finder (the confined
  * #116 `revealPath` IPC) and Insert `@path` into the composer (renderer-only, #189).
  *
- * Highlighting reuses the EXACT `@pierre/diffs` shared-shiki path the git diff panel uses (#159's
- * single pinned shiki) — `getSharedHighlighter` + `codeToHtml` with the diff panel's `pierre-light`
- * theme — so NO new highlighting dependency is added and the preview matches the diff panel's theme.
- * The language is derived from the filename via the lib's `getFiletypeFromFileName`. This is strictly
- * READ-ONLY: it only ever calls `files:read` / `revealPath`, never any write path.
+ * Text uses the same `@pierre/diffs` `File` + `Virtualizer` path as t3code's file preview. That path
+ * provides syntax highlighting, numbered rows, and bounded DOM work while reusing the diff panel's
+ * existing worker pool/theme dependency. This is strictly READ-ONLY: it only ever calls
+ * `files:read` / `revealPath`, never any write path.
  */
 
 /** The diff panel's theme (`DiffWorkerProvider`'s `DIFF_THEME`) — reused so the preview matches it. */
 const PREVIEW_THEME = 'pierre-light'
-
-/** Highlight `content` to a `<pre>` HTML string via the shared shiki, or `null` to fall back to plain. */
-async function highlightToHtml(content: string, fileName: string): Promise<string | null> {
-  try {
-    const lang = getFiletypeFromFileName(fileName)
-    const highlighter = await getSharedHighlighter({ themes: [PREVIEW_THEME], langs: [lang] })
-    return highlighter.codeToHtml(content, { lang, theme: PREVIEW_THEME })
-  } catch {
-    return null // unknown/unloadable grammar — the caller renders the raw text instead
-  }
-}
 
 export function FilePreview({
   agentId,
@@ -49,7 +37,6 @@ export function FilePreview({
   activeThreadId: string | null
 }): JSX.Element {
   const [result, setResult] = useState<FilesReadResult | null>(null)
-  const [html, setHtml] = useState<string | null>(null)
 
   // Fetch the file on mount / path change. Cancellation-guarded so a fast tab switch never lands a
   // stale result. Any rejection degrades to `error` (the handler itself never rejects, but the IPC
@@ -57,7 +44,6 @@ export function FilePreview({
   useEffect(() => {
     let cancelled = false
     setResult(null)
-    setHtml(null)
     window.api
       .filesRead({ agentId, relativePath })
       .then((r) => {
@@ -70,19 +56,6 @@ export function FilePreview({
       cancelled = true
     }
   }, [agentId, relativePath])
-
-  // Highlight text results off the render path; a failure leaves `html` null → the raw-text fallback.
-  useEffect(() => {
-    if (result?.kind !== 'text') return
-    let cancelled = false
-    const fileName = basename(relativePath)
-    void highlightToHtml(result.content, fileName).then((h) => {
-      if (!cancelled) setHtml(h)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [result, relativePath])
 
   const crumbs = breadcrumbSegments(relativePath)
 
@@ -128,7 +101,7 @@ export function FilePreview({
         </button>
       </div>
 
-      <PreviewBody result={result} html={html} />
+      <PreviewBody result={result} relativePath={relativePath} />
     </div>
   )
 }
@@ -136,10 +109,10 @@ export function FilePreview({
 /** The body: highlighted text, the raw-text fallback, or a muted notice per non-text outcome. */
 function PreviewBody({
   result,
-  html,
+  relativePath,
 }: {
   result: FilesReadResult | null
-  html: string | null
+  relativePath: string
 }): JSX.Element {
   if (result === null) return <Notice>Loading…</Notice>
   switch (result.kind) {
@@ -151,17 +124,23 @@ function PreviewBody({
       return <Notice>Could not read file.</Notice>
     case 'text':
       return (
-        <div className="min-h-0 flex-1 overflow-auto text-[12.5px] leading-relaxed [&_pre]:min-h-full [&_pre]:p-3">
-          {html !== null ? (
-            // Highlighted HTML from the shared shiki (the diff panel's exact path). The `<pre>`
-            // carries its own theme background; we only add padding/scroll around it.
-            <div dangerouslySetInnerHTML={{ __html: html }} />
-          ) : (
-            // Fallback before highlighting resolves / for an unhighlightable grammar: raw text,
-            // React-escaped by construction.
-            <pre className="whitespace-pre p-3 font-mono">{result.content}</pre>
-          )}
-        </div>
+        <DiffWorkerProvider>
+          <Virtualizer
+            className="min-h-0 flex-1 overflow-auto"
+            config={{ overscrollSize: 600, intersectionObserverMargin: 1200 }}
+          >
+            <File
+              file={{ name: relativePath, contents: result.content }}
+              options={{
+                disableFileHeader: true,
+                overflow: 'scroll',
+                theme: PREVIEW_THEME,
+                themeType: 'light',
+              }}
+              className="min-h-full text-[12.5px]"
+            />
+          </Virtualizer>
+        </DiffWorkerProvider>
       )
   }
 }

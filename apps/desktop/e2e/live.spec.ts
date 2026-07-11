@@ -33,7 +33,7 @@ test('live: connect on the fake agent, stream a turn, open the side panel', asyn
     await page.getByText('seeded-project').hover()
     await page.getByLabel('New thread in seeded-project').click()
     await expect(page.getByText('connected')).toBeVisible()
-    const composer = page.getByPlaceholder('Ask anything…')
+    const composer = page.getByRole('textbox', { name: 'Ask anything…' })
     await expect(composer).toBeVisible()
     // Agent controls seeded from the fake's session/new: Default / model / High.
     await expect(page.getByLabel('Mode', { exact: true })).toBeVisible()
@@ -73,7 +73,7 @@ test('live: reopening an old thread resumes on the fake agent with history intac
     await page.getByText('seeded-project').click()
     await page.getByText('Sum two numbers').click()
     await expect(page.getByText('connected')).toBeVisible()
-    await expect(page.getByPlaceholder('Ask anything…')).toBeVisible()
+    await expect(page.getByRole('textbox', { name: 'Ask anything…' })).toBeVisible()
     // The Continue-era chrome must NOT be present (resume is first-prompt-lazy).
     await expect(page.getByRole('button', { name: 'Continue' })).toHaveCount(0)
     await expect(page.getByText('history', { exact: true })).toHaveCount(0)
@@ -98,11 +98,47 @@ test('live: terminal keeps readable colors in the built renderer', async () => {
     await expect
       .poll(() =>
         terminalMount.evaluate((element) => {
-          const styles = getComputedStyle(element)
+          const styles = element.ownerDocument.defaultView?.getComputedStyle(element)
           return { background: styles.backgroundColor, foreground: styles.color }
         }),
       )
       .toEqual({ background: 'rgb(28, 27, 26)', foreground: 'rgb(216, 210, 202)' })
+  } finally {
+    await app.close()
+  }
+})
+
+test('live: opened files render numbered code rows', async () => {
+  const userData = await seedProfile({
+    thread: false,
+    files: { 'numbered.ts': 'const first = 1\nconst second = 2\n' },
+  })
+  const { app, page } = await launch(userData, FAKE_ENV)
+  try {
+    await page.getByText('seeded-project').hover()
+    await page.getByLabel('New thread in seeded-project').click()
+    await expect(page.getByText('connected')).toBeVisible()
+
+    await page.getByLabel('Open side panel').click()
+    await page.getByRole('button', { name: /Files/ }).click()
+    const fileTree = page.locator('file-tree-container')
+    await expect
+      .poll(() =>
+        fileTree.evaluate(
+          (tree) => tree.shadowRoot?.querySelector('[data-item-path="numbered.ts"]') !== null,
+        ),
+      )
+      .toBe(true)
+    await fileTree.evaluate((tree) => {
+      const row = tree.shadowRoot?.querySelector('[data-item-path="numbered.ts"]') as {
+        click(): void
+      } | null
+      row?.click()
+    })
+
+    const preview = page.locator('diffs-container')
+    await expect(preview.locator('[data-column-number="1"]')).toBeVisible()
+    await expect(preview.locator('[data-column-number="2"]')).toBeVisible()
   } finally {
     await app.close()
   }
