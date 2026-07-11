@@ -126,7 +126,10 @@ test('live: terminal keeps readable colors in the built renderer', async () => {
     await expect
       .poll(() =>
         terminalMount.evaluate((element) => {
-          const styles = getComputedStyle(element)
+          const getStyles = Reflect.get(globalThis, 'getComputedStyle') as (
+            target: unknown,
+          ) => { backgroundColor: string; color: string }
+          const styles = getStyles(element)
           return { background: styles.backgroundColor, foreground: styles.color }
         }),
       )
