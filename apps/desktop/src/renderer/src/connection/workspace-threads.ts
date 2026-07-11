@@ -1,4 +1,8 @@
 import type { ThreadAgentControls, ThreadConfigAxis } from '../../../shared/ipc'
+import {
+  isAdvertisedThreadControlValue,
+  validatedThreadControlChanges,
+} from '../../../shared/thread-control-intent'
 
 /**
  * Per-Workspace, per-session Thread state (ADR-0006, TB3 #48) — lifted OUT of
@@ -271,11 +275,28 @@ export function draftControls(
   selected: Partial<Record<ThreadConfigAxis, string>>,
 ): ThreadAgentControls {
   const { modes, models, reasoningEffort } = connectionControls
+  const mode =
+    selected.mode && isAdvertisedThreadControlValue(connectionControls, 'mode', selected.mode)
+      ? selected.mode
+      : modes?.currentModeId
+  const model =
+    selected.model && isAdvertisedThreadControlValue(connectionControls, 'model', selected.model)
+      ? selected.model
+      : models?.currentModelId
+  const effort =
+    selected.reasoningEffort &&
+    isAdvertisedThreadControlValue(
+      connectionControls,
+      'reasoningEffort',
+      selected.reasoningEffort,
+    )
+      ? selected.reasoningEffort
+      : reasoningEffort?.current
   return {
-    modes: modes ? { ...modes, currentModeId: selected.mode ?? modes.currentModeId } : null,
-    models: models ? { ...models, currentModelId: selected.model ?? models.currentModelId } : null,
+    modes: modes && mode ? { ...modes, currentModeId: mode } : null,
+    models: models && model ? { ...models, currentModelId: model } : null,
     reasoningEffort: reasoningEffort
-      ? { ...reasoningEffort, current: selected.reasoningEffort ?? reasoningEffort.current }
+      ? { ...reasoningEffort, current: effort ?? reasoningEffort.current }
       : null,
   }
 }
@@ -341,15 +362,5 @@ export function reassertions(
   selected: Partial<Record<ThreadConfigAxis, string>>,
   bound: ThreadAgentControls,
 ): Array<{ axis: ThreadConfigAxis; value: string }> {
-  const axes: ThreadConfigAxis[] = ['mode', 'model', 'reasoningEffort']
-  const out: Array<{ axis: ThreadConfigAxis; value: string }> = []
-  for (const axis of axes) {
-    const want = selected[axis]
-    if (want === undefined) continue
-    const have = boundConfigValue(bound, axis)
-    // Skip an unadvertised axis (have === null): the session has no setter target, so
-    // re-asserting would fire a request that just errors.
-    if (have !== null && have !== want) out.push({ axis, value: want })
-  }
-  return out
+  return validatedThreadControlChanges(selected, bound)
 }

@@ -555,6 +555,15 @@ describe('selection cache + re-assert (#72)', () => {
       const bound: ThreadAgentControls = { modes: null, models: null, reasoningEffort: null }
       expect(reassertions({ mode: 'plan' }, bound)).toEqual([])
     })
+
+    it('a cached id removed from a still-advertised axis is NOT re-asserted', () => {
+      expect(
+        reassertions(
+          { mode: 'removed-mode', model: 'removed-model', reasoningEffort: 'removed-effort' },
+          controls('default', 'mistral-medium-3.5', 'high'),
+        ),
+      ).toEqual([])
+    })
   })
 
   it('boundConfigValue reads a controls payload per axis (null when unadvertised)', () => {
@@ -607,5 +616,16 @@ describe('draftControls (#75)', () => {
     expect(out.modes).toBeNull()
     expect(out.models).toBeNull()
     expect(out.reasoningEffort).toBeNull()
+  })
+
+  it('falls back to current values rather than displaying cached ids missing from advertised options', () => {
+    const out = draftControls(controls('default', 'mistral-medium-3.5', 'high'), {
+      mode: 'removed-mode',
+      model: 'removed-model',
+      reasoningEffort: 'removed-effort',
+    })
+    expect(out.modes?.currentModeId).toBe('default')
+    expect(out.models?.currentModelId).toBe('mistral-medium-3.5')
+    expect(out.reasoningEffort?.current).toBe('high')
   })
 })

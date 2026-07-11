@@ -11,6 +11,7 @@ import {
 import type {
   AuthMethod,
   ThreadAgentControls,
+  ThreadControlIntent,
   ThreadConfigAxis,
   ThreadModels,
   ThreadModes,
@@ -103,6 +104,7 @@ export function Conversation({
   onBound,
   onAskInSideThread,
   autoFocusComposer = false,
+  controlIntent,
 }: {
   thread: LiveThread
   /** The connection's current Mode + options (#66) — display-from-session-state. */
@@ -127,6 +129,8 @@ export function Conversation({
   onAskInSideThread?: (selection: MessageSelection) => void
   /** Focus the composer once when this presentation mounts (Side Threads only). */
   autoFocusComposer?: boolean
+  /** Pending Side Draft choices for main to validate/apply before first prompt. */
+  controlIntent?: ThreadControlIntent
 }): JSX.Element {
   const [state, dispatch] = useReducer(conversationReducer, initialConversationState)
   // The session this Thread is bound to — null until a draft's first prompt binds
@@ -326,6 +330,7 @@ export function Conversation({
         sessionId: boundRef.current,
         text,
         images: images.map(({ data, mimeType }) => ({ data, mimeType })),
+        controlIntent,
       })
       if (result.ok) {
         ok = true

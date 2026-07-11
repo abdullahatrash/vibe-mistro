@@ -215,13 +215,24 @@ test('live: ask about an agent Message selection in a new Side Thread', async ()
       ),
     ).toHaveCount(2)
 
-    // Closing is a Surface-only operation after binding: it removes the Side presentation,
-    // not the durable Thread. The primary conversation is unchanged and both normal Thread
-    // rows remain available in the Workspace list.
-    await sidePanel.getByRole('button', { name: 'Close Fake deterministic thread' }).click()
+    // Selecting the durable Side Thread from the sidebar atomically promotes that SAME
+    // Thread to the primary conversation and removes only its alternate Surface. Target the
+    // non-active row (both fake Threads deliberately receive the same deterministic title).
+    const sideThreadRow = sidebar
+      .locator('[data-slot="nav-item"]:not([data-active])')
+      .filter({ hasText: 'Fake deterministic thread' })
+    await expect(sideThreadRow).toHaveCount(1)
+    await sideThreadRow.click()
+
+    // No duplicate presentation is committed: the panel lands on its empty launcher,
+    // exactly one central composer/transcript remains, and the promoted Thread retains its
+    // existing turn without sending, cancelling, or showing a context-reset resume notice.
     await expect(sidePanel.getByText('Open a surface', { exact: true })).toBeVisible()
     await expect(sidebar.getByRole('button', { name: /Fake deterministic thread/ })).toHaveCount(2)
-    await expect(page.getByRole('textbox', { name: 'Ask for follow-up changes' })).toBeVisible()
+    await expect(page.getByRole('textbox', { name: 'Ask for follow-up changes' })).toHaveCount(1)
+    await expect(page.getByText(sideQuestion, { exact: true })).toBeVisible()
+    await expect(page.getByText('Agent context was reset', { exact: false })).toHaveCount(0)
+    await expect(page.getByLabel('Stop turn')).toBeHidden()
     await expect(
       page.getByText(
         'Hello from the fake agent. This reply is fully deterministic, so the visual smoke suite can pin it to the pixel.',

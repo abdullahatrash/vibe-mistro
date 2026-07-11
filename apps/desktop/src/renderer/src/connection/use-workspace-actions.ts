@@ -4,7 +4,7 @@ import type { NavAction, NavState } from '../shell/nav-reducer'
 import { clearThreadStatus, type ThreadStatusMap } from '../conversation/thread-status'
 import { clearDraft } from '../conversation/composer-draft-store'
 import { replayCache } from '../conversation/replay-cache'
-import { removeWorkspacePanel } from '../side-panel/side-panel-store'
+import { closeWorkspaceSurface, removeWorkspacePanel } from '../side-panel/side-panel-store'
 import { agentIdOf, type ConnectionAction, type ConnectionMap } from './connections'
 import {
   workspaceThreadStateFor,
@@ -63,6 +63,10 @@ export function useWorkspaceActions(deps: WorkspaceActionsDeps): WorkspaceAction
     async deleteThread(thread) {
       const result = await window.api.deleteThread(thread.id)
       if (!result.ok) return
+      // Placement is renderer-owned. Remove the deleted Thread's alternate Side
+      // presentation immediately; closeSurface preserves siblings/order and applies
+      // the standard active-neighbour fallback without touching transcript/session.
+      closeWorkspaceSurface(thread.workspaceId, `thread:${thread.id}`)
       const wts = workspaceThreadStateFor(deps.workspaceThreads, thread.workspaceId)
       if (wts?.live.has(thread.id)) {
         deps.wtDispatch({ type: 'remove', workspaceId: thread.workspaceId, threadId: thread.id })

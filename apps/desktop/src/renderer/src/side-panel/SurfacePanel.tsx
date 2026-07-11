@@ -22,6 +22,9 @@ import { BrowserSurface } from './BrowserSurface'
 import { surfaceForChord } from './surface-keys'
 import { basename } from '../lib/paths'
 import { clearComposerDraft } from '../conversation/composer-draft-store'
+import type { ThreadStatusMap } from '../conversation/thread-status'
+import { Badge } from '../ui/badge'
+import { LogoSnakeSpinner } from '../shell/logo-snake-spinner'
 import {
   activateWorkspaceSurface,
   closeAllWorkspaceSurfaces,
@@ -50,6 +53,7 @@ import {
   setPanelWidth,
 } from './panel-width-store'
 import { unpromptedSideThreadIds } from './side-thread-surface-cleanup'
+import { surfaceThreadStatus } from './surface-thread-status'
 
 /** Windows this narrow present the panel as a slide-over Sheet (t3code's 980px break). */
 const NARROW_QUERY = '(max-width: 980px)'
@@ -79,6 +83,7 @@ export function SurfacePanel({
   activeThreadId,
   renderSideThread,
   getSideThreadTitle,
+  threadStatuses,
   isActive,
   busy,
 }: {
@@ -92,6 +97,8 @@ export function SurfacePanel({
   renderSideThread: (threadId: string) => ReactNode
   /** Resolve a bound Side Thread's latest Vibe-generated title for its tab. */
   getSideThreadTitle: (threadId: string) => string | null
+  /** Main-authored status for every live Thread, including unmounted Side Threads. */
+  threadStatuses: ThreadStatusMap
   /** Whether this is the on-screen Workspace (#84) — gates git streaming AND shortcuts. */
   isActive: boolean
   /** Whether a turn is streaming (#86) — threaded to the Review panel's commit guard. */
@@ -145,6 +152,7 @@ export function SurfacePanel({
       activeThreadId={activeThreadId}
       renderSideThread={renderSideThread}
       getSideThreadTitle={getSideThreadTitle}
+      threadStatuses={threadStatuses}
       isActive={isActive}
       busy={busy}
       panel={panel}
@@ -186,6 +194,7 @@ function PanelBody({
   activeThreadId,
   renderSideThread,
   getSideThreadTitle,
+  threadStatuses,
   isActive,
   busy,
   panel,
@@ -197,6 +206,7 @@ function PanelBody({
   activeThreadId: string | null
   renderSideThread: (threadId: string) => ReactNode
   getSideThreadTitle: (threadId: string) => string | null
+  threadStatuses: ThreadStatusMap
   isActive: boolean
   busy: boolean
   panel: ReturnType<typeof useWorkspacePanel>
@@ -321,6 +331,7 @@ function PanelBody({
             surfaces={panel.surfaces}
             activeSurfaceId={panel.activeSurfaceId}
             getSideThreadTitle={getSideThreadTitle}
+            threadStatuses={threadStatuses}
             onActivate={(id) => activateWorkspaceSurface(workspaceId, id)}
             onClose={closeSurfaceAndCleanUp}
             onCloseOthers={closeOthersAndCleanUp}
@@ -441,6 +452,7 @@ function SurfaceTabStrip({
   surfaces,
   activeSurfaceId,
   getSideThreadTitle,
+  threadStatuses,
   onActivate,
   onClose,
   onCloseOthers,
@@ -452,6 +464,7 @@ function SurfaceTabStrip({
   surfaces: Surface[]
   activeSurfaceId: string | null
   getSideThreadTitle: (threadId: string) => string | null
+  threadStatuses: ThreadStatusMap
   onActivate: (id: string) => void
   onClose: (id: string) => void
   onCloseOthers: (id: string) => void
@@ -469,6 +482,7 @@ function SurfaceTabStrip({
       {surfaces.map((surface, index) => {
         const active = surface.id === activeSurfaceId
         const { icon, label } = surfaceMeta(surface, getSideThreadTitle)
+        const threadStatus = surfaceThreadStatus(surface, threadStatuses)
         return (
           <ContextMenu key={surface.id}>
             <ContextMenuTrigger
@@ -493,6 +507,17 @@ function SurfaceTabStrip({
               >
                 {icon}
                 <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+                {threadStatus?.streaming && <LogoSnakeSpinner size={14} label="Streaming" />}
+                {threadStatus?.needsAttention && (
+                  <Badge
+                    variant="destructive"
+                    aria-label="Needs attention"
+                    title="Awaiting your response"
+                    className="px-1.5"
+                  >
+                    !
+                  </Badge>
+                )}
               </button>
               <button
                 type="button"

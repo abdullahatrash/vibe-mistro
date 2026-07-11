@@ -9,6 +9,7 @@ import type {
 import { ColdThread } from '../conversation/ColdThread'
 import { Conversation } from '../conversation/Conversation'
 import type { MessageSelection } from '../conversation/message-selection'
+import type { ThreadStatusMap } from '../conversation/thread-status'
 import { SurfacePanel } from '../side-panel/SurfacePanel'
 
 /**
@@ -48,6 +49,7 @@ export function ConnectedWorkspace({
   onAskInSideThread,
   renderSideThread,
   getSideThreadTitle,
+  threadStatuses,
 }: {
   connection: ThreadConnection
   /** The Thread App chose to show (its remembered active Thread for this Workspace). */
@@ -88,6 +90,8 @@ export function ConnectedWorkspace({
   renderSideThread: (threadId: string) => ReactNode
   /** Resolve the latest persisted Vibe title for a durable Side Thread tab. */
   getSideThreadTitle: (threadId: string) => string | null
+  /** Main-authored per-Thread status projected into Side Thread Surface tabs. */
+  threadStatuses: ThreadStatusMap
 }): JSX.Element {
   return (
     // h-full on the row + chat column completes the height chain from <main> down to
@@ -136,6 +140,7 @@ export function ConnectedWorkspace({
         busy={busy}
         renderSideThread={renderSideThread}
         getSideThreadTitle={getSideThreadTitle}
+        threadStatuses={threadStatuses}
       />
     </div>
   )

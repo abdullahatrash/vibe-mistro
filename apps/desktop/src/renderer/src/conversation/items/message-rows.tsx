@@ -120,7 +120,12 @@ export function UserRow({ item, selectable }: { item: UserItem; selectable: bool
       )}
       {/* Chip-only prompts (e.g. a bare long paste) skip the bubble — an empty pill reads broken. */}
       {(cleanText.length > 0 || (item.images && item.images.length > 0)) && (
-        <div className="max-w-[80%] rounded-2xl border border-border bg-surface px-3.5 py-2.5 text-[15px] leading-relaxed break-words whitespace-pre-wrap text-text-body">
+        <div
+          data-message-selection-content={selectable ? '' : undefined}
+          data-message-id={selectable ? item.id : undefined}
+          data-message-role={selectable ? 'user' : undefined}
+          className="max-w-[80%] rounded-2xl border border-border bg-surface px-3.5 py-2.5 text-[15px] leading-relaxed break-words whitespace-pre-wrap text-text-body"
+        >
           {item.images && item.images.length > 0 && (
             <div className="mb-2 flex flex-wrap justify-end gap-2">
               {item.images.map((img, i) => (
@@ -133,15 +138,7 @@ export function UserRow({ item, selectable }: { item: UserItem; selectable: bool
               ))}
             </div>
           )}
-          {cleanText.length > 0 && (
-            <span
-              data-message-selection-content={selectable ? '' : undefined}
-              data-message-id={selectable ? item.id : undefined}
-              data-message-role={selectable ? 'user' : undefined}
-            >
-              {cleanText}
-            </span>
-          )}
+          {cleanText}
         </div>
       )}
       {copyText.trim().length > 0 && (
@@ -173,6 +170,7 @@ export function AssistantRow({
         data-message-selection-content={selectable ? '' : undefined}
         data-message-id={selectable ? item.id : undefined}
         data-message-role={selectable ? 'agent' : undefined}
+        className="contents"
       >
         <Response className="text-text-body" text={item.text} />
       </div>

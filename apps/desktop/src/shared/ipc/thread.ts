@@ -154,6 +154,11 @@ export interface SendPromptArgs {
   text: string
   /** Optional image attachments (#100). */
   images?: PromptImage[]
+  /**
+   * Optional pre-bind Agent-control intent for a Side Draft. Main validates every id
+   * against the newly bound session and applies only advertised values before prompt.
+   */
+  controlIntent?: ThreadControlIntent
 }
 
 export type SendPromptResult =
@@ -226,6 +231,9 @@ export type RemoveWorkspaceResult = { ok: true }
 
 /** Which agent control a `setThreadConfig` change targets (#66). */
 export type ThreadConfigAxis = 'mode' | 'model' | 'reasoningEffort'
+
+/** Pending desired Agent-control ids, validated against a newly bound session before use. */
+export type ThreadControlIntent = Partial<Record<ThreadConfigAxis, string>>
 
 /**
  * Change one agent control on a Thread's bound ACP session (#66) — Mode, Model, or

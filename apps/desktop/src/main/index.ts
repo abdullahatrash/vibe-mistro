@@ -100,6 +100,7 @@ import { FilesListCache, shouldInvalidateFilesCacheOnGitStatus } from './files/c
 import { clampWebviewAttachment } from './browser/webview-clamp'
 import { safeExternalUrl } from './files/safe-external-url'
 import { APP_DISPLAY_NAME, buildMenuTemplate } from './app-menu'
+import { applyPendingThreadControls } from './pending-thread-controls'
 
 // App identity: rename the app (menu roles, About panel) away from package.json's
 // `vibe-mistro`. Must run before `app.whenReady()`. `app.name` also derives the
@@ -633,8 +634,24 @@ async function runPromptTurn(
     })
     sessionId = bound.sessionId
     rebound = bound.rebound
-    // Tell the renderer this Thread is now bound, the INSTANT `session/new` /
-    // `session/load` returns and BEFORE `agent.prompt` streams any event below
+    const reportedControls = bound.controls
+    const actualControls =
+      reportedControls && args.controlIntent
+        ? await applyPendingThreadControls(
+            agent,
+            sessionId,
+            args.controlIntent,
+            reportedControls,
+            (error) => {
+              console.error(
+                `[vibe-mistro:controls] pre-prompt apply failed (${args.threadId}): ` +
+                  `${error instanceof Error ? error.message : String(error)}`,
+              )
+            },
+          )
+        : reportedControls
+    // Tell the renderer this Thread is now bound after any validated pending Side
+    // Draft controls have been awaited, and BEFORE `agent.prompt` streams below
     // (same webContents, so ordered ahead of those `acp:event`s). This binds the
     // Thread's live view to its OWN session up front, so it never infers a
     // session from an arbitrary (possibly sibling) event. `rebound` (TB4 #33)
@@ -648,9 +665,10 @@ async function runPromptTurn(
     // no re-emit (the renderer keeps what it holds). We hand the renderer the
     // session's REPORTED controls only; the renderer caches the user's prior
     // non-default selection and RE-ASSERTS it after a `session/load` resume (#72,
-    // ADR-0007) — main stays oblivious to that within-session, renderer-only cache.
-    if (bound.controls && !sender.isDestroyed()) {
-      sender.send(IPC.threadBound, { threadId: args.threadId, sessionId, rebound, controls: bound.controls })
+    // ADR-0007). For a Side Draft's first bind, `actualControls` instead reflects
+    // only successfully applied ids that this newly bound session advertised.
+    if (actualControls && !sender.isDestroyed()) {
+      sender.send(IPC.threadBound, { threadId: args.threadId, sessionId, rebound, controls: actualControls })
     }
   } catch (err) {
     if (err instanceof WorkspaceAgentError && err.authState === 'not-signed-in') {

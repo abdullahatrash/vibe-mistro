@@ -107,7 +107,11 @@ export function MessageSelectionToolbar({
   if (!snapshot) return null
 
   return (
-    <BasePopover.Root open onOpenChange={(open) => !open && dismiss()}>
+    // Dismissal is owned by the document listeners above. Letting Base UI close an
+    // externally opened popup on outside press would treat the pointer-up that
+    // completes the source text drag as an outside interaction and erase the new
+    // Selection before the user can act on it.
+    <BasePopover.Root open>
       <BasePopover.Portal>
         <BasePopover.Positioner
           anchor={snapshot.range}

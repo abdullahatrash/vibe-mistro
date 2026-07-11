@@ -7,11 +7,15 @@
  * §3, §4, §8), so if the app's parser tightens against the real agent, this
  * fake breaks the same way.
  *
- * Deliberately dumb: fixed session ids, fixed reply text, fixed usage numbers,
- * no tool calls, no permission requests, no auth dance (always signed in).
+ * Deliberately dumb by default: fixed session ids, fixed reply text, fixed usage
+ * numbers, no auth dance (always signed in). Opt-in env seams add a held turn,
+ * one Permission request, and an append-only protocol log for lifecycle E2E tests;
+ * existing visual scenarios remain byte-for-byte deterministic without those vars.
  * Anything unexpected gets a -32601 so a new app-side call FAILS LOUDLY in the
  * suite instead of hanging a request.
  */
+
+const { appendFileSync } = process.getBuiltinModule('node:fs')
 
 const out = (msg) => process.stdout.write(JSON.stringify(msg) + '\n')
 const reply = (id, result) => out({ jsonrpc: '2.0', id, result })
@@ -19,7 +23,22 @@ const fail = (id, code, message) => out({ jsonrpc: '2.0', id, error: { code, mes
 const notify = (method, params) => out({ jsonrpc: '2.0', method, params })
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+const LOG_PATH = process.env.VIBE_MISTRO_FAKE_LOG_PATH
+const TURN_HOLD_MS = Math.max(
+  0,
+  Number.parseInt(process.env.VIBE_MISTRO_FAKE_TURN_HOLD_MS ?? '0', 10) || 0,
+)
+const PERMISSION_TRIGGER = process.env.VIBE_MISTRO_FAKE_PERMISSION_TRIGGER ?? ''
+const DISTINCT_TITLES = process.env.VIBE_MISTRO_FAKE_DISTINCT_TITLES === '1'
+
+function log(event, fields = {}) {
+  if (!LOG_PATH) return
+  appendFileSync(LOG_PATH, `${JSON.stringify({ at: Date.now(), event, ...fields })}\n`)
+}
+
 let sessionSeq = 0
+let permissionSeq = 0
+const pendingPermissionReplies = new Map()
 
 /** acp-capture §2 — the modes/models/configOptions bundle `session/new` reports. */
 const MODES = {
@@ -55,6 +74,22 @@ const CONFIG_OPTIONS = [
 ]
 
 async function dispatch(msg) {
+  // A reply to an opt-in agent→client Permission request has no `method`. Consume
+  // it before normal request dispatch so it cannot fall through to -32601.
+  if (msg.method === undefined && msg.id !== undefined) {
+    const resolvePermission = pendingPermissionReplies.get(String(msg.id))
+    if (resolvePermission) {
+      pendingPermissionReplies.delete(String(msg.id))
+      log('permission:resolved', { requestId: msg.id, result: msg.result ?? null })
+      resolvePermission(msg.result)
+      return
+    }
+  }
+
+  log('request', {
+    method: msg.method ?? null,
+    sessionId: msg.params?.sessionId ?? null,
+  })
   switch (msg.method) {
     case 'initialize':
       // acp-capture §1.
@@ -82,6 +117,7 @@ async function dispatch(msg) {
     case 'session/new':
       // acp-capture §2. Deterministic ids so replays/screens can't drift.
       sessionSeq += 1
+      log('session:new', { sessionId: `fake-session-${sessionSeq}` })
       reply(msg.id, {
         sessionId: `fake-session-${sessionSeq}`,
         modes: MODES,
@@ -89,6 +125,20 @@ async function dispatch(msg) {
         configOptions: CONFIG_OPTIONS,
       })
       return
+    case 'session/load': {
+      // Deterministic restart-resume seam. Real Vibe returns the session/new-shaped
+      // controls bundle without a sessionId (the caller already supplied the cursor).
+      // No replay notifications are needed here: the app's own transcript is the
+      // restoration source under test.
+      const sessionId = msg.params?.sessionId
+      log('session:load', { sessionId })
+      reply(msg.id, {
+        modes: MODES,
+        models: MODELS,
+        configOptions: CONFIG_OPTIONS,
+      })
+      return
+    }
     case 'session/prompt':
       await streamTurn(msg)
       return
@@ -109,8 +159,24 @@ async function dispatch(msg) {
 /** One deterministic turn (acp-capture §3/§4): title, three message chunks, usage, end_turn. */
 async function streamTurn(msg) {
   const sessionId = msg.params?.sessionId
+  const promptText = Array.isArray(msg.params?.prompt)
+    ? msg.params.prompt
+        .filter((block) => block?.type === 'text' && typeof block.text === 'string')
+        .map((block) => block.text)
+        .join('\n')
+    : ''
+  log('prompt:start', { sessionId, promptText })
   const update = (u) => notify('session/update', { sessionId, update: u })
-  update({ sessionUpdate: 'session_info_update', title: 'Fake deterministic thread' })
+  update({
+    sessionUpdate: 'session_info_update',
+    title: DISTINCT_TITLES ? `Fake ${sessionId}` : 'Fake deterministic thread',
+  })
+
+  if (PERMISSION_TRIGGER && promptText.includes(PERMISSION_TRIGGER)) {
+    await requestPermission(sessionId)
+  }
+  if (TURN_HOLD_MS > 0) await sleep(TURN_HOLD_MS)
+
   const chunks = [
     'Hello from the **fake agent**. ',
     'This reply is fully deterministic, ',
@@ -121,11 +187,33 @@ async function streamTurn(msg) {
     await sleep(30)
   }
   update({ sessionUpdate: 'usage_update', used: 1234, size: 200000, cost: { amount: 0.0042, currency: 'USD' } })
+  log('prompt:end', { sessionId })
   reply(msg.id, {
     stopReason: 'end_turn',
     usage: { inputTokens: 1000, outputTokens: 34, totalTokens: 1034 },
     userMessageId: 'fake-user-1',
   })
+}
+
+/** Opt-in captured-shape Permission request; resolves only after the app answers it. */
+async function requestPermission(sessionId) {
+  permissionSeq += 1
+  const requestId = `fake-permission-${permissionSeq}`
+  log('permission:requested', { requestId, sessionId })
+  out({
+    jsonrpc: '2.0',
+    id: requestId,
+    method: 'session/request_permission',
+    params: {
+      sessionId,
+      toolCall: { toolCallId: `fake-tool-${permissionSeq}` },
+      options: [
+        { kind: 'allow_once', name: 'Allow once', optionId: 'allow_once' },
+        { kind: 'reject_once', name: 'Deny', optionId: 'reject_once' },
+      ],
+    },
+  })
+  await new Promise((resolve) => pendingPermissionReplies.set(requestId, resolve))
 }
 
 let buffer = ''
