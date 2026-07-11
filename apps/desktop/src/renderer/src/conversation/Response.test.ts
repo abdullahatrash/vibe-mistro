@@ -16,6 +16,32 @@ function render(text: string): string {
   return renderToStaticMarkup(createElement(Response, { text }))
 }
 
+describe('Response — Typeset owns prose rhythm', () => {
+  it('applies the chat preset and removes Streamdown root spacing', () => {
+    const html = render('A paragraph')
+    expect(html).toContain('typeset')
+    expect(html).toContain('typeset-chat')
+    expect(html).toContain('space-y-0')
+    expect(html).not.toContain('space-y-4')
+  })
+
+  it('renders headings, lists, and quotes as semantic elements without Streamdown typography classes', () => {
+    const html = render('## Heading\n\n- one\n- two\n\n> quoted')
+    expect(html).toContain('<h2>Heading</h2>')
+    expect(html).toMatch(/<ul>\s*<li>one<\/li>\s*<li>two<\/li>\s*<\/ul>/)
+    expect(html).toMatch(/<blockquote>\s*<p>quoted<\/p>\s*<\/blockquote>/)
+    expect(html).not.toContain('data-streamdown="heading-2"')
+    expect(html).not.toContain('data-streamdown="unordered-list"')
+    expect(html).not.toContain('data-streamdown="blockquote"')
+  })
+
+  it('retains Streamdown interactive wrappers for fenced code and tables', () => {
+    const html = render('```ts\nconst ok = true\n```\n\n| a | b |\n| - | - |\n| 1 | 2 |')
+    expect(html).toContain('data-streamdown="code-block"')
+    expect(html).toContain('data-streamdown="table-wrapper"')
+  })
+})
+
 describe('Response — file-path links render as chips (#168)', () => {
   const fileLinkCases: ReadonlyArray<[string, string]> = [
     ['bare filename', '[label](test.txt)'],

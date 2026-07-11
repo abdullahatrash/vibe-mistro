@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import './typeset.css';
 
 /* Scan streamdown's dist (#114) so Tailwind emits the utility classes it bakes into
    its rendered markdown JSX — node_modules isn't scanned by default. Its classes are

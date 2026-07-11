@@ -8,6 +8,31 @@ import { findProsePathMatches } from './prose-file-links'
 import { responseRehypePlugins } from './response-rehype'
 import { responseRemarkPlugins } from './response-remark'
 
+/** Streamdown normally paints these prose elements with its own Tailwind utilities.
+ * Mapping them back to intrinsic elements lets the container-level Typeset stylesheet
+ * own their rhythm while Streamdown keeps parsing, streaming, and interactive blocks. */
+const TYPESET_SEMANTIC_COMPONENTS = {
+  blockquote: 'blockquote',
+  h1: 'h1',
+  h2: 'h2',
+  h3: 'h3',
+  h4: 'h4',
+  h5: 'h5',
+  h6: 'h6',
+  hr: 'hr',
+  li: 'li',
+  ol: 'ol',
+  strong: 'strong',
+  sub: 'sub',
+  sup: 'sup',
+  tbody: 'tbody',
+  td: 'td',
+  th: 'th',
+  thead: 'thead',
+  tr: 'tr',
+  ul: 'ul',
+} as const satisfies Components
+
 /**
  * Renders agent-authored text as streaming-safe Markdown (#114, spike #112). Wraps
  * `streamdown`: it self-heals incomplete markdown as it streams (`parseIncompleteMarkdown`),
@@ -42,16 +67,13 @@ import { responseRemarkPlugins } from './response-remark'
  * auto-linkified path is secured exactly like an authored `[label](path)` link. Never inline
  * either plugin array — streamdown memoizes blocks by the arrays' identities.
  *
- * Three `components` overrides:
+ * Typeset integration and two custom `components` overrides:
+ *  - semantic prose elements — Streamdown's default renderers carry their own
+ *    typography utilities. Mapping them to intrinsic HTML lets `typeset.css` own
+ *    size, leading, and forward-only flow without changing the Markdown pipeline.
  *  - `inlineCode` — resolves the spike's `muted` token collision: streamdown's default
  *    inline code is `bg-muted`, but our `--color-muted` is a text-grey, so we repaint
  *    inline code on `--accent-tint` instead (code BLOCKS use `bg-sidebar`, no collision).
- *  - `thead` — same collision (#162): streamdown fills the table header row with
- *    `bg-muted/80`, which our text-grey `--color-muted` renders as ~80% dark warm-grey.
- *    Repaint the one colliding class onto `bg-sidebar` (the same warm-light container
- *    surface code BLOCKS use); the `th` cells keep streamdown's default border/padding/
- *    font-weight untouched. Fixed here, NOT in the token map — `--color-muted` must stay
- *    a text-grey everywhere else it's used.
  *  - `a` — turns file-path destinations into an orange `FileChip`; other links stay
  *    plain accent-underlined anchors (opened in the system browser).
  */
@@ -75,6 +97,7 @@ export function Response({ text, className }: { text: string; className?: string
     // Only bind the props we forward — leaving `node` (and other react-markdown
     // ExtraProps) undestructured keeps them off the DOM element AND lint-clean.
     return {
+      ...TYPESET_SEMANTIC_COMPONENTS,
       inlineCode: ({ className: codeClassName, children }) => (
         <code
           className={cn(
@@ -84,13 +107,6 @@ export function Response({ text, className }: { text: string; className?: string
         >
           {children}
         </code>
-      ),
-      // Repaint only streamdown's colliding `bg-muted/80` (see header comment, #162);
-      // `data-streamdown="table-header"` kept for parity with streamdown's default markup.
-      thead: ({ className: theadClassName, children }) => (
-        <thead data-streamdown="table-header" className={cn('bg-sidebar', theadClassName)}>
-          {children}
-        </thead>
       ),
       a: ({ href, className: linkClassName, children }) => {
         const link = href ? parseFileLink(href) : null
@@ -116,7 +132,7 @@ export function Response({ text, className }: { text: string; className?: string
 
   return (
     <Streamdown
-      className={cn('min-w-0 [&>:first-child]:mt-0 [&>:last-child]:mb-0', className)}
+      className={cn('typeset typeset-chat min-w-0 space-y-0', className)}
       plugins={{ code }}
       controls={{ code: { copy: true } }}
       rehypePlugins={responseRehypePlugins}

@@ -134,7 +134,7 @@ export function AssistantRow({ item, index }: { item: AssistantItem; index: numb
   // `group` so the #116 actions bar reveals on hover of the whole answer.
   return (
     <div className="group flex flex-col gap-1.5">
-      <Response className="text-[15px] leading-relaxed text-text-body" text={item.text} />
+      <Response className="text-text-body" text={item.text} />
       {/* Actions bar (#116): a hover-reveal row under the answer, holding the Copy
           control (clipboard + anchored toast). Hidden while the answer streams (a
           half-written reply isn't copyable) and for an empty item. `focus-within`
