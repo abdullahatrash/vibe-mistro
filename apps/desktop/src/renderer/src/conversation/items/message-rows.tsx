@@ -4,7 +4,7 @@ import { IconButton } from '../../ui/icon-button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../../ui/tooltip'
 import { Response } from '../Response'
 import { matchInvokedCommand } from '../command-autocomplete'
-import { extractPromptContexts, pastedLabel } from '../pending-contexts'
+import { buildPromptCopyText, extractPromptContexts, pastedLabel } from '../pending-contexts'
 import { useRowStreaming, useTimelineHandlers } from '../timeline-context'
 import type { AssistantItem, UserItem } from '../reducer'
 
@@ -16,7 +16,9 @@ export function UserRow({ item }: { item: UserItem }): JSX.Element {
   // `<attached_files>` / `<element_context>` marker blocks; strip them back into chips at
   // RENDER time so the bubble shows the clean prose — live and on JSONL replay, which
   // ride the same text. User-typed inline `@path` mentions pass through untouched.
-  const { cleanText, files, elements, reviews, pasted } = extractPromptContexts(item.text)
+  const extractedContexts = extractPromptContexts(item.text)
+  const { cleanText, files, elements, reviews, pasted } = extractedContexts
+  const copyText = buildPromptCopyText(extractedContexts)
   // Skill/command chip: vibe-acp invokes a skill when the prompt opens with a
   // known `/name`, but gives NO wire-level acknowledgment — so we surface the
   // match ourselves. Matched at RENDER time against the CURRENT list (not stamped
@@ -26,7 +28,7 @@ export function UserRow({ item }: { item: UserItem }): JSX.Element {
   // User turn (#114): a right-aligned rounded bubble, capped so long prose wraps
   // instead of spanning the pane. Echoed attachments (#100) re-home into the bubble.
   return (
-    <div className="flex flex-col items-end gap-1.5">
+    <div className="group flex flex-col items-end gap-1.5">
       {(command || files.length > 0 || elements.length > 0 || reviews.length > 0 || pasted.length > 0) && (
         <div className="flex max-w-[80%] flex-wrap justify-end gap-1.5">
           {command && (
@@ -115,6 +117,11 @@ export function UserRow({ item }: { item: UserItem }): JSX.Element {
           {cleanText}
         </div>
       )}
+      {copyText.trim().length > 0 && (
+        <div className="flex items-center justify-end gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
+          <MessageCopyButton text={copyText} />
+        </div>
+      )}
     </div>
   )
 }
@@ -145,7 +152,7 @@ export function AssistantRow({ item, index }: { item: AssistantItem; index: numb
 const COPY_FEEDBACK_MS = 1000
 
 /**
- * The copy control on the assistant actions bar (#116, mirrors t3code `MessageCopyButton`):
+ * The shared user/assistant copy control (#116, mirrors t3code `MessageCopyButton`):
  * a hover tooltip ("Copy to clipboard") that, on click, swaps to "Copied!" with the icon
  * flipped to a check (button disabled for the beat) — or "Failed to copy" when the
  * clipboard write rejects (never silent). ONE controlled tooltip carries all three

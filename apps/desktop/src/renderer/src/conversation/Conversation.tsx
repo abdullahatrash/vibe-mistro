@@ -48,6 +48,7 @@ import {
   getWorkspaceCommands,
   subscribeWorkspaceCommands,
 } from './workspace-commands'
+import { buildComposerHistoryEntries } from './composer-history'
 
 /** Process-local counter for unique echoed-prompt ids. */
 let promptSeq = 0
@@ -437,7 +438,35 @@ export function Conversation({
   const title = state.title ?? thread.title ?? 'Untitled Thread'
   // The current turn is everything AFTER the last user message; used to scope
   // reasoning auto-open to the live turn only (#115 review S1).
-  const lastUserIndex = state.items.map((i) => i.kind).lastIndexOf('user')
+  let lastUserIndex = -1
+  let userItemCount = 0
+  for (let i = 0; i < state.items.length; i++) {
+    if (state.items[i].kind !== 'user') continue
+    lastUserIndex = i
+    userItemCount += 1
+  }
+  const lastUserItem = lastUserIndex >= 0 ? state.items[lastUserIndex] : null
+  // User items are immutable once appended. Cache by count + last id so assistant streaming chunks
+  // preserve the SAME history-array reference and do not re-render the Composer; count also guards
+  // the process-local optimistic id sequence wrapping across an app restart.
+  const sentPromptHistoryRef = useRef<{ lastUserId: string | null; userItemCount: number; entries: string[] }>({
+    lastUserId: null,
+    userItemCount: 0,
+    entries: [],
+  })
+  const lastUserId = lastUserItem?.kind === 'user' ? lastUserItem.id : null
+  if (
+    sentPromptHistoryRef.current.lastUserId !== lastUserId ||
+    sentPromptHistoryRef.current.userItemCount !== userItemCount
+  ) {
+    sentPromptHistoryRef.current = {
+      lastUserId,
+      userItemCount,
+      entries: buildComposerHistoryEntries(
+        state.items.flatMap((item) => (item.kind === 'user' ? [item.text] : [])),
+      ),
+    }
+  }
 
   // The `/` skill list with the Workspace-level fallback (#241): a bound Thread uses its
   // own session's list; an unbound draft (or a just-warmed Thread whose update hasn't
@@ -517,6 +546,7 @@ export function Conversation({
           isProcessing={state.isProcessing}
           isEmpty={state.items.length === 0}
           availableCommands={availableCommands}
+          sentPromptHistory={sentPromptHistoryRef.current.entries}
           followUps={followUps}
           submitPrompt={submitPrompt}
           modes={modes}

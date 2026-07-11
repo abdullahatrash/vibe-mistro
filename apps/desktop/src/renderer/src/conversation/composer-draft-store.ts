@@ -35,6 +35,8 @@ export interface DraftStorage {
   removeItem(key: string): void
 }
 
+export const COMPOSER_DRAFT_PERSIST_DEBOUNCE_MS = 300
+
 export interface ComposerDraft {
   prompt: string
   inlineTokens: ComposerInlineToken[]
@@ -236,7 +238,11 @@ function readMap(storage: DraftStorage | null | undefined): DraftMap {
  * the last draft is pruned the whole key is REMOVED (not stored as `'{}'`), so an
  * emptied store leaves no dangling blob behind.
  */
-function writeMap(storage: DraftStorage, map: DraftMap): boolean {
+function writeMap(
+  storage: DraftStorage,
+  map: DraftMap,
+  onError?: (error: unknown) => void,
+): boolean {
   try {
     if (Object.keys(map).length === 0) {
       storage.removeItem(COMPOSER_DRAFT_STORAGE_KEY)
@@ -256,8 +262,9 @@ function writeMap(storage: DraftStorage, map: DraftMap): boolean {
       JSON.stringify({ schemaVersion: COMPOSER_DRAFT_SCHEMA_VERSION, drafts: persistedMap }),
     )
     return true
-  } catch {
+  } catch (error) {
     // Best-effort: a full/blocked storage must never throw from a keystroke.
+    onError?.(error)
     return false
   }
 }
@@ -341,27 +348,79 @@ export interface ComposerDraftStore {
   subscribe(listener: () => void): () => void
   getSnapshot(threadId: string): ComposerDraft
   getTextSnapshot(threadId: string): string
+  getPersistenceError(): boolean
   setDraft(threadId: string, draft: ComposerDraft): void
   setText(threadId: string, text: string): void
   clear(threadId: string): void
+  flush(): void
 }
 
-export function createComposerDraftStore(storage: DraftStorage | null | undefined): ComposerDraftStore {
+export interface ComposerDraftStoreOptions {
+  /** Zero keeps the pure/test store synchronous; the renderer coalesces writes. */
+  persistDelayMs?: number
+  onPersistenceError?: (error: unknown) => void
+}
+
+export function createComposerDraftStore(
+  storage: DraftStorage | null | undefined,
+  options: ComposerDraftStoreOptions = {},
+): ComposerDraftStore {
   const listeners = new Set<() => void>()
-  const snapshotCache = new Map<string, ComposerDraft>()
+  let drafts = readMap(storage)
+  if (storage && Object.keys(drafts).length === 0) drafts = migrateLegacyMap(storage)
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let dirty = false
+  let persistenceError = false
+  const persistDelayMs = options.persistDelayMs ?? 0
+
   function notify(): void {
     for (const listener of listeners) listener()
   }
-  function snapshot(threadId: string): ComposerDraft {
-    const cached = snapshotCache.get(threadId)
-    if (cached) return cached
-    const next = getComposerDraft(storage, threadId)
-    snapshotCache.set(threadId, next)
-    return next
+
+  function setPersistenceError(next: boolean): void {
+    if (persistenceError === next) return
+    persistenceError = next
+    notify()
   }
-  function invalidate(threadId: string): void {
-    snapshotCache.delete(threadId)
+
+  function persistNow(): void {
+    if (timer !== null) {
+      clearTimeout(timer)
+      timer = null
+    }
+    if (!storage || !dirty) return
+    const succeeded = writeMap(storage, drafts, (error) => {
+      options.onPersistenceError?.(error)
+      setPersistenceError(true)
+    })
+    if (!succeeded) return
+    dirty = false
+    setPersistenceError(false)
   }
+
+  function schedulePersistence(): void {
+    dirty = true
+    if (persistDelayMs <= 0) {
+      persistNow()
+      return
+    }
+    if (timer !== null) clearTimeout(timer)
+    timer = setTimeout(persistNow, persistDelayMs)
+  }
+
+  function updateDraft(threadId: string, draft: ComposerDraft): void {
+    if (isEmptyDraft(draft)) {
+      if (!(threadId in drafts)) return
+      const next = { ...drafts }
+      delete next[threadId]
+      drafts = next
+    } else {
+      drafts = { ...drafts, [threadId]: draft }
+    }
+    schedulePersistence()
+    notify()
+  }
+
   return {
     subscribe(listener) {
       listeners.add(listener)
@@ -370,31 +429,28 @@ export function createComposerDraftStore(storage: DraftStorage | null | undefine
       }
     },
     getSnapshot(threadId) {
-      return snapshot(threadId)
+      return drafts[threadId] ?? EMPTY_COMPOSER_DRAFT
     },
     getTextSnapshot(threadId) {
-      return snapshot(threadId).prompt
+      return drafts[threadId]?.prompt ?? ''
+    },
+    getPersistenceError() {
+      return persistenceError
     },
     setDraft(threadId, draft) {
-      const next = sessionDraft(draft)
-      setComposerDraft(storage, threadId, next)
-      snapshotCache.set(threadId, next)
-      notify()
+      updateDraft(threadId, sessionDraft(draft))
     },
     setText(threadId, text) {
       const next = {
-        ...snapshot(threadId),
+        ...(drafts[threadId] ?? EMPTY_COMPOSER_DRAFT),
         prompt: text,
       }
-      setComposerDraft(storage, threadId, next)
-      snapshotCache.set(threadId, sessionDraft(next))
-      notify()
+      updateDraft(threadId, sessionDraft(next))
     },
     clear(threadId) {
-      clearDraft(storage, threadId)
-      invalidate(threadId)
-      notify()
+      updateDraft(threadId, EMPTY_COMPOSER_DRAFT)
     },
+    flush: persistNow,
   }
 }
 
@@ -402,7 +458,15 @@ function resolveWindowStorage(): DraftStorage | null {
   return typeof window === 'undefined' ? null : window.localStorage
 }
 
-const composerDraftStore = createComposerDraftStore(resolveWindowStorage())
+const composerDraftStore = createComposerDraftStore(resolveWindowStorage(), {
+  persistDelayMs: COMPOSER_DRAFT_PERSIST_DEBOUNCE_MS,
+  onPersistenceError(error) {
+    console.warn('[composer-drafts] Failed to persist draft changes', error)
+  },
+})
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => composerDraftStore.flush())
+}
 
 export function useComposerDraftText(
   threadId: string,
@@ -427,9 +491,14 @@ export function useComposerDraft(
   ComposerDraft,
   (draft: ComposerDraft | ((current: ComposerDraft) => ComposerDraft)) => void,
   () => void,
+  boolean,
 ] {
   const draft = useSyncExternalStore(composerDraftStore.subscribe, () =>
     composerDraftStore.getSnapshot(threadId),
+  )
+  const persistenceError = useSyncExternalStore(
+    composerDraftStore.subscribe,
+    composerDraftStore.getPersistenceError,
   )
   const setStructuredDraft = useCallback(
     (nextDraft: ComposerDraft | ((current: ComposerDraft) => ComposerDraft)) => {
@@ -442,5 +511,5 @@ export function useComposerDraft(
     [threadId],
   )
   const clear = useCallback(() => composerDraftStore.clear(threadId), [threadId])
-  return [draft, setStructuredDraft, clear]
+  return [draft, setStructuredDraft, clear, persistenceError]
 }

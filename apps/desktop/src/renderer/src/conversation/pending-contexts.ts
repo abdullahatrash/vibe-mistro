@@ -422,6 +422,21 @@ export function extractPromptContexts(text: string): ExtractedPromptContexts {
 }
 
 /**
+ * Build reusable clipboard text from a rendered user prompt. Unlike the transport payload, this
+ * omits marker tags while retaining the full contents represented by context chips. This also
+ * gives chip-only prompts (especially long pastes) something meaningful to copy.
+ */
+export function buildPromptCopyText(contexts: ExtractedPromptContexts): string {
+  const parts: string[] = []
+  if (contexts.cleanText.trim().length > 0) parts.push(contexts.cleanText)
+  if (contexts.files.length > 0) parts.push(contexts.files.map((file) => `@${file.path}`).join('\n'))
+  for (const element of contexts.elements) parts.push(formatElementEntry(element).join('\n'))
+  for (const review of contexts.reviews) parts.push(formatReviewEntry(review).join('\n'))
+  for (const paste of contexts.pasted) parts.push(paste.text)
+  return parts.join('\n\n')
+}
+
+/**
  * Flatten the staged contexts into the outgoing prompt text: a skill chip becomes the
  * leading `/name ` invocation (bare `/name` when there is no prose); file chips become
  * a TRAILING `<attached_files>` block of `@path` mentions the agent expands itself

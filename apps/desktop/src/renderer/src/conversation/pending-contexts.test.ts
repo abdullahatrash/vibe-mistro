@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   addContext,
+  buildPromptCopyText,
   contextKey,
   extractAttachedFiles,
   extractPromptContexts,
@@ -78,6 +79,25 @@ describe('serializeForSend', () => {
     expect(serializeForSend('', [bare, reducerFile])).toBe(
       '<attached_files>\n@src/renderer/src/conversation/reducer.ts\n</attached_files>\n\n<element_context>\nPicked element <div>\nhttp://localhost:5173/\n</element_context>',
     )
+  })
+})
+
+describe('buildPromptCopyText', () => {
+  it('copies chip-only long-paste contents without transport marker tags', () => {
+    const wire = serializeForSend('', [{ kind: 'pasted', id: 'paste:1', text: 'full pasted text' }])
+
+    expect(buildPromptCopyText(extractPromptContexts(wire))).toBe('full pasted text')
+  })
+
+  it('combines visible prose and reusable file/element context without marker tags', () => {
+    const wire = serializeForSend('check this', [reducerFile, button])
+    const copied = buildPromptCopyText(extractPromptContexts(wire))
+
+    expect(copied).toContain('check this')
+    expect(copied).toContain('@src/renderer/src/conversation/reducer.ts')
+    expect(copied).toContain('Picked element <button>')
+    expect(copied).not.toContain('<attached_files>')
+    expect(copied).not.toContain('<element_context>')
   })
 })
 
