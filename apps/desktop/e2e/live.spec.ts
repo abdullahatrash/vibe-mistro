@@ -78,7 +78,11 @@ test('live: connect on the fake agent, stream a turn, open the side panel', asyn
     })
     await expect(page.getByAltText('drop.png')).toBeVisible()
     await page.getByLabel('Remove drop.png').click()
-    await followUpComposer.fill('')
+    // Clear through the editor's real keyboard path. `fill('')` can mutate the contenteditable DOM
+    // without Lexical committing an empty controlled value before the next shell re-render.
+    await followUpComposer.press('ControlOrMeta+A')
+    await followUpComposer.press('Backspace')
+    await expect(followUpComposer).toHaveText('')
 
     // Side panel over the conversation: launcher grid, and the chat column
     // narrows under the composer's compact breakpoints (icon-only chips,
