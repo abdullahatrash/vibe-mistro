@@ -179,6 +179,7 @@ test('live: ask about an agent Message selection in a new Side Thread', async ()
     // prompt. The new composer is empty and focused; the original two settled messages remain
     // the only transcript rows with message actions.
     const sidePanel = page.getByRole('complementary', { name: 'Side panel' })
+    const sideThreadSurface = sidePanel.locator('[data-side-thread-surface]')
     const sideComposer = sidePanel.getByRole('textbox', { name: 'Ask anything…' })
     await expect(sidePanel.getByText('1 selection', { exact: true })).toBeVisible()
     await expect(sidePanel.getByRole('button', { name: 'Remove selection' })).toBeVisible()
@@ -188,6 +189,17 @@ test('live: ask about an agent Message selection in a new Side Thread', async ()
     await expect(page.getByText('Fake deterministic thread')).toHaveCount(2)
     await expect(page.getByLabel('Copy message')).toHaveCount(2)
     await expect(page.getByLabel('Stop turn')).toBeHidden()
+
+    // The tab strip remains full-bleed, while the Side Thread conversation carries
+    // its own compact gutter (the primary conversation gets its gutter from the
+    // central outlet instead). Guard the header and Composer against edge regressions.
+    const surfaceBox = await sideThreadSurface.boundingBox()
+    const headerBox = await sideThreadSurface.locator('.conv__head').boundingBox()
+    const composerCardBox = await sideThreadSurface.locator('[data-slot="card"]').boundingBox()
+    if (!surfaceBox || !headerBox || !composerCardBox) throw new Error('Side Thread layout unavailable')
+    expect(headerBox.x - surfaceBox.x).toBeGreaterThanOrEqual(15)
+    expect(composerCardBox.x - surfaceBox.x).toBeGreaterThanOrEqual(15)
+    expect(surfaceBox.x + surfaceBox.width - (composerCardBox.x + composerCardBox.width)).toBeGreaterThanOrEqual(15)
 
     // The first Side Thread prompt crosses the real binding/persistence seam. Its staged
     // selection becomes a sent transcript chip, while the fake agent streams the same
