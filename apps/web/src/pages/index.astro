@@ -1,9 +1,6 @@
 ---
-// The marketing page (#271, ADR-0018): one page, one macOS download button.
-// The button's href is the PERMANENT `releases/latest/download` redirect — the
-// asset name is versionless by design, so this page never redeploys per Release.
-// Brand-matched to the app (warm paper, Geist, the stepped flame mark) but fully
-// self-contained: fonts ship from this workspace, no external requests.
+// The marketing page (#271, ADR-0018). Release links use GitHub's permanent
+// latest-download redirects, so a new desktop release never requires a redeploy.
 import '@fontsource-variable/geist'
 import '@fontsource-variable/geist-mono'
 
@@ -15,6 +12,7 @@ const DOWNLOAD_URL_LINUX_DEB =
   'https://github.com/abdullahatrash/vibe-mistro/releases/latest/download/Vibe-Mistro.deb'
 const REPO_URL = 'https://github.com/abdullahatrash/vibe-mistro'
 const VIBE_CLI_URL = 'https://docs.mistral.ai/vibe/code/cli/install-setup'
+const YEAR = new Date().getFullYear()
 ---
 
 <!doctype html>
@@ -22,233 +20,571 @@ const VIBE_CLI_URL = 'https://docs.mistral.ai/vibe/code/cli/install-setup'
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Vibe Mistro — orchestrate your Mistral Vibe coding agents</title>
+    <meta name="theme-color" content="#fbfaf8" />
+    <title>Vibe Mistro — a desktop home for Mistral Vibe</title>
     <meta
       name="description"
-      content="Vibe Mistro is a macOS &amp; Linux desktop app that runs and orchestrates Mistral Vibe coding agents across your local projects — parallel workspaces, streamed tool calls, approvals, git, and terminal."
+      content="Run Mistral Vibe coding agents across local Workspaces from one calm desktop app. Keep durable Threads, approvals, files, git, and a terminal close at hand."
     />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta property="og:title" content="Vibe Mistro" />
     <meta
       property="og:description"
-      content="A desktop conductor for Mistral Vibe coding agents. macOS &amp; Linux, beta."
+      content="A light, open-source desktop home for your Mistral Vibe coding agents."
     />
   </head>
   <body>
-    <div class="steps" aria-hidden="true"></div>
+    <a class="skip-link" href="#main">Skip to content</a>
 
     <header class="site-header">
-      <a class="brand" href="/">
-        <svg class="mark" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-          <defs>
-            <linearGradient id="vm-flame" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stop-color="#f6c445"></stop>
-              <stop offset=".55" stop-color="#ef8a3c"></stop>
-              <stop offset="1" stop-color="#e2452a"></stop>
-            </linearGradient>
-          </defs>
-          <rect width="64" height="64" rx="14" fill="url(#vm-flame)"></rect>
-          <path
-            d="M19 19 L32 46 L45 19"
-            stroke="#241a12"
-            stroke-width="8.5"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            fill="none"></path>
-        </svg>
-        <span class="wordmark">Vibe Mistro</span>
-        <span class="beta-chip">Beta</span>
-      </a>
-      <nav>
-        <a class="quiet-link" href={REPO_URL} target="_blank" rel="noreferrer">GitHub</a>
-      </nav>
+      <div class="container nav-shell">
+        <a class="brand" href="/" aria-label="Vibe Mistro home">
+          <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
+            <defs>
+              <linearGradient id="vm-flame" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#f6c445"></stop>
+                <stop offset=".55" stop-color="#ef8a3c"></stop>
+                <stop offset="1" stop-color="#e2452a"></stop>
+              </linearGradient>
+            </defs>
+            <rect width="64" height="64" rx="15" fill="url(#vm-flame)"></rect>
+            <path
+              d="M19 19 32 46 45 19"
+              fill="none"
+              stroke="#241a12"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="8.5"></path>
+          </svg>
+          <span>Vibe Mistro</span>
+          <span class="beta-chip">Beta</span>
+        </a>
+
+        <nav aria-label="Primary navigation">
+          <a href="#workflow">Workflow</a>
+          <a href="#under-the-hood">How it works</a>
+          <a href={REPO_URL} target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+
+        <a class="header-download" href={DOWNLOAD_URL}>
+          Get the app
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="m6 14 8-8m-6 0h6v6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"></path>
+          </svg>
+        </a>
+      </div>
     </header>
 
-    <main>
-      <section class="fold">
-        <div class="hero">
-          <h1>
-            Conduct your <span class="flame">Mistral&nbsp;Vibe</span> agents.
-          </h1>
-          <p class="pitch">
-            Vibe Mistro is a macOS &amp; Linux desktop app that runs and orchestrates Mistral Vibe
-            coding agents across your local projects — parallel workspaces, streamed tool calls,
-            approvals, git, and a terminal, all in one calm window.
+    <main id="main">
+      <section class="hero">
+        <div class="hero-grid" aria-hidden="true"></div>
+        <div class="hero-glow hero-glow-one" aria-hidden="true"></div>
+        <div class="hero-glow hero-glow-two" aria-hidden="true"></div>
+
+        <div class="container hero-copy">
+          <p class="eyebrow hero-eyebrow">
+            <span class="live-dot"></span>
+            Open source · macOS &amp; Linux
           </p>
-          <div class="cta">
-            <div class="download-row">
-              <a class="download" href={DOWNLOAD_URL}>
-                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="glyph">
-                  <path
-                    d="M17.05 20.28c-.98.95-2.05.86-3.08.38-1.09-.5-2.08-.53-3.2 0-1.44.62-2.2.44-3.06-.38C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.08ZM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25Z"
-                  ></path>
-                </svg>
-                Download for macOS
-              </a>
-              <a class="download secondary" href={DOWNLOAD_URL_LINUX}>
-                <svg viewBox="0 0 32 32" fill="none" aria-hidden="true" class="glyph tux">
-                  <path d="M30 16C30 23.728 23.735 30 16 30C8.265 30 2 23.728 2 16C2 8.265 8.265 2 16 2C23.735 2 30 8.265 30 16Z" fill="white"></path>
-                  <path d="M11.3063 21.91C11.181 21.7232 11.0714 21.4713 10.9824 21.1699C9.37571 19.358 10.6169 16.6916 11.8446 14.881C11.9623 14.6874 12.0905 14.5004 12.2299 14.3215C13.1666 13.1577 13.4089 12.3478 13.481 11.2521C13.4896 11.0481 13.4727 10.7781 13.4533 10.4678C13.3542 8.8837 13.1895 6.25174 16.0159 6.0184C19.5489 5.72669 19.2611 8.97105 19.235 10.8732C19.2339 10.9519 19.2328 11.0285 19.2321 11.1024C19.2225 12.249 19.8209 13.0341 20.4455 13.8535C20.6736 14.1528 20.9052 14.4566 21.112 14.7843C21.1181 14.794 21.1242 14.8038 21.1303 14.8135C22.2218 16.3877 23.2994 18.737 21.7995 20.9653C21.5887 21.7259 21.2695 22.424 20.8434 22.9921C19.3136 25.0052 17.9539 24.8008 16.892 24.6412C16.5717 24.5931 16.2785 24.549 16.0159 24.5711C15.5797 24.5977 15.2301 24.6682 14.9281 24.7292C13.7608 24.9648 13.3046 25.0569 11.3063 21.91Z" fill="#000000"></path>
-                  <path d="M18.0139 7.79452C17.9811 8.72691 16.9921 9.53681 15.8065 9.61167C14.6209 9.68654 13.6907 8.97873 13.7235 8.04633C13.7562 7.11393 14.7453 6.30404 15.9309 6.22917C17.1165 6.16112 18.0466 6.86212 18.0139 7.79452Z" fill="url(#paint0_linear_87_7435)"></path>
-                  <path fill-rule="evenodd" clip-rule="evenodd" d="M15.8656 10.0609C15.8751 10.5679 16.1073 11.0002 16.4334 11.1955C15.3695 11.1002 14.0512 11.4891 14.0512 12.2252C14.0348 13.4703 13.3418 15.0195 12.8429 16.1346C12.7447 16.3543 12.654 16.5571 12.5774 16.7374C12.2686 17.5021 12.0833 18.32 12.0614 19.1221C11.2435 17.9947 11.8378 16.5484 12.1582 15.9207C12.5846 15.0947 12.5764 14.9916 12.4108 15.1852C11.7759 16.2648 10.5803 18.4333 12.0775 19.736C12.125 20.3177 12.2667 20.8813 12.5185 21.3994C14.5228 25.4421 18.2761 23.7815 19.5141 21.6853C19.6788 21.3872 19.812 21.0989 19.9177 20.8203C19.9797 20.8593 20.0461 20.8895 20.1167 20.9094C20.739 21.0932 21.6691 20.3922 21.8918 19.9566C22.1604 19.3781 21.8853 18.9833 20.9683 18.5137C20.9215 18.4906 20.8753 18.4688 20.8297 18.4485C21.1814 16.9676 20.2122 15.4276 19.52 14.7743C19.3909 14.7424 19.3727 14.8156 19.5731 15.0155C20.009 15.4333 20.9572 16.9228 20.4442 18.3091C20.3597 18.2864 20.2784 18.2704 20.2009 18.2616C20.0433 17.3158 19.6231 16.58 19.3294 16.0658C19.2629 15.9493 19.2029 15.8442 19.1538 15.7506C19.055 15.5617 18.9368 15.3661 18.8114 15.1587C18.3283 14.3594 17.739 13.3843 17.739 11.9393C17.6651 11.6214 17.3651 11.4094 16.9658 11.2923C17.4293 11.1988 17.7772 10.6573 17.7652 10.0065C17.7521 9.30545 17.3132 8.74737 16.7892 8.76099C16.2652 8.7746 15.846 9.3599 15.8656 10.0609ZM16.2979 10.2174C16.2914 10.6054 16.4748 10.9184 16.7172 10.9184C16.953 10.9184 17.156 10.6054 17.1626 10.2242C17.1691 9.83631 16.9857 9.52324 16.7434 9.52324C16.501 9.52324 16.3045 9.83631 16.2979 10.2174Z" fill="url(#paint1_linear_87_7435)"></path>
-                  <path fill-rule="evenodd" clip-rule="evenodd" d="M14.5556 11.1498C14.9355 11.1294 15.2106 10.619 15.1779 10.0133C15.1451 9.40754 14.8111 8.93794 14.4311 8.95835C14.0512 8.97877 13.7761 9.48921 13.8089 10.0949C13.8416 10.7006 14.1757 11.1702 14.5556 11.1498ZM14.7848 10.2242C14.8176 10.5441 14.6997 10.8163 14.5294 10.8436C14.3591 10.864 14.1953 10.6258 14.1626 10.3059C14.1298 9.98604 14.2477 9.7138 14.418 9.68658C14.5883 9.66616 14.7521 9.90436 14.7848 10.2242Z" fill="url(#paint2_linear_87_7435)"></path>
-                  <path d="M16.3961 9.99963C16.3764 10.2174 16.4747 10.3944 16.6122 10.408C16.7498 10.4216 16.8808 10.2514 16.9004 10.0405C16.9201 9.82267 16.8218 9.64572 16.6843 9.63211C16.5467 9.6185 16.4157 9.78865 16.3961 9.99963Z" fill="url(#paint3_linear_87_7435)"></path>
-                  <path d="M14.641 10.0542C14.6606 10.2312 14.5886 10.3877 14.4838 10.4013C14.379 10.4149 14.2807 10.2788 14.261 10.0951C14.2414 9.91811 14.3134 9.76158 14.4183 9.74797C14.5231 9.73436 14.6213 9.87728 14.641 10.0542Z" fill="url(#paint4_linear_87_7435)"></path>
-                  <path d="M18.669 17.1525C18.669 18.3503 17.562 19.9021 15.6625 19.8885C13.7039 19.9021 12.8721 18.3503 12.8721 17.1525C12.8721 15.9547 14.169 14.9814 15.7673 14.9814C17.3721 14.9883 18.669 15.9547 18.669 17.1525Z" fill="url(#paint5_linear_87_7435)"></path>
-                  <path d="M17.6346 13.3892C17.615 14.6279 16.8355 14.9205 15.8529 14.9205C14.8704 14.9205 14.1564 14.7367 14.0713 13.3892C14.0713 12.5453 14.8704 12.0552 15.8529 12.0552C16.8355 12.0484 17.6346 12.5385 17.6346 13.3892Z" fill="url(#paint6_linear_87_7435)"></path>
-                  <path d="M11.6936 15.2947C12.3356 14.2807 13.6914 12.7221 11.9491 15.5125C10.5342 17.8129 11.4251 19.2898 11.8836 19.6981C13.2067 20.9232 13.1543 21.7467 12.1128 21.1001C9.87922 19.7185 10.3443 17.3909 11.6936 15.2947Z" fill="url(#paint7_linear_87_7435)"></path>
-                  <path d="M20.9881 15.71C20.4314 14.519 18.6628 11.4972 21.0733 15.009C23.2676 18.1873 21.7283 20.3992 21.4532 20.617C21.1781 20.8348 20.2545 21.2771 20.5231 20.5081C20.7982 19.739 22.1606 18.2826 20.9881 15.71Z" fill="url(#paint8_linear_87_7435)"></path>
-                  <path d="M11.2089 25.1021C9.74165 24.2922 7.61283 25.2586 8.38575 23.0671C8.54296 22.5703 8.15649 21.8217 8.4054 21.3384C8.70016 20.7463 9.33553 20.8756 9.71544 20.4809C10.0888 20.0726 10.3246 19.3648 11.0255 19.4736C11.7198 19.5825 12.1849 20.4673 12.6696 21.5562C13.0299 22.3321 14.3006 23.4278 14.2154 24.299C14.1106 25.6329 12.6499 25.8847 11.2089 25.1021Z" fill="url(#paint9_linear_87_7435)"></path>
-                  <path fill-rule="evenodd" clip-rule="evenodd" d="M9.87664 20.6404C9.51984 21.0307 8.86452 20.9371 8.60152 21.4477C8.43261 21.7756 8.61716 22.2796 8.64206 22.6387C8.67282 23.0824 8.30503 23.711 8.49233 24.0899C8.70268 24.5154 9.65296 24.4602 10.0707 24.5213C11.1019 24.6719 12.8063 26.0065 13.7388 24.9414C14.6504 23.9002 12.8982 22.5825 12.4684 21.6569C12.1889 21.0289 11.7706 19.825 10.992 19.7027C10.4431 19.6175 10.1931 20.2943 9.87664 20.6404ZM11.0583 19.2446C12.0278 19.3967 12.5129 20.6535 12.8707 21.4572C13.4138 22.6227 15.2747 23.8755 14.0686 25.2531C12.9732 26.5043 11.2438 25.1604 10.0086 24.98C9.39166 24.8898 8.41858 24.9546 8.09576 24.3015C7.81821 23.7401 8.2362 23.2316 8.1974 22.672C8.16434 22.1952 7.97565 21.6832 8.2077 21.2306C8.52537 20.5945 9.13864 20.7485 9.55546 20.3192C9.99809 19.8328 10.2634 19.1211 11.0583 19.2446Z" fill="#E68C3F"></path>
-                  <path d="M21.3814 24.7278C22.4556 23.3735 24.8464 23.6525 23.2351 21.7945C22.8945 21.393 22.9993 20.5354 22.5801 20.1679C22.0888 19.7187 21.5451 20.0862 21.0473 19.8548C20.5495 19.603 20.0255 19.1198 19.4163 19.4601C18.8071 19.8072 18.7416 20.7056 18.6827 21.8898C18.6303 22.7405 17.8836 24.1629 18.2831 24.9456C18.8596 26.157 20.3596 25.9937 21.3814 24.7278Z" fill="url(#paint10_linear_87_7435)"></path>
-                  <path fill-rule="evenodd" clip-rule="evenodd" d="M21.8097 19.6982C22.0851 19.6909 22.415 19.7102 22.7248 19.9925C23.1101 20.3322 23.1139 20.8867 23.2592 21.351C23.4312 21.9008 24.0341 22.2149 23.998 22.8597C23.9391 23.9136 22.1138 24.1675 21.552 24.8759C21.0121 25.5447 20.3297 25.9429 19.6821 25.9966C18.7 26.078 17.8888 25.2522 17.9462 24.2439C17.9928 23.4276 18.4086 22.6861 18.4593 21.8764C18.4885 21.29 18.52 20.7464 18.626 20.305C18.7331 19.8589 18.9261 19.4748 19.3083 19.257C20.1453 18.7894 20.9539 19.7206 21.8097 19.6982ZM19.5219 19.6637C19.2953 19.7931 19.1512 20.0316 19.0586 20.4171C18.9649 20.8073 18.9341 21.3073 18.9043 21.9046C18.8543 22.7162 18.4377 23.4572 18.3913 24.2713C18.3499 24.9972 18.9075 25.5961 19.6467 25.5348C20.1484 25.4932 20.7272 25.1764 21.2091 24.5797C21.6397 24.0373 23.5137 23.5336 23.5529 22.8328C23.5785 22.3752 22.9765 21.9459 22.8351 21.4943C22.7245 21.1408 22.7187 20.5932 22.4355 20.3449C22.2545 20.1795 22.0641 20.1549 21.8209 20.1613C21.1162 20.1797 20.1761 19.2992 19.5219 19.6637Z" fill="#E68C3F"></path>
-                  <path d="M20.9156 22.9174C22.5793 20.3652 21.3413 20.3856 20.9221 20.1882C20.5029 19.9841 20.0641 19.5825 19.5728 19.8616C19.0815 20.1474 19.0553 20.8824 19.0422 21.8489C19.0226 22.5431 18.4658 23.7069 18.7999 24.3534C19.206 25.1089 20.1885 24.0131 20.9156 22.9174Z" fill="url(#paint11_linear_87_7435)"></path>
-                  <path d="M10.8682 23.2847C8.37909 21.6105 9.54502 21.0388 9.91839 20.7733C10.3704 20.433 10.3769 19.7797 10.9337 19.8409C11.4904 19.9022 11.8179 20.6168 12.1913 21.5016C12.4664 22.1345 13.4228 22.9784 13.3507 23.7066C13.259 24.5642 11.9424 23.9993 10.8682 23.2847Z" fill="url(#paint12_linear_87_7435)"></path>
-                  <path d="M21.7481 19.9362C21.5516 20.2901 20.7525 20.8481 20.2219 20.6984C19.6783 20.5555 19.4294 19.7592 19.5407 19.1603C19.639 18.4797 20.2219 18.4457 20.9556 18.786C21.735 19.1535 21.9774 19.4666 21.7481 19.9362Z" fill="#000000"></path>
-                  <path d="M21.2108 19.7389C21.0863 19.9839 20.5623 20.3718 20.1955 20.2697C19.8287 20.1676 19.6453 19.6164 19.7042 19.2012C19.7566 18.7316 20.1496 18.7044 20.6475 18.9358C21.1846 19.1944 21.3549 19.4122 21.2108 19.7389Z" fill="url(#paint13_linear_87_7435)"></path>
-                  <path d="M14.4374 10.8576C14.6994 10.6057 15.3348 9.83668 16.54 10.6398C16.7627 10.7895 16.9461 10.8031 17.3719 10.9937C18.23 11.3612 17.8238 12.2459 16.9068 12.5454C16.5138 12.6747 16.1601 13.1715 15.4527 13.1239C14.8435 13.0899 14.6863 12.6747 14.3129 12.4501C13.6514 12.0622 13.5531 11.5381 13.9134 11.2591C14.2736 10.9801 14.4112 10.878 14.4374 10.8576Z" fill="url(#paint14_linear_87_7435)"></path>
-                  <path fill-rule="evenodd" clip-rule="evenodd" d="M13.9933 11.3703C13.8563 11.4764 13.8127 11.6174 13.858 11.7734C13.951 12.0938 14.6216 12.5345 14.8784 12.7501C15.0244 12.8727 15.1914 12.9699 15.4613 12.985C16.0393 13.0239 16.3603 12.5792 16.8667 12.4126C17.1997 12.3038 17.9044 11.8882 17.671 11.4119C17.4718 11.0054 16.8008 10.9803 16.4675 10.7563C15.8939 10.3742 15.4763 10.3769 15.1788 10.4841C14.8528 10.6016 14.2885 11.1416 13.9933 11.3703ZM15.0911 10.2215C15.4781 10.0821 15.9812 10.1021 16.6126 10.5228C17.0276 10.8018 17.659 10.7749 17.9093 11.2858C18.2282 11.9365 17.4555 12.5116 16.947 12.6777C16.4025 12.857 16.0983 13.3061 15.4447 13.2624C15.1058 13.2433 14.8884 13.1158 14.7103 12.9663C14.3408 12.6561 13.7165 12.3613 13.5738 11.8694C13.4946 11.5966 13.6101 11.3204 13.8334 11.1474C14.1943 10.8679 14.682 10.369 15.0911 10.2215Z" fill="#E68C3F"></path>
-                  <path fill-rule="evenodd" clip-rule="evenodd" d="M17.4745 11.5671C17.4772 11.6182 17.4395 11.6619 17.3904 11.6646C16.6971 11.7039 16.2099 12.4951 15.427 12.4951C14.9889 12.4951 14.6421 12.2837 14.3941 12.0804C14.3442 12.0395 13.9033 11.6996 13.9033 11.613C13.9033 11.5618 13.9432 11.5203 13.9925 11.5203C14.0846 11.5203 14.3625 11.8219 14.4659 11.9067C14.6995 12.0982 15.0463 12.3098 15.427 12.3098C16.2021 12.3098 16.6776 11.5195 17.3806 11.4796C17.4298 11.4768 17.4718 11.516 17.4745 11.5671Z" fill="#E68C3F"></path>
-                  <path d="M14.8442 10.7893C14.9752 10.6668 15.3878 10.3333 15.9315 10.6736C16.0494 10.7416 16.1673 10.8165 16.3376 10.9186C16.6848 11.1296 16.5145 11.4358 16.0952 11.6264C15.9053 11.7081 15.5909 11.885 15.3551 11.8714C15.0931 11.8442 14.9162 11.6672 14.7459 11.5515C14.4249 11.3338 14.4446 11.15 14.5952 11.0071C14.7066 10.8982 14.8311 10.7961 14.8442 10.7893Z" fill="url(#paint15_linear_87_7435)"></path>
-                  <defs>
-                    <linearGradient id="paint0_linear_87_7435" x1="16.0578" y1="6.30617" x2="15.8364" y2="9.30598" gradientUnits="userSpaceOnUse">
-                      <stop stop-color="white" stop-opacity="0.8"></stop>
-                      <stop offset="1" stop-color="white" stop-opacity="0"></stop>
-                    </linearGradient>
-                    <linearGradient id="paint1_linear_87_7435" x1="12.8966" y1="22.6721" x2="11.2506" y2="17.2716" gradientUnits="userSpaceOnUse">
-                      <stop stop-color="#FFEED7"></stop>
-                      <stop offset="1" stop-color="#BDBFC2"></stop>
-                    </linearGradient>
-                    <linearGradient id="paint2_linear_87_7435" x1="12.8966" y1="22.6721" x2="11.2506" y2="17.2716" gradientUnits="userSpaceOnUse">
-                      <stop stop-color="#FFEED7"></stop>
-                      <stop offset="1" stop-color="#BDBFC2"></stop>
-                    </linearGradient>
-                    <linearGradient id="paint3_linear_87_7435" x1="16.6681" y1="9.65546" x2="16.5748" y2="10.3542" gradientUnits="userSpaceOnUse">
-                      <stop stop-color="white" stop-opacity="0.65"></stop>
-                      <stop offset="1" stop-color="white" stop-opacity="0"></stop>
-                    </linearGradient>
-                    <linearGradient id="paint4_linear_87_7435" x1="14.434" y1="9.78294" x2="14.5344" y2="10.3483" gradientUnits="userSpaceOnUse">
-                      <stop stop-color="white" stop-opacity="0.65"></stop>
-                      <stop offset="1" stop-color="white" stop-opacity="0"></stop>
-                    </linearGradient>
-                    <linearGradient id="paint5_linear_87_7435" x1="15.7613" y1="15.6306" x2="15.778" y2="19.6272" gradientUnits="userSpaceOnUse">
-                      <stop stop-color="white" stop-opacity="0.8"></stop>
-                      <stop offset="1" stop-color="white" stop-opacity="0"></stop>
-                    </linearGradient>
-                    <linearGradient id="paint6_linear_87_7435" x1="15.8504" y1="13.1247" x2="15.8688" y2="14.7138" gradientUnits="userSpaceOnUse">
-                      <stop stop-color="white" stop-opacity="0.65"></stop>
-                      <stop offset="1" stop-color="white" stop-opacity="0"></stop>
-                    </linearGradient>
-                    <linearGradient id="paint7_linear_87_7435" x1="11.72" y1="14.1055" x2="11.72" y2="19.9372" gradientUnits="userSpaceOnUse">
-                      <stop stop-color="white" stop-opacity="0.65"></stop>
-                      <stop offset="1" stop-color="white" stop-opacity="0"></stop>
-                    </linearGradient>
-                    <linearGradient id="paint8_linear_87_7435" x1="21.033" y1="13.5359" x2="21.0308" y2="18.8052" gradientUnits="userSpaceOnUse">
-                      <stop stop-color="white" stop-opacity="0.65"></stop>
-                      <stop offset="1" stop-color="white" stop-opacity="0"></stop>
-                    </linearGradient>
-                    <linearGradient id="paint9_linear_87_7435" x1="11.4286" y1="22.4374" x2="10.5354" y2="25.4214" gradientUnits="userSpaceOnUse">
-                      <stop stop-color="#FFA63F"></stop>
-                      <stop offset="1" stop-color="#FFFF00"></stop>
-                    </linearGradient>
-                    <linearGradient id="paint10_linear_87_7435" x1="19.882" y1="21.53" x2="22.2656" y2="24.7801" gradientUnits="userSpaceOnUse">
-                      <stop stop-color="#FFA63F"></stop>
-                      <stop offset="1" stop-color="#FFFF00"></stop>
-                    </linearGradient>
-                    <linearGradient id="paint11_linear_87_7435" x1="20.5198" y1="18.9333" x2="19.6863" y2="22.8605" gradientUnits="userSpaceOnUse">
-                      <stop stop-color="white" stop-opacity="0.65"></stop>
-                      <stop offset="1" stop-color="white" stop-opacity="0"></stop>
-                    </linearGradient>
-                    <linearGradient id="paint12_linear_87_7435" x1="11.2464" y1="19.9042" x2="11.4117" y2="24.3239" gradientUnits="userSpaceOnUse">
-                      <stop stop-color="white" stop-opacity="0.65"></stop>
-                      <stop offset="1" stop-color="white" stop-opacity="0"></stop>
-                    </linearGradient>
-                    <linearGradient id="paint13_linear_87_7435" x1="20.3755" y1="18.8616" x2="20.5688" y2="20.1822" gradientUnits="userSpaceOnUse">
-                      <stop stop-color="white" stop-opacity="0.65"></stop>
-                      <stop offset="1" stop-color="white" stop-opacity="0"></stop>
-                    </linearGradient>
-                    <linearGradient id="paint14_linear_87_7435" x1="15.7644" y1="10.784" x2="15.7805" y2="13.1098" gradientUnits="userSpaceOnUse">
-                      <stop stop-color="#FFA63F"></stop>
-                      <stop offset="1" stop-color="#FFFF00"></stop>
-                    </linearGradient>
-                    <linearGradient id="paint15_linear_87_7435" x1="15.5106" y1="10.5638" x2="15.5062" y2="11.7936" gradientUnits="userSpaceOnUse">
-                      <stop stop-color="white" stop-opacity="0.65"></stop>
-                      <stop offset="1" stop-color="white" stop-opacity="0"></stop>
-                    </linearGradient>
-                  </defs>
-                </svg>
-                Download for Linux
-              </a>
-            </div>
-            <p class="cta-note">
-              macOS Apple&nbsp;Silicon · Linux x64 — a universal AppImage.{' '}<a
-                href={DOWNLOAD_URL_LINUX_DEB}>Debian or Ubuntu? Get the&nbsp;.deb</a
-              >.<br />
-              Free &amp; open source · requires the{' '}<a
-                href={VIBE_CLI_URL}
-                target="_blank"
-                rel="noreferrer">Mistral Vibe CLI</a
-              >.
-            </p>
+          <h1>
+            Mistral Vibe,<br />
+            <span>with room to think.</span>
+          </h1>
+          <p class="lede">
+            Keep every local Workspace, durable Thread, approval, diff, and shell in one calm
+            desktop window. Vibe writes the code. Mistro keeps the work legible.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href={DOWNLOAD_URL}>
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M17.05 20.28c-.98.95-2.05.86-3.08.38-1.09-.5-2.08-.53-3.2 0-1.44.62-2.2.44-3.06-.38C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.08ZM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25Z"></path>
+              </svg>
+              Download for macOS
+            </a>
+            <a class="button button-ghost" href={REPO_URL} target="_blank" rel="noreferrer">
+              View source
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="m6 14 8-8m-6 0h6v6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"></path>
+              </svg>
+            </a>
           </div>
+          <p class="hero-note">
+            Apple Silicon · Linux x64 · Free and MIT licensed · Requires the
+            <a href={VIBE_CLI_URL} target="_blank" rel="noreferrer">Mistral Vibe CLI</a>
+          </p>
         </div>
 
-        <div class="shot-wrap">
-          <img
-            class="shot"
-            src="/app-screenshot.jpg"
-            width="1800"
-            height="1126"
-            alt="Vibe Mistro running a live agent conversation: streamed responses in the center, project threads in the sidebar, and the Files surface open on the right"
-            loading="eager"
-            decoding="async"
-          />
+        <div class="container app-stage">
+          <div class="stage-label stage-label-workspace" aria-hidden="true">
+            <span class="status-dot status-working"></span>
+            Workspace agent is warm
+          </div>
+          <div class="stage-label stage-label-thread" aria-hidden="true">
+            <span class="thread-glyph">↳</span>
+            Threads resume here
+          </div>
+          <div class="stage-card">
+            <div class="stage-toolbar" aria-hidden="true">
+              <div class="traffic-lights"><span></span><span></span><span></span></div>
+              <span class="stage-title">Vibe Mistro</span>
+              <span class="stage-state"><i></i> Agent connected</span>
+            </div>
+            <div class="screenshot-shell">
+              <img
+                src="/app-screenshot.jpg"
+                width="1800"
+                height="1126"
+                alt="Vibe Mistro showing Workspace Threads, a live Mistral Vibe conversation, and the Files panel"
+                loading="eager"
+                decoding="async"
+                fetchpriority="high"
+              />
+            </div>
+          </div>
+          <div class="stage-caption">
+            <span><b>01</b> Workspaces stay warm</span>
+            <span><b>02</b> Threads stay durable</span>
+            <span><b>03</b> Your code stays local</span>
+          </div>
         </div>
       </section>
 
-      <section class="triad">
-        <div>
-          <h2>Parallel workspaces</h2>
-          <p>One warm agent per project, many persistent threads. Everything resumes where you left it.</p>
+      <section class="signal-strip" aria-label="Product principles">
+        <div class="signal-track">
+          <span>One Vibe process per open Workspace</span>
+          <i></i>
+          <span>Many durable Threads</span>
+          <i></i>
+          <span>Raw ACP events, faithfully rendered</span>
+          <i></i>
+          <span>No credentials stored</span>
+          <i></i>
+          <span>Local files stay local</span>
         </div>
-        <div>
-          <h2>Approvals built in</h2>
-          <p>Sensitive actions pause for you — allow once, plan first, or hand over the keys per thread.</p>
+      </section>
+
+      <section class="section workflow" id="workflow">
+        <div class="container">
+          <div class="section-intro split-intro">
+            <div>
+              <p class="eyebrow">Parallel by default</p>
+              <h2>Know what every agent is doing—without babysitting terminals.</h2>
+            </div>
+            <p>
+              Open a Workspace when you need it. Keep several Threads moving inside it. The sidebar
+              tells you what is streaming, waiting for approval, or ready for your next prompt.
+            </p>
+          </div>
+
+          <div class="workspace-demo">
+            <div class="demo-sidebar">
+              <div class="demo-sidebar-head">
+                <span>Workspaces</span>
+                <span class="mini-button">＋</span>
+              </div>
+
+              <div class="demo-workspace">
+                <div class="workspace-row">
+                  <span class="chevron">⌄</span>
+                  <span class="folder-icon"></span>
+                  <strong>checkout-redesign</strong>
+                  <span class="status-dot status-working"></span>
+                </div>
+                <div class="thread-row is-active">
+                  <span class="status-dot status-streaming"></span>
+                  <span>Fix mobile payment flow</span>
+                  <small>now</small>
+                </div>
+                <div class="thread-row">
+                  <span class="status-dot status-idle"></span>
+                  <span>Audit failed webhooks</span>
+                  <small>12m</small>
+                </div>
+              </div>
+
+              <div class="demo-workspace">
+                <div class="workspace-row">
+                  <span class="chevron">⌄</span>
+                  <span class="folder-icon"></span>
+                  <strong>docs-site</strong>
+                  <span class="status-dot status-attention"></span>
+                </div>
+                <div class="thread-row needs-attention">
+                  <span class="status-dot status-attention"></span>
+                  <span>Refresh API examples</span>
+                  <small>!</small>
+                </div>
+                <div class="thread-row">
+                  <span class="status-dot status-idle"></span>
+                  <span>Improve first-run guide</span>
+                  <small>1h</small>
+                </div>
+              </div>
+
+              <div class="demo-workspace is-collapsed">
+                <div class="workspace-row">
+                  <span class="chevron">›</span>
+                  <span class="folder-icon"></span>
+                  <strong>design-system</strong>
+                  <span class="status-dot status-idle"></span>
+                </div>
+              </div>
+            </div>
+
+            <div class="demo-main">
+              <div class="demo-main-head">
+                <div>
+                  <span class="status-dot status-streaming"></span>
+                  <strong>Fix mobile payment flow</strong>
+                </div>
+                <span class="connected-chip">connected</span>
+              </div>
+
+              <div class="activity-feed">
+                <div class="activity-line">
+                  <span class="activity-icon">⌁</span>
+                  <div>
+                    <strong>Read</strong>
+                    <code>src/payments/checkout.ts</code>
+                  </div>
+                  <span class="activity-ok">✓</span>
+                </div>
+                <div class="activity-line">
+                  <span class="activity-icon activity-icon-warm">✦</span>
+                  <div>
+                    <strong>Reasoning</strong>
+                    <p>The retry branch is losing the original payment intent…</p>
+                  </div>
+                  <span class="working-dots"><i></i><i></i><i></i></span>
+                </div>
+                <div class="activity-line is-muted">
+                  <span class="activity-icon">⌘</span>
+                  <div>
+                    <strong>Run</strong>
+                    <code>bun test checkout</code>
+                  </div>
+                  <span class="activity-ok">✓</span>
+                </div>
+              </div>
+
+              <div class="agent-answer">
+                <span class="answer-kicker">Vibe</span>
+                <p>
+                  I found the race: the retry path creates a second intent before the first request
+                  resolves. I’m moving intent creation behind the idempotency guard and adding a
+                  regression test.
+                </p>
+                <div class="change-summary">
+                  <span>2 files changed</span>
+                  <strong>+28</strong>
+                  <em>−9</em>
+                </div>
+              </div>
+
+              <div class="composer-demo">
+                <span>Ask for follow-up changes</span>
+                <div class="composer-controls">
+                  <span>＋</span>
+                  <span>◇ Default</span>
+                  <span>◎ mistral-medium</span>
+                  <b>↑</b>
+                </div>
+              </div>
+            </div>
+
+            <aside class="activity-legend">
+              <p class="legend-label">Live status</p>
+              <div>
+                <span class="legend-mark streaming-mark"></span>
+                <p><strong>Streaming</strong><small>Vibe is working now</small></p>
+              </div>
+              <div>
+                <span class="legend-mark attention-mark">!</span>
+                <p><strong>Needs attention</strong><small>A decision is waiting</small></p>
+              </div>
+              <div>
+                <span class="legend-mark ready-mark">✓</span>
+                <p><strong>Ready</strong><small>Pick up where you left off</small></p>
+              </div>
+              <div class="legend-rule"></div>
+              <p class="legend-note">The app stays quiet until a Thread actually needs you.</p>
+            </aside>
+          </div>
         </div>
-        <div>
-          <h2>Git &amp; terminal at hand</h2>
-          <p>Review diffs, stage, commit, and drop into a real shell without leaving the conversation.</p>
+      </section>
+
+      <section class="section under-the-hood" id="under-the-hood">
+        <div class="container">
+          <div class="section-intro compact-intro">
+            <p class="eyebrow">Thin on purpose</p>
+            <h2>Vibe keeps the intelligence.<br />Mistro gives it a proper room.</h2>
+            <p>
+              No embedded model. No second agent loop. Vibe Mistro speaks the Agent Client Protocol,
+              supervises the process, and turns its live work into a desktop interface.
+            </p>
+          </div>
+
+          <div class="protocol-flow" aria-label="How Vibe Mistro connects you to Mistral Vibe and your Workspace">
+            <div class="flow-node human-node">
+              <span class="node-number">01</span>
+              <span class="node-icon">You</span>
+              <strong>Prompt &amp; decide</strong>
+              <small>One clear desktop surface</small>
+            </div>
+            <div class="flow-arrow" aria-hidden="true"><span>prompt</span>→</div>
+            <div class="flow-node mistro-node">
+              <span class="node-number">02</span>
+              <svg class="flow-logo" viewBox="0 0 64 64" aria-hidden="true">
+                <rect width="64" height="64" rx="15" fill="#ef8a3c"></rect>
+                <path d="M19 19 32 46 45 19" fill="none" stroke="#241a12" stroke-linecap="round" stroke-linejoin="round" stroke-width="8.5"></path>
+              </svg>
+              <strong>Vibe Mistro</strong>
+              <small>Orchestrate &amp; render</small>
+            </div>
+            <div class="flow-arrow" aria-hidden="true"><span>ACP</span>→</div>
+            <div class="flow-node vibe-node">
+              <span class="node-number">03</span>
+              <span class="vibe-pixel" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+              <strong>Mistral Vibe</strong>
+              <small>Reason, choose tools, code</small>
+            </div>
+            <div class="flow-arrow" aria-hidden="true"><span>tools</span>→</div>
+            <div class="flow-node workspace-node">
+              <span class="node-number">04</span>
+              <span class="code-braces">&#123; &#125;</span>
+              <strong>Your Workspace</strong>
+              <small>Files, git, and shell</small>
+            </div>
+          </div>
+
+          <div class="principle-row">
+            <span><b>Unconfined reads</b> for CLI parity</span>
+            <span><b>Workspace-confined writes</b> for safety</span>
+            <span><b>Credentials stay with Vibe</b>, never with Mistro</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section approvals">
+        <div class="container approval-grid">
+          <div class="approval-copy">
+            <p class="eyebrow">Your call, at the right moment</p>
+            <h2>Stay in the loop without living in the loop.</h2>
+            <p>
+              Permission requests arrive inside the Thread that caused them. Approve one action,
+              reject it, or choose a different approval posture for the work ahead.
+            </p>
+            <ul>
+              <li><span>01</span>Plan before touching code</li>
+              <li><span>02</span>Accept edits while guarding commands</li>
+              <li><span>03</span>Give trusted Threads more autonomy</li>
+            </ul>
+          </div>
+
+          <div class="permission-scene">
+            <div class="permission-backplate" aria-hidden="true">
+              <span>MODE</span>
+              <b>Default</b>
+              <span>MODEL</span>
+              <b>mistral-medium</b>
+              <span>EFFORT</span>
+              <b>Max</b>
+            </div>
+            <div class="permission-card">
+              <div class="permission-head">
+                <span class="shield-icon">◇</span>
+                <div>
+                  <strong>Permission requested</strong>
+                  <small>Vibe is paused until you decide</small>
+                </div>
+                <span class="permission-time">now</span>
+              </div>
+              <div class="permission-body">
+                <p>Run a command in this Workspace?</p>
+                <code>bun run test src/main/agent-pool.test.ts</code>
+                <span class="path-label">checkout-redesign · local shell</span>
+              </div>
+              <div class="permission-actions">
+                <span class="permission-reject">Reject</span>
+                <span class="permission-allow">Allow once</span>
+              </div>
+            </div>
+            <div class="mode-switcher" aria-label="Available approval modes">
+              <span class="is-selected">Default</span>
+              <span>Plan</span>
+              <span>Accept edits</span>
+              <span>Auto-approve</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section side-work">
+        <div class="container">
+          <div class="section-intro split-intro side-work-intro">
+            <div>
+              <p class="eyebrow">Everything beside the conversation</p>
+              <h2>The side work stays beside the work.</h2>
+            </div>
+            <p>
+              Inspect files, review a diff, stage a change, or open a real shell without losing the
+              Thread that explains why you are doing it.
+            </p>
+          </div>
+
+          <div class="side-work-stage">
+            <div class="surface-files">
+              <div class="surface-head"><strong>Files</strong><span>146 files</span><i>⌕</i></div>
+              <div class="file-search">Search Workspace…</div>
+              <div class="file-tree">
+                <span>⌄ <b>src</b></span>
+                <span class="depth-one">⌄ <b>main</b></span>
+                <span class="depth-two is-file">◇ agent-pool.ts</span>
+                <span class="depth-two is-file is-active">◇ thread-binding.ts</span>
+                <span class="depth-two is-file">◇ persistence.ts</span>
+                <span class="depth-one">› <b>renderer</b></span>
+                <span class="is-file">◇ package.json</span>
+              </div>
+            </div>
+
+            <div class="surface-git">
+              <div class="surface-head"><strong>Changes</strong><span>3 files</span><i>↻</i></div>
+              <div class="branch-row"><span>⌘</span><b>feat/thread-resume</b><small>main</small></div>
+              <div class="diff-file"><span>M</span><code>thread-binding.ts</code><b>+18</b><em>−4</em></div>
+              <div class="diff-file"><span>M</span><code>index.ts</code><b>+7</b><em>−2</em></div>
+              <div class="diff-file"><span>A</span><code>thread-binding.test.ts</code><b>+41</b><em>−0</em></div>
+              <div class="commit-box">Resume a Thread after agent eviction</div>
+              <div class="commit-button">Commit 3 files <span>⌘↵</span></div>
+            </div>
+
+            <div class="surface-terminal">
+              <div class="terminal-head">
+                <span><i></i><i></i><i></i></span>
+                <strong>Workspace shell</strong>
+                <small>zsh</small>
+              </div>
+              <div class="terminal-body">
+                <p><b>~/checkout-redesign</b> <span>git:(feat/thread-resume)</span></p>
+                <p><i>$</i> bun run test thread-binding</p>
+                <p class="terminal-muted">✓ 8 tests passed in 231ms</p>
+                <p><i>$</i> <em class="terminal-cursor"></em></p>
+              </div>
+            </div>
+          </div>
+
+          <div class="surface-tabs" aria-label="Side surfaces shown above">
+            <span><b>01</b> Files</span>
+            <span><b>02</b> Git</span>
+            <span><b>03</b> Terminal</span>
+            <span><b>04</b> Skills</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="section open-source">
+        <div class="container">
+          <div class="open-panel">
+            <div class="open-grid" aria-hidden="true"></div>
+            <div class="open-copy">
+              <p class="eyebrow">Open from the protocol up</p>
+              <h2>Read it. Fork it.<br />Make it yours.</h2>
+              <p>
+                Vibe Mistro is an MIT-licensed Electron app built in the open. The architecture is
+                documented, the protocol boundary is explicit, and your local workflow stays yours.
+              </p>
+              <div class="open-actions">
+                <a class="button button-dark" href={REPO_URL} target="_blank" rel="noreferrer">
+                  Browse the source
+                  <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 14 8-8m-6 0h6v6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"></path></svg>
+                </a>
+                <span>MIT licensed</span>
+              </div>
+            </div>
+
+            <div class="open-terminal">
+              <div class="open-terminal-head">
+                <span></span><span></span><span></span>
+                <small>~/code</small>
+              </div>
+              <div class="open-terminal-body">
+                <p><i>$</i> git clone {REPO_URL}.git</p>
+                <p class="terminal-comment">Cloning into 'vibe-mistro'… done.</p>
+                <p><i>$</i> cd vibe-mistro &amp;&amp; bun install</p>
+                <p class="terminal-comment">2361 packages installed</p>
+                <p><i>$</i> bun run dev</p>
+                <p class="terminal-success">✓ Vibe Mistro is ready</p>
+                <p><i>$</i> <em class="terminal-cursor"></em></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="final-cta">
+        <div class="final-grid" aria-hidden="true"></div>
+        <div class="container final-cta-inner">
+          <p class="eyebrow">Your next Thread starts here</p>
+          <h2>Give Vibe a window.</h2>
+          <p>Free, open source, and built for the Mistral Vibe subscription you already use.</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href={DOWNLOAD_URL}>
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M17.05 20.28c-.98.95-2.05.86-3.08.38-1.09-.5-2.08-.53-3.2 0-1.44.62-2.2.44-3.06-.38C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.08ZM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25Z"></path>
+              </svg>
+              Download for macOS
+            </a>
+            <a class="button button-ghost" href={DOWNLOAD_URL_LINUX}>
+              Download for Linux
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10m-4-4 4 4 4-4M4 16h12" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6"></path></svg>
+            </a>
+          </div>
+          <p class="final-note">Using Debian or Ubuntu? <a href={DOWNLOAD_URL_LINUX_DEB}>Download the .deb package.</a></p>
         </div>
       </section>
     </main>
 
     <footer>
-      <p>
-        MIT licensed · <a class="quiet-link" href={REPO_URL} target="_blank" rel="noreferrer">Source on GitHub</a>
-      </p>
-      <p class="fine">An open-source companion for the Mistral Vibe CLI. Not affiliated with Mistral AI.</p>
+      <div class="container footer-inner">
+        <a class="brand footer-brand" href="/" aria-label="Vibe Mistro home">
+          <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
+            <rect width="64" height="64" rx="15" fill="#ef8a3c"></rect>
+            <path d="M19 19 32 46 45 19" fill="none" stroke="#241a12" stroke-linecap="round" stroke-linejoin="round" stroke-width="8.5"></path>
+          </svg>
+          <span>Vibe Mistro</span>
+        </a>
+        <p>© {YEAR} · MIT licensed · An open-source companion for Mistral Vibe.</p>
+        <div class="footer-links">
+          <a href={REPO_URL} target="_blank" rel="noreferrer">GitHub</a>
+          <a href={VIBE_CLI_URL} target="_blank" rel="noreferrer">Vibe CLI</a>
+          <a href={DOWNLOAD_URL}>Download</a>
+        </div>
+      </div>
+      <div class="container disclaimer">Not affiliated with Mistral AI.</div>
     </footer>
 
-    {/* is:global — Astro's default scoping rewrites `*` to an ATTRIBUTE selector
-        (specificity 0-1-0), which beats plain element selectors like `body`
-        (0-0-1): the `* { margin: 0 }` reset was killing `body { margin: 0 auto }`
-        and the page rendered left-anchored, never centered. One page, no
-        components — scoping buys nothing here. */}
     <style is:global>
       :root {
         --bg: #fbfaf8;
-        --sidebar: #f5f3ef;
+        --bg-deep: #f5f3ef;
+        --surface: #fdfcfb;
+        --panel: #ffffff;
         --border: #ecdfd3;
+        --border-strong: #ddcfc1;
         --text: #1c1c1c;
         --text-body: #33302c;
         --muted: #6b645d;
-        --accent-text: #cf6a3a;
-        --on-accent: #241a12;
-        --accent-grad: linear-gradient(160deg, #ee9b5b, #df6f38);
-        --accent-shadow: rgba(200, 90, 30, 0.3);
-        --ok: #1a7f37;
-        --sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+        --faint: #a89f95;
+        --accent: #df6f38;
+        --accent-strong: #c9542c;
+        --accent-soft: #f8e0cf;
+        --accent-pale: #fff1e7;
+        --gold: #f6c445;
+        --green: #3a9a55;
+        --terminal: #1c1b1a;
+        --sans: 'Geist Variable', -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
         --mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
+        --shadow-small: 0 1px 2px rgba(54, 36, 22, 0.06), 0 8px 24px rgba(68, 39, 18, 0.05);
+        --shadow-large: 0 34px 90px -42px rgba(74, 43, 24, 0.45), 0 8px 24px rgba(84, 49, 29, 0.08);
       }
 
       * {
@@ -257,6 +593,7 @@ const VIBE_CLI_URL = 'https://docs.mistral.ai/vibe/code/cli/install-setup'
       }
 
       html {
+        scroll-behavior: smooth;
         background: var(--bg);
         color: var(--text);
         font-family: var(--sans);
@@ -264,296 +601,1916 @@ const VIBE_CLI_URL = 'https://docs.mistral.ai/vibe/code/cli/install-setup'
       }
 
       body {
-        min-height: 100dvh;
-        display: flex;
-        flex-direction: column;
-        max-width: 74rem;
-        margin: 0 auto;
-        padding: 0 1.5rem;
-        position: relative;
+        min-width: 320px;
+        overflow-x: hidden;
+        background: var(--bg);
       }
 
-      /* The stepped-pixel motif from the mark, echoed as a faint page ornament. */
-      .steps {
-        position: absolute;
-        inset: 0 0 auto auto;
-        width: min(38vw, 420px);
-        height: 300px;
-        pointer-events: none;
-        background-image:
-          linear-gradient(rgba(223, 111, 56, 0.055) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(223, 111, 56, 0.055) 1px, transparent 1px);
-        background-size: 27px 27px;
-        mask-image: linear-gradient(215deg, #000 15%, transparent 70%);
-        -webkit-mask-image: linear-gradient(215deg, #000 15%, transparent 70%);
+      a {
+        color: inherit;
+      }
+
+      button,
+      a {
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      a:focus-visible {
+        outline: 3px solid rgba(223, 111, 56, 0.3);
+        outline-offset: 4px;
+      }
+
+      .container {
+        width: min(100% - 48px, 1180px);
+        margin-inline: auto;
+      }
+
+      .skip-link {
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        z-index: 100;
+        transform: translateY(-150%);
+        border-radius: 8px;
+        background: var(--text);
+        color: white;
+        padding: 10px 14px;
+        text-decoration: none;
+      }
+
+      .skip-link:focus {
+        transform: none;
       }
 
       .site-header {
-        display: flex;
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        border-bottom: 1px solid rgba(221, 207, 193, 0.72);
+        background: rgba(251, 250, 248, 0.84);
+        backdrop-filter: blur(18px) saturate(1.3);
+      }
+
+      .nav-shell {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
         align-items: center;
-        justify-content: space-between;
-        padding: 1.4rem 0;
+        min-height: 68px;
       }
 
       .brand {
-        display: flex;
+        display: inline-flex;
         align-items: center;
-        gap: 0.65rem;
-        text-decoration: none;
+        justify-self: start;
+        gap: 10px;
+        width: fit-content;
         color: var(--text);
+        font-size: 16px;
+        font-weight: 660;
+        letter-spacing: -0.02em;
+        text-decoration: none;
       }
 
-      .mark {
-        height: 24px;
-        width: 24px;
-      }
-
-      .wordmark {
-        font-weight: 680;
-        font-size: 1.15rem;
-        letter-spacing: -0.015em;
+      .brand-mark {
+        width: 28px;
+        height: 28px;
+        filter: drop-shadow(0 4px 8px rgba(198, 82, 31, 0.16));
       }
 
       .beta-chip {
-        font-size: 0.7rem;
-        font-weight: 600;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        color: var(--accent-text);
         border: 1px solid var(--border);
-        background: var(--sidebar);
         border-radius: 999px;
-        padding: 0.15rem 0.55rem;
+        background: rgba(255, 255, 255, 0.7);
+        color: var(--accent-strong);
+        font-size: 10px;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        line-height: 1;
+        padding: 5px 7px 4px;
+        text-transform: uppercase;
       }
 
-      .quiet-link {
-        color: var(--muted);
-        text-decoration: none;
-        font-size: 0.95rem;
-      }
-      .quiet-link:hover {
-        color: var(--accent-text);
-      }
-
-      /* The above-the-fold composition: hero copy left, the real app screenshot
-         right as the visual counterweight — one complete viewport-height scene
-         on wide screens instead of a left-hugging column with dead air. */
-      .fold {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 38rem);
-        gap: clamp(2.5rem, 5vw, 4.5rem);
+      nav {
+        display: flex;
         align-items: center;
-        min-height: min(calc(100dvh - 160px), 56rem);
-        padding: 1.5rem 0 3rem;
+        gap: 30px;
+      }
+
+      nav a,
+      .footer-links a {
+        color: var(--muted);
+        font-size: 14px;
+        text-decoration: none;
+        transition: color 150ms ease;
+      }
+
+      nav a:hover,
+      .footer-links a:hover {
+        color: var(--accent-strong);
+      }
+
+      .header-download {
+        display: inline-flex;
+        align-items: center;
+        justify-self: end;
+        gap: 8px;
+        border: 1px solid var(--text);
+        border-radius: 9px;
+        background: var(--text);
+        color: white;
+        font-size: 13px;
+        font-weight: 620;
+        padding: 9px 13px;
+        text-decoration: none;
+        transition: transform 150ms ease, background 150ms ease;
+      }
+
+      .header-download:hover {
+        transform: translateY(-1px);
+        background: #37322e;
+      }
+
+      .header-download svg,
+      .button svg {
+        width: 16px;
+        height: 16px;
       }
 
       .hero {
-        max-width: 40rem;
+        position: relative;
+        overflow: hidden;
+        padding: 108px 0 0;
+        isolation: isolate;
+      }
+
+      .hero-grid,
+      .final-grid,
+      .open-grid {
+        position: absolute;
+        inset: 0;
+        z-index: -2;
+        background-image:
+          linear-gradient(rgba(207, 106, 58, 0.07) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(207, 106, 58, 0.07) 1px, transparent 1px);
+        background-size: 42px 42px;
+        mask-image: linear-gradient(to bottom, black 0, rgba(0, 0, 0, 0.75) 36%, transparent 78%);
+        -webkit-mask-image: linear-gradient(to bottom, black 0, rgba(0, 0, 0, 0.75) 36%, transparent 78%);
+      }
+
+      .hero-glow {
+        position: absolute;
+        z-index: -1;
+        width: 420px;
+        height: 420px;
+        border-radius: 50%;
+        filter: blur(20px);
+        opacity: 0.45;
+      }
+
+      .hero-glow-one {
+        top: 0;
+        left: -250px;
+        background: radial-gradient(circle, rgba(246, 196, 69, 0.3), transparent 68%);
+      }
+
+      .hero-glow-two {
+        top: 160px;
+        right: -270px;
+        background: radial-gradient(circle, rgba(226, 69, 42, 0.18), transparent 68%);
+      }
+
+      .hero-copy {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+
+      .eyebrow {
+        color: var(--accent-strong);
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .hero-eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        opacity: 0;
+        animation: enter 650ms 80ms ease forwards;
+      }
+
+      .live-dot,
+      .status-dot {
+        display: inline-block;
+        flex: 0 0 auto;
+        width: 7px;
+        height: 7px;
+        border-radius: 999px;
+      }
+
+      .live-dot {
+        background: var(--green);
+        box-shadow: 0 0 0 5px rgba(58, 154, 85, 0.1);
       }
 
       h1 {
-        font-size: clamp(2.6rem, 4.6vw, 4rem);
-        line-height: 1.04;
-        font-weight: 720;
-        letter-spacing: -0.035em;
+        max-width: 990px;
+        margin-top: 26px;
+        font-size: clamp(64px, 8.2vw, 106px);
+        font-weight: 610;
+        letter-spacing: -0.065em;
+        line-height: 0.92;
         text-wrap: balance;
+        opacity: 0;
+        transform: translateY(18px);
+        animation: enter 720ms 150ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
       }
 
-      .flame {
-        background: linear-gradient(100deg, #ef8a3c 10%, #e2452a 90%);
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
+      h1 span {
+        color: var(--accent-strong);
       }
 
-      .pitch {
-        margin-top: 1.4rem;
-        font-size: clamp(1.05rem, 1.8vw, 1.25rem);
-        line-height: 1.55;
+      .lede {
+        max-width: 720px;
+        margin-top: 31px;
         color: var(--text-body);
-        max-width: 40rem;
+        font-size: clamp(18px, 2vw, 22px);
+        letter-spacing: -0.02em;
+        line-height: 1.5;
+        text-wrap: balance;
+        opacity: 0;
+        transform: translateY(14px);
+        animation: enter 650ms 250ms ease forwards;
       }
 
-      .cta {
-        margin-top: 2.2rem;
-      }
-
-      .download-row {
+      .hero-actions {
         display: flex;
         flex-wrap: wrap;
-        gap: 0.8rem;
+        justify-content: center;
+        gap: 11px;
+        margin-top: 34px;
       }
 
-      .download {
+      .hero-copy .hero-actions,
+      .hero-note {
+        opacity: 0;
+        transform: translateY(12px);
+        animation: enter 600ms 340ms ease forwards;
+      }
+
+      .button {
         display: inline-flex;
         align-items: center;
-        gap: 0.6rem;
-        font-size: 1.05rem;
-        font-weight: 600;
-        color: var(--on-accent);
+        justify-content: center;
+        gap: 10px;
+        min-height: 50px;
+        border-radius: 11px;
+        font-size: 15px;
+        font-weight: 640;
+        padding: 0 20px;
         text-decoration: none;
-        background: var(--accent-grad);
-        border-radius: 12px;
-        padding: 0.85rem 1.5rem;
-        box-shadow:
-          0 1px 2px rgba(28, 28, 28, 0.12),
-          0 8px 24px -8px var(--accent-shadow);
-        transition:
-          transform 140ms ease,
-          box-shadow 140ms ease,
-          filter 140ms ease;
-      }
-      .download:hover {
-        transform: translateY(-1px);
-        filter: brightness(1.03);
-        box-shadow:
-          0 2px 3px rgba(28, 28, 28, 0.12),
-          0 12px 30px -8px var(--accent-shadow);
-      }
-      .download:active {
-        transform: translateY(0);
-        filter: brightness(0.97);
+        transition: transform 150ms ease, box-shadow 150ms ease, background 150ms ease;
       }
 
-      /* Linux gets equal billing but a quieter, outlined treatment so the mac
-         download stays the visual primary. */
-      .download.secondary {
+      .button:hover {
+        transform: translateY(-2px);
+      }
+
+      .button-primary {
+        border: 1px solid #cf6532;
+        background: linear-gradient(160deg, #ee9b5b, #df6f38);
+        color: #241a12;
+        box-shadow: 0 12px 28px -12px rgba(200, 90, 30, 0.52), inset 0 1px rgba(255, 255, 255, 0.35);
+      }
+
+      .button-primary:hover {
+        box-shadow: 0 16px 32px -12px rgba(200, 90, 30, 0.62), inset 0 1px rgba(255, 255, 255, 0.35);
+      }
+
+      .button-ghost {
+        border: 1px solid var(--border-strong);
+        background: rgba(253, 252, 251, 0.78);
         color: var(--text-body);
-        background: var(--sidebar);
-        border: 1px solid var(--border);
-        box-shadow: 0 1px 2px rgba(28, 28, 28, 0.06);
-      }
-      .download.secondary:hover {
-        filter: none;
-        background: var(--bg);
-        box-shadow: 0 2px 8px -4px rgba(28, 28, 28, 0.18);
+        box-shadow: var(--shadow-small);
       }
 
-      .glyph {
-        width: 1.15em;
-        height: 1.15em;
-        margin-top: -0.1em;
-      }
-      /* The Tux badge is a filled disc, so nudge it up slightly larger to match
-         the optical weight of the outline-style Apple glyph beside it. */
-      .glyph.tux {
-        width: 1.4em;
-        height: 1.4em;
-        margin-top: 0;
+      .button-ghost:hover {
+        background: white;
+        box-shadow: 0 10px 24px -12px rgba(54, 36, 22, 0.3);
       }
 
-      .cta-note {
-        margin-top: 0.8rem;
-        font-size: 0.85rem;
+      .hero-note,
+      .final-note {
+        margin-top: 16px;
         color: var(--muted);
-      }
-      .cta-note a {
-        color: var(--accent-text);
-        text-decoration: none;
-      }
-      .cta-note a:hover {
-        text-decoration: underline;
+        font-size: 13px;
+        line-height: 1.5;
       }
 
-      /* ------- the app screenshot ------- */
-      .shot-wrap {
-        /* Fade-in lift so the fold still has one quiet entrance moment. */
+      .hero-note a,
+      .final-note a {
+        color: var(--accent-strong);
+        text-underline-offset: 3px;
+      }
+
+      .app-stage {
+        position: relative;
+        margin-top: 86px;
         opacity: 0;
-        transform: translateY(8px);
-        animation: reveal 600ms ease 200ms forwards;
+        transform: translateY(26px) scale(0.99);
+        animation: enter 850ms 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
       }
 
-      @keyframes reveal {
-        to {
-          opacity: 1;
-          transform: none;
-        }
+      .stage-card {
+        position: relative;
+        z-index: 2;
+        border: 1px solid var(--border-strong);
+        border-radius: 25px;
+        background: #eee8e1;
+        box-shadow: var(--shadow-large);
+        padding: 7px;
       }
 
-      @media (prefers-reduced-motion: reduce) {
-        .shot-wrap {
-          animation: none;
-          opacity: 1;
-          transform: none;
-        }
+      .stage-toolbar {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        height: 43px;
+        padding: 0 13px;
+        color: var(--muted);
+        font-size: 11px;
       }
 
-      .shot {
+      .traffic-lights,
+      .open-terminal-head {
+        display: flex;
+        gap: 6px;
+      }
+
+      .traffic-lights span,
+      .open-terminal-head > span {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: #ec6a5e;
+      }
+
+      .traffic-lights span:nth-child(2),
+      .open-terminal-head > span:nth-child(2) {
+        background: #f4bf4f;
+      }
+
+      .traffic-lights span:nth-child(3),
+      .open-terminal-head > span:nth-child(3) {
+        background: #61c554;
+      }
+
+      .stage-title {
+        font-weight: 600;
+      }
+
+      .stage-state {
+        display: flex;
+        align-items: center;
+        justify-self: end;
+        gap: 6px;
+      }
+
+      .stage-state i {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--green);
+      }
+
+      .screenshot-shell {
+        overflow: hidden;
+        border: 1px solid rgba(196, 179, 164, 0.85);
+        border-radius: 17px;
+        background: white;
+      }
+
+      .screenshot-shell img {
         display: block;
         width: 100%;
         height: auto;
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        box-shadow:
-          0 1px 2px rgba(28, 28, 28, 0.05),
-          0 24px 60px -30px rgba(82, 45, 20, 0.3);
       }
 
-      @media (max-width: 980px) {
-        .fold {
-          grid-template-columns: 1fr;
-          gap: 3rem;
-          min-height: 0;
-          padding: 3rem 0 1.5rem;
-        }
-        .shot-wrap {
-          max-width: 44rem;
-        }
-      }
-
-      .answer {
-        line-height: 1.55;
+      .stage-label {
+        position: absolute;
+        z-index: 4;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--border-strong);
+        border-radius: 999px;
+        background: rgba(253, 252, 251, 0.94);
+        box-shadow: 0 16px 34px -16px rgba(65, 39, 21, 0.3);
         color: var(--text-body);
-      }
-      .answer code {
         font-family: var(--mono);
-        font-size: 0.85em;
-        background: var(--sidebar);
-        border-radius: 5px;
-        padding: 0.08em 0.35em;
+        font-size: 11px;
+        padding: 10px 13px;
+        backdrop-filter: blur(10px);
       }
 
-      /* ------- triad + footer ------- */
-      .triad {
+      .stage-label-workspace {
+        top: 18%;
+        left: -60px;
+        transform: rotate(-4deg);
+        animation: float-one 5s ease-in-out infinite;
+      }
+
+      .stage-label-thread {
+        top: 47%;
+        right: -54px;
+        transform: rotate(3deg);
+        animation: float-two 5.5s 600ms ease-in-out infinite;
+      }
+
+      .status-working,
+      .status-streaming {
+        background: var(--green);
+        box-shadow: 0 0 0 3px rgba(58, 154, 85, 0.1);
+      }
+
+      .status-streaming {
+        animation: status-pulse 1.8s ease-in-out infinite;
+      }
+
+      .thread-glyph {
+        color: var(--accent-strong);
+        font-size: 16px;
+      }
+
+      .stage-caption {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
-        gap: 2rem;
-        padding: 3rem 0 2rem;
+        gap: 20px;
+        padding: 22px 10px 78px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 11px;
+        text-transform: uppercase;
+      }
+
+      .stage-caption span {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+
+      .stage-caption span:nth-child(2) {
+        justify-content: center;
+      }
+
+      .stage-caption span:last-child {
+        justify-content: flex-end;
+      }
+
+      .stage-caption b {
+        color: var(--accent-strong);
+      }
+
+      .signal-strip {
+        overflow: hidden;
+        border-block: 1px solid var(--border);
+        background: var(--bg-deep);
+      }
+
+      .signal-track {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 26px;
+        min-width: max-content;
+        min-height: 65px;
+        padding-inline: 24px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 11px;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+      }
+
+      .signal-track i {
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+
+      .section {
         border-top: 1px solid var(--border);
-        margin-top: 2.5rem;
+        padding: 118px 0;
       }
 
-      .triad h2 {
-        font-size: 1rem;
-        font-weight: 650;
+      .section-intro h2,
+      .approval-copy h2,
+      .open-copy h2,
+      .final-cta h2 {
+        color: var(--text);
+        font-size: clamp(44px, 5.2vw, 68px);
+        font-weight: 570;
+        letter-spacing: -0.055em;
+        line-height: 0.98;
+        text-wrap: balance;
+      }
+
+      .section-intro .eyebrow,
+      .approval-copy .eyebrow,
+      .open-copy .eyebrow,
+      .final-cta .eyebrow {
+        margin-bottom: 22px;
+      }
+
+      .split-intro {
+        display: grid;
+        grid-template-columns: minmax(0, 1.5fr) minmax(270px, 0.65fr);
+        align-items: end;
+        gap: clamp(50px, 9vw, 130px);
+      }
+
+      .split-intro > p,
+      .compact-intro > p:last-child,
+      .approval-copy > p,
+      .open-copy > p,
+      .final-cta-inner > p:not(.eyebrow):not(.final-note) {
+        color: var(--muted);
+        font-size: 17px;
         letter-spacing: -0.01em;
+        line-height: 1.65;
       }
 
-      .triad p {
-        margin-top: 0.45rem;
-        font-size: 0.92rem;
-        line-height: 1.5;
+      .workflow {
+        border-top: 0;
+      }
+
+      .workflow,
+      .under-the-hood {
+        scroll-margin-top: 86px;
+      }
+
+      .workspace-demo {
+        display: grid;
+        grid-template-columns: 245px minmax(0, 1fr) 205px;
+        min-height: 610px;
+        overflow: hidden;
+        margin-top: 72px;
+        border: 1px solid var(--border-strong);
+        border-radius: 24px;
+        background: var(--surface);
+        box-shadow: var(--shadow-large);
+      }
+
+      .demo-sidebar {
+        border-right: 1px solid var(--border);
+        background: var(--bg-deep);
+        padding: 19px 10px;
+      }
+
+      .demo-sidebar-head,
+      .workspace-row,
+      .thread-row,
+      .demo-main-head,
+      .surface-head,
+      .branch-row,
+      .diff-file {
+        display: flex;
+        align-items: center;
+      }
+
+      .demo-sidebar-head {
+        justify-content: space-between;
+        color: var(--faint);
+        font-size: 11px;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        padding: 0 8px 12px;
+        text-transform: uppercase;
+      }
+
+      .mini-button {
+        display: grid;
+        width: 24px;
+        height: 24px;
+        place-items: center;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: white;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .demo-workspace {
+        padding: 9px 0;
+      }
+
+      .workspace-row {
+        gap: 7px;
+        color: var(--text-body);
+        font-size: 12px;
+        padding: 7px 8px;
+      }
+
+      .workspace-row strong {
+        overflow: hidden;
+        margin-right: auto;
+        font-weight: 590;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .chevron {
+        width: 9px;
+        color: var(--faint);
+      }
+
+      .folder-icon {
+        width: 12px;
+        height: 9px;
+        border: 1px solid #9e9489;
+        border-radius: 2px;
+        position: relative;
+      }
+
+      .folder-icon::before {
+        position: absolute;
+        top: -4px;
+        left: 1px;
+        width: 5px;
+        height: 3px;
+        border: 1px solid #9e9489;
+        border-bottom: 0;
+        border-radius: 2px 2px 0 0;
+        content: '';
+      }
+
+      .thread-row {
+        gap: 9px;
+        border-radius: 8px;
+        color: #625b54;
+        font-size: 11px;
+        padding: 8px 8px 8px 31px;
+      }
+
+      .thread-row span:nth-child(2) {
+        overflow: hidden;
+        margin-right: auto;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .thread-row small {
+        color: var(--faint);
+        font-size: 9px;
+      }
+
+      .thread-row.is-active {
+        background: #ece4da;
+        color: var(--text);
+        font-weight: 560;
+      }
+
+      .thread-row.needs-attention {
+        color: var(--text-body);
+      }
+
+      .status-idle {
+        background: #c8bfb5;
+      }
+
+      .status-attention {
+        background: var(--accent);
+        box-shadow: 0 0 0 3px rgba(223, 111, 56, 0.1);
+      }
+
+      .demo-main {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        padding: 0 28px 24px;
+        background: #fdfcfb;
+      }
+
+      .demo-main-head {
+        justify-content: space-between;
+        min-height: 64px;
+        border-bottom: 1px solid var(--border);
+        font-size: 13px;
+      }
+
+      .demo-main-head > div {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+
+      .connected-chip {
+        border: 1px solid #b9d4bd;
+        border-radius: 999px;
+        background: #edf7ee;
+        color: #397a45;
+        font-size: 10px;
+        font-weight: 600;
+        padding: 5px 9px;
+      }
+
+      .activity-feed {
+        display: grid;
+        gap: 5px;
+        padding: 25px 0 21px;
+      }
+
+      .activity-line {
+        display: grid;
+        grid-template-columns: 26px 1fr auto;
+        align-items: center;
+        gap: 8px;
+        border-radius: 8px;
+        color: var(--muted);
+        font-size: 11px;
+        padding: 7px 9px;
+      }
+
+      .activity-line:hover {
+        background: var(--bg-deep);
+      }
+
+      .activity-line > div {
+        display: flex;
+        align-items: baseline;
+        gap: 7px;
+        min-width: 0;
+      }
+
+      .activity-line strong {
+        color: var(--text-body);
+        font-weight: 580;
+      }
+
+      .activity-line code,
+      .activity-line p {
+        overflow: hidden;
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 10px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .activity-icon {
+        display: grid;
+        width: 24px;
+        height: 24px;
+        place-items: center;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        background: white;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .activity-icon-warm {
+        background: var(--accent-pale);
+        color: var(--accent-strong);
+      }
+
+      .activity-ok {
+        color: var(--green);
+        font-size: 11px;
+      }
+
+      .working-dots {
+        display: flex;
+        gap: 3px;
+      }
+
+      .working-dots i {
+        width: 3px;
+        height: 3px;
+        border-radius: 50%;
+        background: var(--accent);
+        animation: dot-wave 1s ease-in-out infinite;
+      }
+
+      .working-dots i:nth-child(2) { animation-delay: 120ms; }
+      .working-dots i:nth-child(3) { animation-delay: 240ms; }
+
+      .agent-answer {
+        border-top: 1px solid var(--border);
+        padding: 23px 6px 20px;
+      }
+
+      .answer-kicker {
+        display: block;
+        margin-bottom: 10px;
+        color: var(--accent-strong);
+        font-family: var(--mono);
+        font-size: 9px;
+        font-weight: 650;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .agent-answer p {
+        max-width: 610px;
+        color: var(--text-body);
+        font-size: 13px;
+        line-height: 1.65;
+      }
+
+      .change-summary {
+        display: flex;
+        gap: 10px;
+        margin-top: 16px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 10px;
+      }
+
+      .change-summary strong,
+      .diff-file b {
+        color: var(--green);
+      }
+
+      .change-summary em,
+      .diff-file em {
+        color: #c45c50;
+        font-style: normal;
+      }
+
+      .composer-demo {
+        margin-top: auto;
+        border: 1px solid var(--border);
+        border-radius: 17px;
+        background: white;
+        box-shadow: 0 8px 24px rgba(54, 36, 22, 0.04);
+        color: var(--faint);
+        font-size: 12px;
+        padding: 17px 17px 10px;
+      }
+
+      .composer-controls {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        margin-top: 25px;
+        color: var(--muted);
+        font-size: 10px;
+      }
+
+      .composer-controls b {
+        display: grid;
+        width: 27px;
+        height: 27px;
+        place-items: center;
+        margin-left: auto;
+        border-radius: 50%;
+        background: linear-gradient(160deg, #ee9b5b, #df6f38);
+        color: white;
+      }
+
+      .activity-legend {
+        border-left: 1px solid var(--border);
+        background: white;
+        padding: 27px 22px;
+      }
+
+      .legend-label {
+        margin-bottom: 27px;
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 9px;
+        font-weight: 650;
+        letter-spacing: 0.11em;
+        text-transform: uppercase;
+      }
+
+      .activity-legend > div:not(.legend-rule) {
+        display: flex;
+        align-items: flex-start;
+        gap: 11px;
+        margin-bottom: 23px;
+      }
+
+      .legend-mark {
+        display: grid;
+        flex: 0 0 auto;
+        width: 18px;
+        height: 18px;
+        place-items: center;
+        border-radius: 6px;
+        font-size: 9px;
+        font-weight: 700;
+      }
+
+      .streaming-mark {
+        border-radius: 50%;
+        background: var(--green);
+        box-shadow: 0 0 0 4px rgba(58, 154, 85, 0.1);
+        transform: scale(0.38);
+      }
+
+      .attention-mark {
+        background: var(--accent-pale);
+        color: var(--accent-strong);
+      }
+
+      .ready-mark {
+        background: #edf7ee;
+        color: var(--green);
+      }
+
+      .activity-legend strong,
+      .activity-legend small {
+        display: block;
+      }
+
+      .activity-legend strong {
+        font-size: 11px;
+        font-weight: 620;
+      }
+
+      .activity-legend small {
+        margin-top: 3px;
+        color: var(--faint);
+        font-size: 9px;
+        line-height: 1.35;
+      }
+
+      .legend-rule {
+        height: 1px;
+        margin: 32px 0 20px;
+        background: var(--border);
+      }
+
+      .legend-note {
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 1.55;
+      }
+
+      .under-the-hood {
+        background: var(--bg-deep);
+      }
+
+      .compact-intro {
+        max-width: 840px;
+      }
+
+      .compact-intro > p:last-child {
+        max-width: 660px;
+        margin-top: 27px;
+      }
+
+      .protocol-flow {
+        display: grid;
+        grid-template-columns: 1fr 72px 1fr 72px 1fr 72px 1fr;
+        align-items: stretch;
+        margin-top: 72px;
+      }
+
+      .flow-node {
+        position: relative;
+        display: flex;
+        min-height: 230px;
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: flex-end;
+        overflow: hidden;
+        border: 1px solid var(--border-strong);
+        border-radius: 19px;
+        background: var(--surface);
+        box-shadow: var(--shadow-small);
+        padding: 22px;
+      }
+
+      .flow-node::after {
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(207, 106, 58, 0.045) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(207, 106, 58, 0.045) 1px, transparent 1px);
+        background-size: 24px 24px;
+        content: '';
+        pointer-events: none;
+      }
+
+      .node-number {
+        position: absolute;
+        top: 17px;
+        right: 17px;
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 9px;
+      }
+
+      .node-icon,
+      .code-braces {
+        display: grid;
+        width: 54px;
+        height: 54px;
+        place-items: center;
+        margin-bottom: 31px;
+        border: 1px solid var(--border);
+        border-radius: 50%;
+        background: white;
+        font-family: var(--mono);
+        font-size: 13px;
+      }
+
+      .flow-logo,
+      .vibe-pixel {
+        width: 54px;
+        height: 54px;
+        margin-bottom: 31px;
+      }
+
+      .vibe-pixel {
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(3, 13px);
+        grid-template-rows: repeat(3, 13px);
+        gap: 3px;
+        align-content: center;
+        justify-content: center;
+      }
+
+      .vibe-pixel i {
+        background: var(--accent);
+      }
+
+      .vibe-pixel i:nth-child(1) { grid-column: 1; grid-row: 1; }
+      .vibe-pixel i:nth-child(2) { grid-column: 3; grid-row: 1; background: var(--gold); }
+      .vibe-pixel i:nth-child(3) { grid-column: 2; grid-row: 2; }
+      .vibe-pixel i:nth-child(4) { grid-column: 1; grid-row: 3; background: #e2452a; }
+      .vibe-pixel i:nth-child(5) { grid-column: 3; grid-row: 3; }
+
+      .flow-node strong {
+        position: relative;
+        z-index: 1;
+        font-size: 14px;
+        font-weight: 650;
+      }
+
+      .flow-node small {
+        position: relative;
+        z-index: 1;
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .flow-arrow {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        color: var(--accent);
+        font-family: var(--mono);
+        font-size: 18px;
+      }
+
+      .flow-arrow span {
+        color: var(--faint);
+        font-size: 8px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .principle-row {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1px;
+        overflow: hidden;
+        margin-top: 22px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: var(--border);
+      }
+
+      .principle-row span {
+        background: var(--surface);
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+        padding: 17px 19px;
+      }
+
+      .principle-row b {
+        color: var(--text-body);
+        font-weight: 620;
+      }
+
+      .approval-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 0.8fr) minmax(420px, 1.1fr);
+        align-items: center;
+        gap: clamp(70px, 10vw, 140px);
+      }
+
+      .approval-copy > p {
+        margin-top: 27px;
+      }
+
+      .approval-copy ul {
+        display: grid;
+        gap: 0;
+        margin-top: 36px;
+        list-style: none;
+      }
+
+      .approval-copy li {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        border-top: 1px solid var(--border);
+        color: var(--text-body);
+        font-size: 14px;
+        padding: 15px 0;
+      }
+
+      .approval-copy li:last-child {
+        border-bottom: 1px solid var(--border);
+      }
+
+      .approval-copy li span {
+        color: var(--accent-strong);
+        font-family: var(--mono);
+        font-size: 10px;
+      }
+
+      .permission-scene {
+        position: relative;
+        min-height: 520px;
+      }
+
+      .permission-scene::before {
+        position: absolute;
+        inset: 25px 10px 60px;
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        background:
+          linear-gradient(rgba(207, 106, 58, 0.05) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(207, 106, 58, 0.05) 1px, transparent 1px),
+          var(--bg-deep);
+        background-size: 32px 32px;
+        content: '';
+      }
+
+      .permission-backplate {
+        position: absolute;
+        top: 70px;
+        right: 0;
+        display: grid;
+        grid-template-columns: auto auto;
+        gap: 8px 18px;
+        width: 255px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: white;
+        box-shadow: var(--shadow-small);
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 8px;
+        letter-spacing: 0.08em;
+        padding: 19px;
+      }
+
+      .permission-backplate b {
+        color: var(--text-body);
+        font-size: 9px;
+        letter-spacing: 0;
+        text-align: right;
+      }
+
+      .permission-card {
+        position: absolute;
+        top: 155px;
+        left: 0;
+        z-index: 2;
+        width: min(100% - 35px, 480px);
+        overflow: hidden;
+        border: 1px solid #dfc4b3;
+        border-radius: 19px;
+        background: white;
+        box-shadow: 0 28px 60px -30px rgba(91, 45, 20, 0.45);
+      }
+
+      .permission-head {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 12px;
+        border-bottom: 1px solid #eeded2;
+        background: var(--accent-pale);
+        padding: 16px 18px;
+      }
+
+      .shield-icon {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border-radius: 10px;
+        background: white;
+        color: var(--accent-strong);
+        font-size: 19px;
+      }
+
+      .permission-head strong,
+      .permission-head small {
+        display: block;
+      }
+
+      .permission-head strong {
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      .permission-head small {
+        margin-top: 2px;
+        color: var(--muted);
+        font-size: 10px;
+      }
+
+      .permission-time {
+        color: var(--faint);
+        font-size: 9px;
+      }
+
+      .permission-body {
+        display: grid;
+        gap: 11px;
+        padding: 20px 19px 17px;
+      }
+
+      .permission-body p {
+        color: var(--text-body);
+        font-size: 12px;
+      }
+
+      .permission-body code {
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-deep);
+        color: var(--text-body);
+        font-family: var(--mono);
+        font-size: 10px;
+        padding: 11px 12px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .path-label {
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 9px;
+      }
+
+      .permission-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        border-top: 1px solid var(--border);
+        padding: 12px 15px;
+      }
+
+      .permission-actions span {
+        border-radius: 8px;
+        font-size: 10px;
+        font-weight: 620;
+        padding: 8px 11px;
+      }
+
+      .permission-reject {
+        border: 1px solid var(--border);
         color: var(--muted);
       }
 
-      @media (max-width: 640px) {
-        .triad {
-          grid-template-columns: 1fr;
-          gap: 1.4rem;
-        }
+      .permission-allow {
+        background: var(--text);
+        color: white;
+      }
+
+      .mode-switcher {
+        position: absolute;
+        right: 23px;
+        bottom: 24px;
+        z-index: 3;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        max-width: 405px;
+        border: 1px solid var(--border-strong);
+        border-radius: 12px;
+        background: white;
+        box-shadow: var(--shadow-small);
+        padding: 5px;
+      }
+
+      .mode-switcher span {
+        border-radius: 8px;
+        color: var(--muted);
+        font-size: 9px;
+        padding: 8px 9px;
+      }
+
+      .mode-switcher .is-selected {
+        background: var(--accent-soft);
+        color: var(--accent-strong);
+        font-weight: 650;
+      }
+
+      .side-work {
+        background: var(--bg-deep);
+      }
+
+      .side-work-intro {
+        align-items: center;
+      }
+
+      .side-work-stage {
+        position: relative;
+        min-height: 650px;
+        margin-top: 72px;
+        border: 1px solid var(--border-strong);
+        border-radius: 24px;
+        background:
+          radial-gradient(circle at 50% 30%, rgba(246, 196, 69, 0.15), transparent 36%),
+          linear-gradient(rgba(207, 106, 58, 0.05) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(207, 106, 58, 0.05) 1px, transparent 1px),
+          #f7f4ef;
+        background-size: auto, 34px 34px, 34px 34px, auto;
+      }
+
+      .surface-files,
+      .surface-git,
+      .surface-terminal {
+        position: absolute;
+        overflow: hidden;
+        border: 1px solid var(--border-strong);
+        border-radius: 17px;
+        background: white;
+        box-shadow: 0 24px 50px -28px rgba(54, 36, 22, 0.45);
+      }
+
+      .surface-files {
+        top: 70px;
+        left: 6%;
+        z-index: 1;
+        width: 34%;
+        min-height: 455px;
+        transform: rotate(-2.2deg);
+      }
+
+      .surface-git {
+        top: 36px;
+        left: 35%;
+        z-index: 3;
+        width: 38%;
+        min-height: 500px;
+      }
+
+      .surface-terminal {
+        right: 5%;
+        bottom: 61px;
+        z-index: 4;
+        width: 36%;
+        transform: rotate(1.8deg);
+        background: var(--terminal);
+        color: #d8d2ca;
+      }
+
+      .surface-head {
+        min-height: 51px;
+        gap: 8px;
+        border-bottom: 1px solid var(--border);
+        padding: 0 16px;
+        font-size: 12px;
+      }
+
+      .surface-head strong {
+        font-weight: 650;
+      }
+
+      .surface-head span {
+        margin-right: auto;
+        color: var(--faint);
+        font-size: 9px;
+      }
+
+      .surface-head i {
+        color: var(--muted);
+        font-style: normal;
+      }
+
+      .file-search {
+        margin: 12px;
+        border: 1px solid var(--border);
+        border-radius: 7px;
+        color: var(--faint);
+        font-size: 10px;
+        padding: 9px 10px;
+      }
+
+      .file-tree {
+        display: grid;
+        gap: 2px;
+        padding: 0 12px 16px;
+      }
+
+      .file-tree span {
+        border-radius: 6px;
+        color: var(--muted);
+        font-size: 10px;
+        padding: 6px 8px;
+      }
+
+      .file-tree b {
+        color: var(--text-body);
+        font-weight: 570;
+      }
+
+      .file-tree .depth-one { padding-left: 24px; }
+      .file-tree .depth-two { padding-left: 41px; }
+      .file-tree .is-file { font-family: var(--mono); font-size: 9px; }
+      .file-tree .is-active { background: var(--accent-pale); color: var(--accent-strong); }
+
+      .branch-row {
+        gap: 9px;
+        border-bottom: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 10px;
+        padding: 14px 16px;
+      }
+
+      .branch-row b {
+        margin-right: auto;
+        color: var(--text-body);
+        font-family: var(--mono);
+        font-size: 9px;
+      }
+
+      .branch-row small {
+        color: var(--faint);
+      }
+
+      .diff-file {
+        gap: 9px;
+        border-bottom: 1px solid #f2ece6;
+        color: var(--muted);
+        font-size: 9px;
+        padding: 12px 16px;
+      }
+
+      .diff-file > span {
+        color: var(--accent-strong);
+        font-family: var(--mono);
+      }
+
+      .diff-file code {
+        overflow: hidden;
+        margin-right: auto;
+        color: var(--text-body);
+        font-family: var(--mono);
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .commit-box {
+        margin: 18px 16px 9px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text-body);
+        font-size: 10px;
+        padding: 11px;
+      }
+
+      .commit-button {
+        display: flex;
+        justify-content: center;
+        gap: 16px;
+        margin: 0 16px 17px;
+        border-radius: 8px;
+        background: var(--text);
+        color: white;
+        font-size: 10px;
+        font-weight: 620;
+        padding: 10px;
+      }
+
+      .commit-button span {
+        color: #aaa39c;
+        font-family: var(--mono);
+      }
+
+      .terminal-head {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        min-height: 45px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 0 13px;
+      }
+
+      .terminal-head > span {
+        display: flex;
+        gap: 5px;
+      }
+
+      .terminal-head i {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #ec6a5e;
+      }
+
+      .terminal-head i:nth-child(2) { background: #f4bf4f; }
+      .terminal-head i:nth-child(3) { background: #61c554; }
+
+      .terminal-head strong {
+        font-size: 9px;
+        font-weight: 550;
+      }
+
+      .terminal-head small {
+        justify-self: end;
+        color: #7b756f;
+        font-family: var(--mono);
+        font-size: 8px;
+      }
+
+      .terminal-body,
+      .open-terminal-body {
+        font-family: var(--mono);
+        font-size: 10px;
+        line-height: 1.8;
+        padding: 21px;
+      }
+
+      .terminal-body b { color: #d8d2ca; font-weight: 550; }
+      .terminal-body span { color: #d99764; }
+      .terminal-body i,
+      .open-terminal-body i { color: #7fb56b; font-style: normal; }
+      .terminal-body .terminal-muted { color: #807a74; }
+
+      .terminal-cursor {
+        display: inline-block;
+        width: 6px;
+        height: 12px;
+        background: currentColor;
+        vertical-align: -2px;
+        animation: cursor-blink 1.1s step-end infinite;
+      }
+
+      .surface-tabs {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        margin-top: 23px;
+        border-block: 1px solid var(--border);
+      }
+
+      .surface-tabs span {
+        display: flex;
+        gap: 10px;
+        border-right: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 12px;
+        padding: 17px 18px;
+      }
+
+      .surface-tabs span:last-child { border-right: 0; }
+      .surface-tabs b { color: var(--accent-strong); font-family: var(--mono); font-size: 10px; }
+
+      .open-source {
+        border-top: 0;
+        background: var(--bg-deep);
+        padding-top: 0;
+      }
+
+      .open-panel {
+        position: relative;
+        display: grid;
+        grid-template-columns: minmax(0, 0.8fr) minmax(430px, 1fr);
+        align-items: center;
+        gap: 90px;
+        min-height: 580px;
+        overflow: hidden;
+        border: 1px solid #ca693e;
+        border-radius: 28px;
+        background: linear-gradient(135deg, #ef945d 0%, #e47a42 52%, #d65c34 100%);
+        box-shadow: 0 30px 70px -38px rgba(154, 67, 28, 0.6);
+        padding: 70px;
+      }
+
+      .open-grid {
+        z-index: 0;
+        background-image:
+          linear-gradient(rgba(91, 42, 20, 0.11) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(91, 42, 20, 0.11) 1px, transparent 1px);
+        background-size: 35px 35px;
+        mask-image: linear-gradient(90deg, black, transparent 75%);
+        -webkit-mask-image: linear-gradient(90deg, black, transparent 75%);
+      }
+
+      .open-copy,
+      .open-terminal {
+        position: relative;
+        z-index: 1;
+      }
+
+      .open-copy .eyebrow {
+        color: #5b2a18;
+      }
+
+      .open-copy h2 {
+        color: #241a12;
+      }
+
+      .open-copy > p {
+        margin-top: 25px;
+        color: rgba(46, 28, 18, 0.76);
+      }
+
+      .open-actions {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-top: 29px;
+      }
+
+      .button-dark {
+        background: #241a12;
+        color: white;
+        box-shadow: 0 16px 30px -14px rgba(62, 26, 11, 0.52);
+      }
+
+      .open-actions > span {
+        color: rgba(46, 28, 18, 0.72);
+        font-family: var(--mono);
+        font-size: 10px;
+        text-transform: uppercase;
+      }
+
+      .open-terminal {
+        overflow: hidden;
+        border: 1px solid rgba(49, 29, 18, 0.25);
+        border-radius: 17px;
+        background: #fffaf5;
+        box-shadow: 0 28px 65px -30px rgba(74, 30, 13, 0.6);
+        transform: rotate(1.5deg);
+      }
+
+      .open-terminal-head {
+        position: relative;
+        align-items: center;
+        min-height: 47px;
+        border-bottom: 1px solid #ead7c8;
+        background: #f4e9df;
+        padding: 0 15px;
+      }
+
+      .open-terminal-head small {
+        position: absolute;
+        left: 50%;
+        color: #7b6f65;
+        font-family: var(--mono);
+        font-size: 9px;
+        transform: translateX(-50%);
+      }
+
+      .open-terminal-body {
+        min-height: 300px;
+        color: #3e352f;
+        font-size: 11px;
+        line-height: 2.05;
+        padding: 29px;
+      }
+
+      .open-terminal-body i { color: #b9512d; }
+      .open-terminal-body .terminal-comment { color: #9f8e81; }
+      .open-terminal-body .terminal-success { color: #397a45; }
+
+      .final-cta {
+        position: relative;
+        overflow: hidden;
+        border-top: 1px solid var(--border);
+        padding: 145px 0 135px;
+        isolation: isolate;
+      }
+
+      .final-grid {
+        mask-image: radial-gradient(circle at center, black, transparent 70%);
+        -webkit-mask-image: radial-gradient(circle at center, black, transparent 70%);
+      }
+
+      .final-cta-inner {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+
+      .final-cta h2 {
+        font-size: clamp(62px, 8.2vw, 102px);
+      }
+
+      .final-cta-inner > p:not(.eyebrow):not(.final-note) {
+        max-width: 590px;
+        margin-top: 24px;
+        font-size: 19px;
       }
 
       footer {
-        margin-top: auto;
-        padding: 2.5rem 0 2rem;
-        font-size: 0.85rem;
+        border-top: 1px solid var(--border);
+        background: var(--bg-deep);
         color: var(--muted);
+        padding: 34px 0 24px;
       }
 
-      .fine {
-        margin-top: 0.3rem;
-        font-size: 0.75rem;
-        color: #a89f95;
+      .footer-inner {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+      }
+
+      .footer-brand {
+        font-size: 14px;
+      }
+
+      .footer-brand .brand-mark {
+        width: 24px;
+        height: 24px;
+      }
+
+      .footer-inner > p {
+        font-size: 11px;
+      }
+
+      .footer-links {
+        display: flex;
+        justify-self: end;
+        gap: 22px;
+      }
+
+      .footer-links a {
+        font-size: 12px;
+      }
+
+      .disclaimer {
+        margin-top: 18px;
+        color: var(--faint);
+        font-size: 9px;
+        text-align: center;
+      }
+
+      @keyframes enter {
+        to { opacity: 1; transform: none; }
+      }
+
+      @keyframes float-one {
+        0%, 100% { transform: translateY(0) rotate(-4deg); }
+        50% { transform: translateY(-7px) rotate(-3deg); }
+      }
+
+      @keyframes float-two {
+        0%, 100% { transform: translateY(0) rotate(3deg); }
+        50% { transform: translateY(7px) rotate(2deg); }
+      }
+
+      @keyframes status-pulse {
+        0%, 100% { box-shadow: 0 0 0 3px rgba(58, 154, 85, 0.1); }
+        50% { box-shadow: 0 0 0 6px rgba(58, 154, 85, 0.02); }
+      }
+
+      @keyframes dot-wave {
+        0%, 100% { opacity: 0.25; transform: translateY(0); }
+        50% { opacity: 1; transform: translateY(-2px); }
+      }
+
+      @keyframes cursor-blink {
+        0%, 49% { opacity: 1; }
+        50%, 100% { opacity: 0; }
+      }
+
+      @media (max-width: 1100px) {
+        .stage-label-workspace { left: -20px; }
+        .stage-label-thread { right: -20px; }
+        .workspace-demo { grid-template-columns: 220px minmax(0, 1fr); }
+        .activity-legend { display: none; }
+        .protocol-flow { grid-template-columns: 1fr 45px 1fr; gap: 0; }
+        .protocol-flow .flow-node:nth-of-type(3),
+        .protocol-flow .flow-node:nth-of-type(4) { margin-top: 45px; }
+        .protocol-flow .flow-arrow:nth-of-type(2) { display: none; }
+        .open-panel { gap: 55px; padding: 55px; }
+      }
+
+      @media (max-width: 820px) {
+        .container { width: min(100% - 32px, 1180px); }
+        .nav-shell { grid-template-columns: 1fr auto; }
+        nav { display: none; }
+        .hero { padding-top: 80px; }
+        h1 { font-size: clamp(54px, 13vw, 82px); }
+        .app-stage { margin-top: 62px; }
+        .stage-label { display: none; }
+        .stage-caption { padding-bottom: 55px; }
+        .section { padding: 90px 0; }
+        .split-intro,
+        .approval-grid,
+        .open-panel { grid-template-columns: 1fr; }
+        .split-intro { gap: 28px; }
+        .split-intro > p { max-width: 620px; }
+        .workspace-demo { grid-template-columns: 190px minmax(0, 1fr); min-height: 560px; }
+        .demo-main { padding-inline: 20px; }
+        .protocol-flow { grid-template-columns: 1fr 44px 1fr; }
+        .principle-row { grid-template-columns: 1fr; }
+        .approval-grid { gap: 45px; }
+        .permission-scene { width: min(100%, 610px); margin-inline: auto; }
+        .side-work-stage { min-height: 590px; }
+        .surface-files { left: 3%; width: 43%; }
+        .surface-git { left: 29%; width: 48%; }
+        .surface-terminal { right: 2%; width: 47%; }
+        .open-panel { gap: 50px; padding: 55px; }
+        .open-terminal { width: min(100%, 560px); }
+        .footer-inner { grid-template-columns: 1fr auto; gap: 24px; }
+        .footer-inner > p { grid-column: 1 / -1; grid-row: 2; text-align: center; }
+      }
+
+      @media (max-width: 640px) {
+        .header-download { padding: 9px 11px; }
+        .header-download svg { display: none; }
+        .hero { padding-top: 70px; }
+        .hero-eyebrow { font-size: 10px; }
+        h1 { font-size: clamp(48px, 14vw, 68px); line-height: 0.95; }
+        .lede { font-size: 17px; }
+        .hero-actions { width: 100%; }
+        .hero-actions .button { width: 100%; }
+        .stage-card { border-radius: 17px; padding: 4px; }
+        .stage-toolbar { height: 35px; }
+        .stage-state { display: none; }
+        .stage-toolbar { grid-template-columns: 1fr auto 1fr; }
+        .screenshot-shell { border-radius: 11px; }
+        .stage-caption { grid-template-columns: 1fr; gap: 8px; padding: 17px 4px 44px; }
+        .stage-caption span,
+        .stage-caption span:nth-child(2),
+        .stage-caption span:last-child { justify-content: flex-start; }
+        .signal-track { justify-content: flex-start; }
+        .section { padding: 76px 0; }
+        .section-intro h2,
+        .approval-copy h2,
+        .open-copy h2 { font-size: clamp(40px, 11vw, 54px); }
+        .workspace-demo { display: block; min-height: auto; margin-top: 48px; }
+        .demo-sidebar { display: none; }
+        .demo-main { min-height: 555px; padding: 0 17px 18px; }
+        .activity-line > div { display: block; }
+        .activity-line code,
+        .activity-line p { display: block; margin-top: 2px; }
+        .composer-controls { gap: 10px; }
+        .composer-controls span:nth-child(3) { display: none; }
+        .protocol-flow { grid-template-columns: 1fr; gap: 12px; margin-top: 48px; }
+        .protocol-flow .flow-node { min-height: 170px; }
+        .protocol-flow .flow-node:nth-of-type(3),
+        .protocol-flow .flow-node:nth-of-type(4) { margin-top: 0; }
+        .flow-arrow { flex-direction: row; min-height: 28px; transform: rotate(90deg); }
+        .flow-arrow span { display: none; }
+        .approval-copy ul { margin-top: 28px; }
+        .permission-scene { min-height: 470px; }
+        .permission-backplate { top: 35px; right: 0; width: 215px; }
+        .permission-card { top: 132px; width: calc(100% - 16px); }
+        .mode-switcher { right: 10px; bottom: 16px; max-width: calc(100% - 20px); }
+        .mode-switcher span { padding: 7px; }
+        .side-work-stage { min-height: 660px; margin-top: 48px; }
+        .surface-files { top: 38px; left: 4%; width: 63%; min-height: 410px; }
+        .surface-git { top: 105px; right: 3%; left: auto; width: 67%; min-height: 455px; }
+        .surface-terminal { right: 4%; bottom: 35px; width: 78%; }
+        .surface-tabs { grid-template-columns: repeat(2, 1fr); }
+        .surface-tabs span:nth-child(2) { border-right: 0; }
+        .surface-tabs span:nth-child(-n + 2) { border-bottom: 1px solid var(--border); }
+        .open-panel { min-height: auto; border-radius: 21px; padding: 38px 24px 28px; }
+        .open-actions { align-items: flex-start; flex-direction: column; }
+        .open-terminal-body { overflow-x: auto; padding: 22px 18px; white-space: nowrap; }
+        .final-cta { padding: 105px 0 96px; }
+        .final-cta h2 { font-size: clamp(58px, 16vw, 80px); }
+        .footer-inner { grid-template-columns: 1fr; justify-items: center; }
+        .footer-brand,
+        .footer-links { justify-self: center; }
+        .footer-links { flex-wrap: wrap; justify-content: center; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html { scroll-behavior: auto; }
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          scroll-behavior: auto !important;
+        }
       }
     </style>
   </body>
