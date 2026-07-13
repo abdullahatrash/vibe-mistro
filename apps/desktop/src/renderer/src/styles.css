@@ -461,7 +461,11 @@ body {
 
 .conv__title {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Agent context-reset notice (TB4 #33): woven into the conversation, not an error. */

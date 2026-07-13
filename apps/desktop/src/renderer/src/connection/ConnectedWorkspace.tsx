@@ -1,4 +1,4 @@
-import { type JSX } from 'react'
+import { type JSX, type ReactNode } from 'react'
 import type {
   AuthMethod,
   ThreadAgentControls,
@@ -8,7 +8,10 @@ import type {
 } from '../../../shared/ipc'
 import { ColdThread } from '../conversation/ColdThread'
 import { Conversation } from '../conversation/Conversation'
+import type { MessageSelection } from '../conversation/message-selection'
+import type { ThreadStatusMap } from '../conversation/thread-status'
 import { SurfacePanel } from '../side-panel/SurfacePanel'
+import type { SideThreadLifecycle } from '../side-panel/side-panel-store'
 
 /**
  * A connected Workspace's conversation OUTLET (ADR-0006, TB3 #48). It no longer
@@ -44,6 +47,10 @@ export function ConnectedWorkspace({
   onContinue,
   onCloseCold,
   onAuthExpired,
+  onAskInSideThread,
+  renderSideThread,
+  getSideThreadTitle,
+  threadStatuses,
 }: {
   connection: ThreadConnection
   /** The Thread App chose to show (its remembered active Thread for this Workspace). */
@@ -78,6 +85,14 @@ export function ConnectedWorkspace({
   onCloseCold: () => void
   /** Mid-session expiry (-32000): route to in-place re-auth with these methods. */
   onAuthExpired: (authMethods: AuthMethod[]) => void
+  /** Open a renderer-only Side Draft from a selection without changing primary navigation. */
+  onAskInSideThread: (selection: MessageSelection) => void
+  /** Render the active Side Thread Surface using the Workspace's existing connection. */
+  renderSideThread: (threadId: string, lifecycle: SideThreadLifecycle) => ReactNode
+  /** Resolve the latest persisted Vibe title for a durable Side Thread tab. */
+  getSideThreadTitle: (threadId: string) => string | null
+  /** Main-authored per-Thread status projected into Side Thread Surface tabs. */
+  threadStatuses: ThreadStatusMap
 }): JSX.Element {
   return (
     // h-full on the row + chat column completes the height chain from <main> down to
@@ -104,6 +119,9 @@ export function ConnectedWorkspace({
             onSetConfig={onSetConfig}
             onAuthExpired={onAuthExpired}
             onBound={onBound}
+            // A background Workspace stays mounted for streaming, but selection UI
+            // portals outside its hidden wrapper. Only the on-screen owner may mount it.
+            onAskInSideThread={isActive ? onAskInSideThread : undefined}
           />
         ) : (
           <ColdThread key={activeThread.id} thread={activeThread} onClose={onCloseCold} onContinue={onContinue} />
@@ -121,6 +139,9 @@ export function ConnectedWorkspace({
         activeThreadId={activeThread.id}
         isActive={isActive}
         busy={busy}
+        renderSideThread={renderSideThread}
+        getSideThreadTitle={getSideThreadTitle}
+        threadStatuses={threadStatuses}
       />
     </div>
   )

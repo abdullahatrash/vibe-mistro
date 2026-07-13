@@ -418,3 +418,22 @@ describe('agent-rebound (TB4 context reset notice)', () => {
     expect(next.items.some((i) => i.kind === 'error')).toBe(false)
   })
 })
+
+describe('system-notice', () => {
+  it('surfaces a recoverable condition without ending the active turn', () => {
+    const start: ConversationState = {
+      ...initialConversationState,
+      isProcessing: true,
+      items: [{ kind: 'user', id: 'u1', text: 'continue with fallback settings' }],
+    }
+
+    const next = conversationReducer(start, {
+      type: 'system-notice',
+      message: 'Mode could not be applied.',
+    })
+
+    expect(next.items.map((item) => item.kind)).toEqual(['user', 'notice'])
+    expect((next.items[1] as NoticeItem).message).toBe('Mode could not be applied.')
+    expect(next.isProcessing).toBe(true)
+  })
+})

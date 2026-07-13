@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type JSX, type PointerEvent, type ReactNode } from 'react'
-import { FileDiff, FileText, Files, Globe, Plus, SquareTerminal, X } from 'lucide-react'
+import { FileDiff, FileText, Files, Globe, MessageSquare, Plus, SquareTerminal, X } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { useMediaQuery } from '../lib/use-media-query'
 import {
@@ -21,6 +21,10 @@ import { TerminalSurface } from './TerminalSurface'
 import { BrowserSurface } from './BrowserSurface'
 import { surfaceForChord } from './surface-keys'
 import { basename } from '../lib/paths'
+import { clearComposerDraft } from '../conversation/composer-draft-store'
+import type { ThreadStatusMap } from '../conversation/thread-status'
+import { Badge } from '../ui/badge'
+import { LogoSnakeSpinner } from '../shell/logo-snake-spinner'
 import {
   activateWorkspaceSurface,
   closeAllWorkspaceSurfaces,
@@ -40,6 +44,7 @@ import {
   toggleWorkspaceTerminalSurface,
   useWorkspacePanel,
   type SingletonKind,
+  type SideThreadLifecycle,
   type Surface,
 } from './side-panel-store'
 import {
@@ -48,6 +53,8 @@ import {
   getPanelWidth,
   setPanelWidth,
 } from './panel-width-store'
+import { unpromptedSideThreadIds } from './side-thread-surface-cleanup'
+import { surfaceThreadStatus } from './surface-thread-status'
 
 /** Windows this narrow present the panel as a slide-over Sheet (t3code's 980px break). */
 const NARROW_QUERY = '(max-width: 980px)'
@@ -75,6 +82,9 @@ export function SurfacePanel({
   workspaceDir,
   agentId,
   activeThreadId,
+  renderSideThread,
+  getSideThreadTitle,
+  threadStatuses,
   isActive,
   busy,
 }: {
@@ -84,6 +94,12 @@ export function SurfacePanel({
   agentId: string
   /** The live Thread whose composer a file preview's Insert-@path targets (#189); null when none. */
   activeThreadId: string | null
+  /** Render a Side Thread conversation without changing the primary Thread selection. */
+  renderSideThread: (threadId: string, lifecycle: SideThreadLifecycle) => ReactNode
+  /** Resolve a bound Side Thread's latest Vibe-generated title for its tab. */
+  getSideThreadTitle: (threadId: string) => string | null
+  /** Main-authored status for every live Thread, including unmounted Side Threads. */
+  threadStatuses: ThreadStatusMap
   /** Whether this is the on-screen Workspace (#84) — gates git streaming AND shortcuts. */
   isActive: boolean
   /** Whether a turn is streaming (#86) — threaded to the Review panel's commit guard. */
@@ -135,6 +151,9 @@ export function SurfacePanel({
       workspaceDir={workspaceDir}
       agentId={agentId}
       activeThreadId={activeThreadId}
+      renderSideThread={renderSideThread}
+      getSideThreadTitle={getSideThreadTitle}
+      threadStatuses={threadStatuses}
       isActive={isActive}
       busy={busy}
       panel={panel}
@@ -174,6 +193,9 @@ function PanelBody({
   workspaceDir,
   agentId,
   activeThreadId,
+  renderSideThread,
+  getSideThreadTitle,
+  threadStatuses,
   isActive,
   busy,
   panel,
@@ -183,6 +205,9 @@ function PanelBody({
   workspaceDir: string
   agentId: string
   activeThreadId: string | null
+  renderSideThread: (threadId: string, lifecycle: SideThreadLifecycle) => ReactNode
+  getSideThreadTitle: (threadId: string) => string | null
+  threadStatuses: ThreadStatusMap
   isActive: boolean
   busy: boolean
   panel: ReturnType<typeof useWorkspacePanel>
@@ -234,33 +259,32 @@ function PanelBody({
     [workspaceId],
   )
 
-  // A close op is a VIEW op for every Surface except terminal, whose tab IS the
-  // session's lifetime (ADR-0014): unmount keeps the shell (reattach later), but
-  // explicitly closing the tab kills the PTY. Each close path first kills the
-  // sessions its store op is about to remove — one `terminalClose` per removed
-  // terminal tab, addressed by its own `term-N` resource id.
-  function killTerminalsAmong(removed: Surface[]): void {
+  // A close op is a VIEW op except for resource-owning renderer-only Surfaces:
+  // terminal tabs own PTYs, and unprompted Side Threads own composer Draft state.
+  // Every explicit close path cleans those resources before removing descriptors.
+  function cleanUpRemovedSurfaces(removed: Surface[]): void {
     for (const surface of removed) {
       if (surface.kind === 'terminal') {
         void window.api.terminalClose({ workspaceId, terminalId: surface.resourceId })
       }
     }
+    for (const threadId of unpromptedSideThreadIds(removed)) clearComposerDraft(threadId)
   }
-  function closeSurfaceAndKill(id: string): void {
-    killTerminalsAmong(panel.surfaces.filter((surface) => surface.id === id))
+  function closeSurfaceAndCleanUp(id: string): void {
+    cleanUpRemovedSurfaces(panel.surfaces.filter((surface) => surface.id === id))
     closeWorkspaceSurface(workspaceId, id)
   }
-  function closeOthersAndKill(id: string): void {
-    killTerminalsAmong(panel.surfaces.filter((surface) => surface.id !== id))
+  function closeOthersAndCleanUp(id: string): void {
+    cleanUpRemovedSurfaces(panel.surfaces.filter((surface) => surface.id !== id))
     closeOtherWorkspaceSurfaces(workspaceId, id)
   }
-  function closeToRightAndKill(id: string): void {
+  function closeToRightAndCleanUp(id: string): void {
     const index = panel.surfaces.findIndex((surface) => surface.id === id)
-    if (index >= 0) killTerminalsAmong(panel.surfaces.slice(index + 1))
+    if (index >= 0) cleanUpRemovedSurfaces(panel.surfaces.slice(index + 1))
     closeWorkspaceSurfacesToRight(workspaceId, id)
   }
-  function closeAllAndKill(): void {
-    killTerminalsAmong(panel.surfaces)
+  function closeAllAndCleanUp(): void {
+    cleanUpRemovedSurfaces(panel.surfaces)
     closeAllWorkspaceSurfaces(workspaceId)
   }
   /** A launcher card / "+"-menu target: singletons via the store op, terminal/browser via their own. */
@@ -307,11 +331,13 @@ function PanelBody({
           <SurfaceTabStrip
             surfaces={panel.surfaces}
             activeSurfaceId={panel.activeSurfaceId}
+            getSideThreadTitle={getSideThreadTitle}
+            threadStatuses={threadStatuses}
             onActivate={(id) => activateWorkspaceSurface(workspaceId, id)}
-            onClose={closeSurfaceAndKill}
-            onCloseOthers={closeOthersAndKill}
-            onCloseToRight={closeToRightAndKill}
-            onCloseAll={closeAllAndKill}
+            onClose={closeSurfaceAndCleanUp}
+            onCloseOthers={closeOthersAndCleanUp}
+            onCloseToRight={closeToRightAndCleanUp}
+            onCloseAll={closeAllAndCleanUp}
             onOpen={openCardTarget}
             terminalAtCap={terminalAtCap}
           />
@@ -361,6 +387,18 @@ function PanelBody({
                 activeThreadId={activeThreadId}
               />
             )}
+            {active?.kind === 'thread' && (
+              // Keep the tab strip full-bleed, then inset the conversation itself.
+              // Side Threads reuse the central Conversation, whose normal 24px gutter
+              // lives in ConnectedWorkspace; without a local gutter here every row and
+              // the Composer sit directly against the panel seam and window edge.
+              <div
+                data-side-thread-surface
+                className="flex min-h-0 min-w-0 flex-1 flex-col px-4 pt-3 pb-4"
+              >
+                {renderSideThread(active.threadId, active.lifecycle)}
+              </div>
+            )}
             {/* The embedded dev-server preview (#216, ADR-0015). Unlike the other
                 surfaces it stays MOUNTED whenever its tab is open — only HIDDEN when
                 another tab is active — because the live page lives in the renderer's
@@ -387,7 +425,10 @@ function PanelBody({
 }
 
 /** A Surface's tab-strip presentation: its kind icon + a short human label. */
-function surfaceMeta(surface: Surface): { icon: ReactNode; label: string } {
+function surfaceMeta(
+  surface: Surface,
+  getSideThreadTitle: (threadId: string) => string | null,
+): { icon: ReactNode; label: string } {
   switch (surface.kind) {
     case 'review':
       return { icon: <FileDiff aria-hidden />, label: 'Review' }
@@ -403,6 +444,11 @@ function surfaceMeta(surface: Surface): { icon: ReactNode; label: string } {
     }
     case 'browser':
       return { icon: <Globe aria-hidden />, label: 'Browser' }
+    case 'thread':
+      return {
+        icon: <MessageSquare aria-hidden />,
+        label: getSideThreadTitle(surface.threadId) ?? 'Side Thread',
+      }
   }
 }
 
@@ -417,6 +463,8 @@ function surfaceMeta(surface: Surface): { icon: ReactNode; label: string } {
 function SurfaceTabStrip({
   surfaces,
   activeSurfaceId,
+  getSideThreadTitle,
+  threadStatuses,
   onActivate,
   onClose,
   onCloseOthers,
@@ -427,6 +475,8 @@ function SurfaceTabStrip({
 }: {
   surfaces: Surface[]
   activeSurfaceId: string | null
+  getSideThreadTitle: (threadId: string) => string | null
+  threadStatuses: ThreadStatusMap
   onActivate: (id: string) => void
   onClose: (id: string) => void
   onCloseOthers: (id: string) => void
@@ -443,7 +493,8 @@ function SurfaceTabStrip({
     >
       {surfaces.map((surface, index) => {
         const active = surface.id === activeSurfaceId
-        const { icon, label } = surfaceMeta(surface)
+        const { icon, label } = surfaceMeta(surface, getSideThreadTitle)
+        const threadStatus = surfaceThreadStatus(surface, threadStatuses)
         return (
           <ContextMenu key={surface.id}>
             <ContextMenuTrigger
@@ -468,6 +519,17 @@ function SurfaceTabStrip({
               >
                 {icon}
                 <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+                {threadStatus?.streaming && <LogoSnakeSpinner size={14} label="Streaming" />}
+                {threadStatus?.needsAttention && (
+                  <Badge
+                    variant="destructive"
+                    aria-label="Needs attention"
+                    title="Awaiting your response"
+                    className="px-1.5"
+                  >
+                    !
+                  </Badge>
+                )}
               </button>
               <button
                 type="button"

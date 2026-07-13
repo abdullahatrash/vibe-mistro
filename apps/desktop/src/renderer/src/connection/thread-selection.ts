@@ -17,7 +17,7 @@ export type ThreadView = 'live' | 'cold'
  * from a prior launch does NOT make it live.
  */
 export function routeThreadSelection(
-  thread: ThreadMeta,
+  thread: Pick<ThreadMeta, 'id'>,
   liveThreadIds: ReadonlySet<string>,
 ): ThreadView {
   return liveThreadIds.has(thread.id) ? 'live' : 'cold'

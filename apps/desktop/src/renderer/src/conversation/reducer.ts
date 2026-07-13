@@ -213,6 +213,9 @@ export type ConversationAction =
   // The agent's context was reset after a failed `session/load` resume (TB4 #33):
   // append the honest "context reset" notice. Not a turn error — input stays usable.
   | { type: 'agent-rebound' }
+  // A recoverable system condition that should be visible in the transcript without
+  // ending the active turn (for example, a rejected initial Agent-control setter).
+  | { type: 'system-notice'; message: string }
   // Seed a live Thread from its replayed JSONL history (TB5 #34): replace the
   // whole state, so switching INTO a Thread shows its saved conversation before
   // live events resume. The provided state is already folded (via replayTranscript).
@@ -246,6 +249,8 @@ export function conversationReducer(
       return resolvePermission(state, action.requestId, action.optionId, action.name)
     case 'agent-rebound':
       return appendNotice(state, REBOUND_NOTICE)
+    case 'system-notice':
+      return appendNotice(state, action.message)
     case 'acp-event':
       return reduceAcpEvent(state, action.payload)
   }

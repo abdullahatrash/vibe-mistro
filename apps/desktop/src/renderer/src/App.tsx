@@ -3,6 +3,8 @@ import type {
   AuthMethod,
   ListMetadataResult,
   StartThreadResult,
+  ThreadAgentControls,
+  ThreadConfigAxis,
   ThreadConnection,
   ThreadMeta,
   VibeDetectResult,
@@ -20,14 +22,24 @@ import {
   initialWorkspaceThreads,
   workspaceThreadsReducer,
   workspaceThreadStateFor,
+  selectedFor,
   type WorkspaceThreadState,
 } from './connection/workspace-threads'
 import { ConnectedWorkspace } from './connection/ConnectedWorkspace'
-import { routeThreadSelection, seedSessionId } from './connection/thread-selection'
+import { routeThreadSelection, seedSessionId, type ThreadView } from './connection/thread-selection'
+import { planPrimaryThreadPromotion } from './connection/side-thread-promotion'
+import { reconcileRestoredSideThreadPlacement } from './connection/side-thread-restoration'
 import { useThreadControls } from './connection/use-thread-controls'
 import { useWorkspaceActions } from './connection/use-workspace-actions'
 import { resolveActiveControls } from './connection/resolve-controls'
+import { snapshotSideDraftControls } from './connection/side-thread-controls'
 import { setThreadStatus, type ThreadStatusMap } from './conversation/thread-status'
+import { Conversation } from './conversation/Conversation'
+import {
+  promoteComposerDraftToPersistent,
+  stageMessageSelectionContext,
+} from './conversation/composer-draft-store'
+import type { MessageSelection } from './conversation/message-selection'
 import { replayCache, wireReplayCacheInvalidation } from './conversation/replay-cache'
 import { setWorkspaceControls, workspaceControlsKey } from './connection/workspace-controls-store'
 import { ArrowLeft, ArrowRight, PanelLeft, PanelRight, Terminal } from 'lucide-react'
@@ -47,9 +59,14 @@ import {
   setSidebarCollapsed as setSidebarCollapsedStore,
 } from './shell/sidebar-collapsed-store'
 import {
+  closeWorkspaceSurface,
+  getWorkspacePanel,
+  openWorkspaceSideThreadSurface,
+  promoteWorkspaceSideThreadSurface,
   toggleWorkspacePanelVisibility,
   toggleWorkspaceTerminalSurface,
   useWorkspacePanel,
+  type SideThreadLifecycle,
 } from './side-panel/side-panel-store'
 import { deriveUnifiedThreads, workspaceFlags, type UnifiedThreadRow } from './shell/unified-threads'
 import { EmptyState } from './shell/EmptyState'
@@ -134,6 +151,10 @@ export function App(): JSX.Element {
   // Persisted Workspaces + Threads (ADR-0005), listed cold on launch from
   // metadata alone — no agent spawned, no transcript loaded.
   const [recents, setRecents] = useState<ListMetadataResult>([])
+  // Restoration reconciliation must happen exactly once. Re-running it for live
+  // state changes can race a just-bound Side Thread's metadata refresh or erase an
+  // in-memory Draft (which intentionally has no metadata yet).
+  const restoredPanelsReconciledRef = useRef(false)
   // Workspaces with a connect IN FLIGHT, tracked synchronously so a fast double-
   // select can't fire two `startThread`s (the `connections` closure is stale
   // within a render frame, so a state check alone would let both through).
@@ -156,7 +177,12 @@ export function App(): JSX.Element {
   }
 
   async function refreshRecents(): Promise<void> {
-    setRecents(await window.api.listMetadata())
+    const metadata = await window.api.listMetadata()
+    if (!restoredPanelsReconciledRef.current) {
+      reconcileRestoredSideThreadPlacement(metadata)
+      restoredPanelsReconciledRef.current = true
+    }
+    setRecents(metadata)
   }
 
   /**
@@ -174,8 +200,21 @@ export function App(): JSX.Element {
    * - Connecting / sign-in / error: nav-select only; the transient outlet resolves.
    */
   function selectThreadInWorkspace(workspaceId: string, threadId: string): void {
+    const currentPanel = getWorkspacePanel(workspaceId)
+    const promotion = planPrimaryThreadPromotion(
+      currentPanel,
+      threadId,
+      workspaceThreadStateFor(workspaceThreads, workspaceId)?.live ?? NO_LIVE,
+    )
+    // Remove the alternate presentation FIRST. An external-store update may render
+    // synchronously, so this order guarantees there is never a frame with the same
+    // Thread mounted centrally and in the Side panel. Ordinary rows are a same-ref
+    // no-op and do not notify the panel store.
+    if (promotion.panel !== currentPanel) {
+      closeWorkspaceSurface(workspaceId, `thread:${threadId}`)
+    }
     navDispatch({ type: 'select-thread', workspaceId, threadId })
-    hostSelectedThread(workspaceId, threadId)
+    hostSelectedThread(workspaceId, threadId, promotion.view)
   }
 
   /**
@@ -184,10 +223,22 @@ export function App(): JSX.Element {
    * same side effects — nav alone moves the sidebar highlight, but the mounted
    * conversation follows `workspaceThreads`' active pointer, which lives here.
    */
-  function hostSelectedThread(workspaceId: string, threadId: string): void {
+  function hostSelectedThread(
+    workspaceId: string,
+    threadId: string,
+    currentView?: ThreadView,
+  ): void {
     const status = connections[workspaceId]?.status
     if (status === 'connected') {
-      wtDispatch({ type: 'open', workspaceId, threadId })
+      // An already-hosted Thread only changes the primary pointer: its bound session,
+      // turn, queue, permissions, and transcript remain untouched. A cold Thread takes
+      // the existing `open` path, which makes it live for process-free replay + lazy
+      // session resume on its next prompt.
+      wtDispatch({
+        type: currentView === 'live' ? 'select' : 'open',
+        workspaceId,
+        threadId,
+      })
       return
     }
     if (workspaceThreadStateFor(workspaceThreads, workspaceId)) {
@@ -241,6 +292,11 @@ export function App(): JSX.Element {
    */
   function applyConnectResult(workspaceId: string, result: StartThreadResult, focus: boolean): void {
     const state = routeThreadResult(result)
+    // A restored Side descriptor can name the Thread selected by start/open. Resolve
+    // that primary-presentation conflict before the connection state makes it central.
+    if (state.status === 'connected') {
+      closeWorkspaceSurface(workspaceId, `thread:${state.thread.threadId}`)
+    }
     connDispatch({ type: 'set', workspaceId, state })
     if (state.status !== 'connected') return
     // Seed the connect-time (primary) Thread's controls per-Thread (#70) from the
@@ -570,6 +626,102 @@ export function App(): JSX.Element {
     const liveIds = wts?.live ?? new Set([conn.threadId])
     const isLive = routeThreadSelection(activeThread, liveIds) === 'live'
     const seed = seedSessionId(activeThread, wts?.bound ?? {})
+
+    function setThreadConfig(
+      threadId: string,
+      axis: ThreadConfigAxis,
+      value: string,
+      sessionId: string | null,
+    ): void {
+      if (sessionId) {
+        controls.changeThreadConfig(conn.workspaceId, conn.agentId, threadId, axis, value, sessionId)
+      } else {
+        controls.preselectDraftConfig(conn.workspaceId, threadId, axis, value)
+      }
+    }
+
+    function recordBoundThread(
+      threadId: string,
+      sessionId: string,
+      boundControls: ThreadAgentControls | null,
+      reassert = true,
+    ): void {
+      wtDispatch({ type: 'bind', workspaceId: conn.workspaceId, threadId, sessionId, controls: boundControls })
+      if (!boundControls) return
+      if (reassert) {
+        controls.reassertAfterResume(conn.workspaceId, conn.agentId, threadId, sessionId, boundControls)
+      }
+      setWorkspaceControls(
+        window.localStorage,
+        workspaceControlsKey(conn.workspaceId, conn.workspaceDir),
+        boundControls,
+      )
+    }
+
+    function openSideThread(selection: MessageSelection): void {
+      const threadId = crypto.randomUUID()
+      const snapshot = snapshotSideDraftControls(
+        resolveActiveControls(
+          workspaceThreads,
+          conn,
+          selection.source.threadId,
+          window.localStorage,
+        ),
+      )
+      const axes: ThreadConfigAxis[] = ['mode', 'model', 'reasoningEffort']
+      for (const axis of axes) {
+        const value = snapshot[axis]
+        if (value) controls.preselectDraftConfig(conn.workspaceId, threadId, axis, value)
+      }
+      stageMessageSelectionContext(threadId, selection)
+      openWorkspaceSideThreadSurface(conn.workspaceId, threadId)
+    }
+
+    function renderSideThread(threadId: string, lifecycle: SideThreadLifecycle): ReactNode {
+      const sideThreadMeta = cold.find((thread) => thread.id === threadId)
+      const sideThreadTitle = sideThreadMeta?.title ?? 'Side Thread'
+      const sideControls = resolveActiveControls(
+        workspaceThreads,
+        conn,
+        threadId,
+        window.localStorage,
+      )
+      const controlIntent = selectedFor(workspaceThreads, conn.workspaceId, threadId)
+      return (
+        <Conversation
+          key={threadId}
+          thread={{
+            agentId: conn.agentId,
+            threadId,
+            workspaceId: conn.workspaceId,
+            workspaceDir: conn.workspaceDir,
+            sessionId: sideThreadMeta
+              ? seedSessionId(sideThreadMeta, wts?.bound ?? {})
+              : (wts?.bound[threadId] ?? null),
+            title: sideThreadTitle,
+          }}
+          modes={sideControls.modes}
+          models={sideControls.models}
+          reasoningEffort={sideControls.reasoningEffort}
+          onSetConfig={(axis, value, sessionId) => setThreadConfig(threadId, axis, value, sessionId)}
+          onAuthExpired={(authMethods) =>
+            toSignInPanel(conn.workspaceId, conn.agentId, conn.workspaceDir, authMethods)
+          }
+          onBound={(sessionId, boundControls) => {
+            // Main already validated/applied this Side Thread's pending intent before
+            // emitting thread:bound, so do not race it with renderer-side reassertion.
+            recordBoundThread(threadId, sessionId, boundControls, false)
+            promoteWorkspaceSideThreadSurface(conn.workspaceId, threadId)
+            promoteComposerDraftToPersistent(threadId)
+          }}
+          onAskInSideThread={openSideThread}
+          controlIntent={controlIntent}
+          autoFocusComposer
+          skipInitialHydration={lifecycle === 'draft'}
+        />
+      )
+    }
+
     return (
       // Key by agentId so per-Workspace state can't bleed across connections.
       // A controlled outlet now (TB3 #48): the sidebar drives selection; this just
@@ -583,31 +735,18 @@ export function App(): JSX.Element {
         busy={busy}
         seedSessionId={seed}
         controls={resolveActiveControls(workspaceThreads, conn, activeThread.id, window.localStorage)}
-        onSetConfig={(axis, value, sessionId) => {
-          // A real session => the bound IPC path (#70); a null session => a draft
-          // pre-pick that only caches (#75), applied to the session on first bind.
-          if (sessionId) {
-            controls.changeThreadConfig(conn.workspaceId, conn.agentId, activeThread.id, axis, value, sessionId)
-          } else {
-            controls.preselectDraftConfig(conn.workspaceId, activeThread.id, axis, value)
-          }
-        }}
-        onBound={(sessionId, boundControls) => {
-          // Seed the displayed config from the bound session's reported values, then
-          // re-assert the user's cached selection over them (#72) — a resume reports
-          // defaults, so this restores a prior non-default Mode/Model/effort.
-          wtDispatch({ type: 'bind', workspaceId: conn.workspaceId, threadId: activeThread.id, sessionId, controls: boundControls })
-          if (boundControls) {
-            controls.reassertAfterResume(conn.workspaceId, conn.agentId, activeThread.id, sessionId, boundControls)
-            // Cache the bound session's option lists per Workspace (#153) so the NEXT
-            // never-bound draft here shows the picker before its own first prompt binds.
-            setWorkspaceControls(
-              window.localStorage,
-              workspaceControlsKey(conn.workspaceId, conn.workspaceDir),
-              boundControls,
-            )
-          }
-        }}
+        onSetConfig={(axis, value, sessionId) =>
+          setThreadConfig(activeThread.id, axis, value, sessionId)
+        }
+        onBound={(sessionId, boundControls) =>
+          recordBoundThread(activeThread.id, sessionId, boundControls)
+        }
+        onAskInSideThread={openSideThread}
+        renderSideThread={renderSideThread}
+        getSideThreadTitle={(threadId) =>
+          cold.find((thread) => thread.id === threadId)?.title ?? null
+        }
+        threadStatuses={statuses}
         onContinue={() => {
           wtDispatch({ type: 'open', workspaceId: conn.workspaceId, threadId: activeThread.id })
           navDispatch({ type: 'select-thread', workspaceId: conn.workspaceId, threadId: activeThread.id })

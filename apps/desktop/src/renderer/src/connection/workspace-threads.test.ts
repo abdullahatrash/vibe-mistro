@@ -144,6 +144,30 @@ describe('workspaceThreadsReducer', () => {
     expect(s.w1.bound).toEqual({ draft: 'sD' })
   })
 
+  it('bind hosts a Side Thread live without changing the primary active Thread or sibling config', () => {
+    let s = workspaceThreadsReducer(initialWorkspaceThreads, {
+      type: 'connect',
+      workspaceId: 'w1',
+      threadId: 'primary',
+      sessionId: 's-primary',
+      controls: controls('default'),
+    })
+
+    s = workspaceThreadsReducer(s, {
+      type: 'bind',
+      workspaceId: 'w1',
+      threadId: 'side-thread',
+      sessionId: 's-side',
+      controls: controls('plan', 'devstral-small'),
+    })
+
+    expect([...s.w1.live]).toEqual(['primary', 'side-thread'])
+    expect(s.w1.active).toBe('primary')
+    expect(s.w1.bound).toEqual({ primary: 's-primary', 'side-thread': 's-side' })
+    expect(s.w1.config['side-thread']?.modes?.currentModeId).toBe('plan')
+    expect(s.w1.config.primary?.modes?.currentModeId).toBe('default')
+  })
+
   it('bind with an unchanged session AND null controls returns the same state reference', () => {
     const s = workspaceThreadsReducer(initialWorkspaceThreads, {
       type: 'connect',
@@ -531,6 +555,15 @@ describe('selection cache + re-assert (#72)', () => {
       const bound: ThreadAgentControls = { modes: null, models: null, reasoningEffort: null }
       expect(reassertions({ mode: 'plan' }, bound)).toEqual([])
     })
+
+    it('a cached id removed from a still-advertised axis is NOT re-asserted', () => {
+      expect(
+        reassertions(
+          { mode: 'removed-mode', model: 'removed-model', reasoningEffort: 'removed-effort' },
+          controls('default', 'mistral-medium-3.5', 'high'),
+        ),
+      ).toEqual([])
+    })
   })
 
   it('boundConfigValue reads a controls payload per axis (null when unadvertised)', () => {
@@ -583,5 +616,16 @@ describe('draftControls (#75)', () => {
     expect(out.modes).toBeNull()
     expect(out.models).toBeNull()
     expect(out.reasoningEffort).toBeNull()
+  })
+
+  it('falls back to current values rather than displaying cached ids missing from advertised options', () => {
+    const out = draftControls(controls('default', 'mistral-medium-3.5', 'high'), {
+      mode: 'removed-mode',
+      model: 'removed-model',
+      reasoningEffort: 'removed-effort',
+    })
+    expect(out.modes?.currentModeId).toBe('default')
+    expect(out.models?.currentModelId).toBe('mistral-medium-3.5')
+    expect(out.reasoningEffort?.current).toBe('high')
   })
 })

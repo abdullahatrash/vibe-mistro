@@ -64,6 +64,11 @@ it sits beside the conversation; on a narrow window it presents as a **Sheet** â
 right edge, over the conversation, dismissed by Esc or clicking outside.
 _Avoid_: drawer, sidebar (that's the left navigation), overlay (the Sheet is one presentation of it).
 
+**Side Thread Surface**:
+A Surface hosting a separate Thread beside the Workspace's primary visible Thread. It keeps its own
+conversation context while selected text from another Thread can be staged as a Context attachment.
+_Avoid_: side chat, side task, split chat.
+
 **Files browser**:
 The Files Surface's content â€” a searchable tree of the Workspace's files. Opening a file from it opens
 that file's own Surface: a read-only preview topped by a read-only breadcrumb of its path. Browsing
@@ -113,6 +118,12 @@ _Avoid_: inline chip, tag, pill.
 Structured context staged with a prompt but applying to the whole prompt rather than a specific
 cursor position, such as an element pick, review comment, pasted text, or image.
 _Avoid_: inline token, attachment (unqualified), prompt text.
+
+**Message selection**:
+A non-empty excerpt selected within one user or agent message, including its prose or code blocks,
+and staged as a Context attachment. It never spans messages or includes reasoning, tool output,
+Permission requests, status rows, Terminal output, or diffs.
+_Avoid_: text selection (too broad), quote, highlighted text.
 
 **Terminal context**:
 A terminal selection referenced from the prompt by an Inline token, with the selected output carried

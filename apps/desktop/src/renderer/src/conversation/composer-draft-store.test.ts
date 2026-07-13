@@ -5,15 +5,22 @@ import {
   COMPOSER_DRAFT_STORAGE_KEY,
   LEGACY_COMPOSER_DRAFT_STORAGE_KEY,
   clearDraft,
+  clearComposerDraft,
+  _resetComposerDraftStore,
   createComposerDraftStore,
   getComposerDraft,
   getDraft,
   setComposerDraft,
   setDraft,
+  promoteComposerDraftToPersistent,
+  stageMessageSelectionContext,
   type DraftStorage,
 } from './composer-draft-store'
 
-afterEach(() => vi.useRealTimers())
+afterEach(() => {
+  _resetComposerDraftStore(null)
+  vi.useRealTimers()
+})
 
 /**
  * Per-Thread composer drafts (#60): unsent composer text persisted to localStorage
@@ -379,6 +386,183 @@ describe('composer draft external store', () => {
 
     expect(store.getSnapshot('t1').images).toEqual([oversized])
     expect(store.getSnapshot('t1').nonPersistedImageIds).toEqual(['img:big'])
+    expect(storage.map.has(COMPOSER_DRAFT_STORAGE_KEY)).toBe(false)
+  })
+})
+
+describe('stageMessageSelectionContext', () => {
+  it('stages a Message selection before the Composer mounts without persisting it', () => {
+    const storage = fakeStorage()
+    const store = _resetComposerDraftStore(storage)
+    const listener = vi.fn()
+    store.subscribe(listener)
+
+    stageMessageSelectionContext('side-thread', {
+      text: '  keep this verbatim\n  ',
+      source: {
+        messageId: 'message-7',
+        role: 'user',
+        threadId: 'source-thread',
+        threadTitle: 'Original Thread',
+      },
+    })
+
+    expect(store.getSnapshot('side-thread').contextAttachments).toEqual([
+      {
+        kind: 'message-selection',
+        id: 'message-selection:0',
+        text: '  keep this verbatim\n  ',
+        source: {
+          messageId: 'message-7',
+          role: 'user',
+          threadId: 'source-thread',
+          threadTitle: 'Original Thread',
+        },
+      },
+    ])
+    expect(listener).toHaveBeenCalledTimes(1)
+    store.flush()
+    expect(storage.map.has(COMPOSER_DRAFT_STORAGE_KEY)).toBe(false)
+  })
+
+  it('loses a session-only Side Draft when the renderer store restarts', () => {
+    const storage = fakeStorage()
+    const store = _resetComposerDraftStore(storage)
+    stageMessageSelectionContext('side-thread', {
+      text: 'temporary selection',
+      source: {
+        messageId: 'message-7',
+        role: 'user',
+        threadId: 'source-thread',
+        threadTitle: 'Original Thread',
+      },
+    })
+    store.setText('side-thread', 'unsent follow-up')
+    store.flush()
+
+    const restarted = _resetComposerDraftStore(storage)
+
+    expect(restarted.getSnapshot('side-thread')).toMatchObject({
+      prompt: '',
+      contextAttachments: [],
+    })
+  })
+
+  it('continues persisting ordinary composer drafts', () => {
+    const storage = fakeStorage()
+    const store = _resetComposerDraftStore(storage)
+
+    store.setText('ordinary-thread', 'keep across restart')
+    store.flush()
+
+    expect(getDraft(storage, 'ordinary-thread')).toBe('keep across restart')
+  })
+
+  it('keeps a failed-send restoration session-only after the Composer clears for send', () => {
+    const storage = fakeStorage()
+    const store = _resetComposerDraftStore(storage)
+    stageMessageSelectionContext('side-thread', {
+      text: 'temporary selection',
+      source: {
+        messageId: 'message-7',
+        role: 'agent',
+        threadId: 'source-thread',
+        threadTitle: 'Original Thread',
+      },
+    })
+    const sendSnapshot = store.getSnapshot('side-thread')
+
+    store.clear('side-thread')
+    store.setDraft('side-thread', sendSnapshot)
+    store.flush()
+
+    expect(store.getSnapshot('side-thread').contextAttachments).toHaveLength(1)
+    expect(storage.map.has(COMPOSER_DRAFT_STORAGE_KEY)).toBe(false)
+  })
+
+  it('discarding a Side Draft removes it and unmarks the Thread for future ordinary drafts', () => {
+    const storage = fakeStorage()
+    const store = _resetComposerDraftStore(storage)
+    stageMessageSelectionContext('side-thread', {
+      text: 'temporary selection',
+      source: {
+        messageId: 'message-7',
+        role: 'user',
+        threadId: 'source-thread',
+        threadTitle: 'Original Thread',
+      },
+    })
+
+    clearComposerDraft('side-thread')
+    store.setText('side-thread', 'a later ordinary draft')
+    store.flush()
+
+    expect(store.getSnapshot('side-thread').contextAttachments).toEqual([])
+    expect(getDraft(storage, 'side-thread')).toBe('a later ordinary draft')
+  })
+
+  it('promotion allows drafts written after binding to persist', () => {
+    const storage = fakeStorage()
+    const store = _resetComposerDraftStore(storage)
+    stageMessageSelectionContext('side-thread', {
+      text: 'temporary selection',
+      source: {
+        messageId: 'message-7',
+        role: 'agent',
+        threadId: 'source-thread',
+        threadTitle: 'Original Thread',
+      },
+    })
+    store.clear('side-thread')
+
+    promoteComposerDraftToPersistent('side-thread')
+    store.setText('side-thread', 'durable after bind')
+    store.flush()
+
+    expect(getDraft(storage, 'side-thread')).toBe('durable after bind')
+  })
+
+  it('preserves an existing draft while adding another independently keyed selection', () => {
+    const store = _resetComposerDraftStore(null)
+    store.setText('side-thread', 'What does this mean?')
+    const source = {
+      messageId: 'message-7',
+      role: 'agent' as const,
+      threadId: 'source-thread',
+      threadTitle: 'Original Thread',
+    }
+
+    stageMessageSelectionContext('side-thread', { text: 'first', source })
+    stageMessageSelectionContext('side-thread', { text: 'second', source })
+
+    expect(store.getSnapshot('side-thread')).toMatchObject({
+      prompt: 'What does this mean?',
+      contextAttachments: [
+        { kind: 'message-selection', id: 'message-selection:0', text: 'first' },
+        { kind: 'message-selection', id: 'message-selection:1', text: 'second' },
+      ],
+    })
+  })
+
+  it('cannot resurrect a cleared session-only Side Draft from a pending debounce', () => {
+    vi.useFakeTimers()
+    const storage = fakeStorage()
+    const store = _resetComposerDraftStore(storage, 300)
+    stageMessageSelectionContext('side-thread', {
+      text: 'temporary selection',
+      source: {
+        messageId: 'message-7',
+        role: 'agent',
+        threadId: 'source-thread',
+        threadTitle: 'Original Thread',
+      },
+    })
+
+    clearComposerDraft('side-thread')
+    vi.advanceTimersByTime(300)
+    store.flush()
+
+    expect(store.getSnapshot('side-thread').contextAttachments).toEqual([])
     expect(storage.map.has(COMPOSER_DRAFT_STORAGE_KEY)).toBe(false)
   })
 })

@@ -11,6 +11,7 @@ import {
 import type {
   AuthMethod,
   ThreadAgentControls,
+  ThreadControlIntent,
   ThreadConfigAxis,
   ThreadModels,
   ThreadModes,
@@ -51,12 +52,25 @@ import {
   subscribeWorkspaceCommands,
 } from './workspace-commands'
 import { buildComposerHistoryEntries } from './composer-history'
+import { MessageSelectionToolbar } from './message-selection-toolbar'
+import type { MessageSelection } from './message-selection'
 
 /** Process-local counter for unique echoed-prompt ids. */
 let promptSeq = 0
 
 /** Vibe's app code for "this model can't ingest images" (acp-capture §11, #100). */
 const IMAGES_UNSUPPORTED_CODE = -31008
+
+const CONTROL_AXIS_LABELS: Record<ThreadConfigAxis, string> = {
+  mode: 'Mode',
+  model: 'Model',
+  reasoningEffort: 'Reasoning effort',
+}
+
+function controlFailureNotice(axes: ThreadConfigAxis[]): string {
+  const labels = axes.map((axis) => CONTROL_AXIS_LABELS[axis]).join(', ')
+  return `${labels} could not be applied. This turn continued with the agent's reported settings.`
+}
 
 /**
  * The live handle for one Thread hosted on a Workspace agent (TB5). `sessionId`
@@ -99,6 +113,10 @@ export function Conversation({
   onSetConfig,
   onAuthExpired,
   onBound,
+  onAskInSideThread,
+  autoFocusComposer = false,
+  controlIntent,
+  skipInitialHydration = false,
 }: {
   thread: LiveThread
   /** The connection's current Mode + options (#66) — display-from-session-state. */
@@ -119,6 +137,14 @@ export function Conversation({
    *  null on the `sendPrompt`-result path (the result carries no controls — the
    *  `thread:bound` that fired ahead of the stream already delivered them). */
   onBound?: (sessionId: string, controls: ThreadAgentControls | null) => void
+  /** A verbatim selection from one eligible user/agent Message in this Thread. */
+  onAskInSideThread?: (selection: MessageSelection) => void
+  /** Focus the composer once when this presentation mounts (Side Threads only). */
+  autoFocusComposer?: boolean
+  /** Pending Side Draft choices for main to validate/apply before first prompt. */
+  controlIntent?: ThreadControlIntent
+  /** A fresh renderer-only Side Draft must not read or write durable history. */
+  skipInitialHydration?: boolean
 }): JSX.Element {
   const [state, dispatch] = useReducer(conversationReducer, initialConversationState)
   // The session this Thread is bound to — null until a draft's first prompt binds
@@ -138,6 +164,11 @@ export function Conversation({
   // only cache a HYDRATED view, else an instant switch-away before the read
   // resolved would cache an empty state and replay a non-empty Thread as empty.
   const hydratedRef = useRef(false)
+  // A Side Draft is intentionally outside persistence until its first prompt. Keep
+  // the mount-time decision stable when promotion changes its Surface lifecycle:
+  // this mounted Conversation already owns the live reducer state and must not
+  // hydrate over it after binding.
+  const skipInitialHydrationRef = useRef(skipInitialHydration)
   // Mirror of the reducer state for the unmount snapshot (an unmount cleanup
   // closes over the FIRST render's `state` otherwise). Fresh per key-remount.
   const stateRef = useRef(state)
@@ -157,6 +188,7 @@ export function Conversation({
   // `liveSeen` guard keeps a late hydrate from clobbering resumed live events, but
   // the brief early-history gap on such a reopen is accepted for this slice.
   useEffect(() => {
+    if (skipInitialHydrationRef.current) return
     // Cache first (take = consume — the mounted view owns the state from here):
     // a switch-back within the LRU window hydrates instantly, no IPC, no re-fold.
     const cached = replayCache.take(thread.threadId)
@@ -269,6 +301,9 @@ export function Conversation({
       // NOW — main emits `thread:bound` before the prompt streams, so it lands
       // after the user's prompt and before the agent's response (matching replay).
       if (e.rebound) dispatch({ type: 'agent-rebound' })
+      if (e.controlFailures && e.controlFailures.length > 0) {
+        dispatch({ type: 'system-notice', message: controlFailureNotice(e.controlFailures) })
+      }
     })
   }, [thread.threadId])
 
@@ -318,6 +353,7 @@ export function Conversation({
         sessionId: boundRef.current,
         text,
         images: images.map(({ data, mimeType }) => ({ data, mimeType })),
+        controlIntent,
       })
       if (result.ok) {
         ok = true
@@ -545,7 +581,12 @@ export function Conversation({
           <TimelineHandlersProvider value={timelineHandlers}>
             <TimelineActivityProvider value={timelineActivity}>
               {state.items.map((item, idx) => (
-                <Item key={item.id} item={item} index={idx} />
+                <Item
+                  key={item.id}
+                  item={item}
+                  index={idx}
+                  selectable={onAskInSideThread !== undefined}
+                />
               ))}
             </TimelineActivityProvider>
           </TimelineHandlersProvider>
@@ -554,6 +595,14 @@ export function Conversation({
               and unmounts on completion, so its timer starts at turn start. */}
           {state.isProcessing && <WorkingRow />}
         </MessageScroller>
+
+        {onAskInSideThread && (
+          <MessageSelectionToolbar
+            conversationRef={convRef}
+            thread={{ id: thread.threadId, title }}
+            onAskInSideThread={onAskInSideThread}
+          />
+        )}
 
         {state.isProcessing && (
           // Escape hatch: if a turn wedges (e.g. a permission prompt is dismissed
@@ -578,6 +627,7 @@ export function Conversation({
           models={models}
           reasoningEffort={reasoningEffort}
           onSetConfig={onSetConfig}
+          autoFocusComposer={autoFocusComposer}
         />
       </div>
     </FileOpenProvider>

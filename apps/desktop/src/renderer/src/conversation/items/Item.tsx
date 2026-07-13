@@ -18,26 +18,29 @@ import { ErrorRow, FallbackRow, NoticeRow } from './status-rows'
 export const Item = memo(function Item({
   item,
   index,
+  selectable = false,
 }: {
   item: ConversationItem
   /** The row's position — the live-turn `streaming` flag derives from it. */
   index: number
+  /** Whether eligible Message content should expose a browser-selection boundary. */
+  selectable?: boolean
 }): JSX.Element {
   return (
     <div data-item-id={item.id} className="rounded-lg">
-      {renderRow(item, index)}
+      {renderRow(item, index, selectable)}
     </div>
   )
 })
 
-function renderRow(item: ConversationItem, index: number): JSX.Element {
+function renderRow(item: ConversationItem, index: number, selectable: boolean): JSX.Element {
   switch (item.kind) {
     case 'user':
-      return <UserRow item={item} />
+      return <UserRow item={item} selectable={selectable} />
     case 'reasoning':
       return <ReasoningRow item={item} index={index} />
     case 'assistant':
-      return <AssistantRow item={item} index={index} />
+      return <AssistantRow item={item} index={index} selectable={selectable} />
     case 'tool':
       return <ToolRow item={item} index={index} />
     case 'permission':

@@ -38,10 +38,14 @@ import {
   addContext,
   contextKey,
   isLongPaste,
-  pastedLabel,
   removeContext,
   type PendingContext,
 } from './pending-contexts'
+import {
+  pendingContextChipLabel,
+  pendingContextChipRemoveLabel,
+  pendingContextChipTitle,
+} from './pending-context-chip'
 import { nextQueueId, type FollowUpQueue } from './follow-up-queue'
 import { useComposerAutocomplete, CompletionPopover } from './use-composer-autocomplete'
 import { createCommandSource, createPathSource } from './composer-sources'
@@ -75,58 +79,6 @@ let reviewSeq = 0
 let pasteSeq = 0
 let terminalSeq = 0
 
-/** A review chip's compact line-range suffix, e.g. `:10-12` / `:7` — empty when unlocated. */
-function reviewRange(context: { startLine: number | null; endLine: number | null }): string {
-  if (context.startLine === null || context.endLine === null) return ''
-  return context.startLine === context.endLine
-    ? `:${context.startLine}`
-    : `:${context.startLine}-${context.endLine}`
-}
-
-/** A pending-context chip's visible label, per kind. */
-function chipLabel(context: PendingContext): string {
-  switch (context.kind) {
-    case 'skill':
-      return `/${context.name}`
-    case 'file':
-      return context.path
-    case 'element':
-      return context.selector ?? `<${context.tagName}>`
-    case 'review':
-      return `${context.filePath}${reviewRange(context)}`
-    case 'pasted':
-      return pastedLabel(context)
-  }
-}
-
-/** A pasted chip's hover preview — the head of the text, capped so the tooltip stays sane. */
-const PASTE_TITLE_PREVIEW_CHARS = 400
-
-/** A pending-context chip's hover detail (`title`), per kind. */
-function chipTitle(context: PendingContext): string | undefined {
-  switch (context.kind) {
-    case 'skill':
-      return context.description
-    case 'file':
-      return context.path
-    case 'element':
-      return [
-        `<${context.tagName}>`,
-        context.selector ?? '',
-        context.text.trim(),
-        context.pageUrl,
-      ]
-        .filter((line) => line.length > 0)
-        .join('\n')
-    case 'review':
-      return [`${context.filePath}${reviewRange(context)}`, context.note, '', context.excerpt].join('\n')
-    case 'pasted':
-      return context.text.length > PASTE_TITLE_PREVIEW_CHARS
-        ? `${context.text.slice(0, PASTE_TITLE_PREVIEW_CHARS)}…`
-        : context.text
-  }
-}
-
 /** The picker's `accept` list — the accepted image mime types, comma-joined. */
 const IMAGE_ACCEPT = ACCEPTED_IMAGE_TYPES.join(',')
 
@@ -153,6 +105,7 @@ export function Composer({
   models,
   reasoningEffort,
   onSetConfig,
+  autoFocusComposer = false,
 }: {
   threadId: string
   agentId: string
@@ -178,6 +131,8 @@ export function Composer({
   models: ThreadModels | null
   reasoningEffort: ThreadReasoningEffort | null
   onSetConfig?: (axis: ThreadConfigAxis, value: string, sessionId: string | null) => void
+  /** Focus the Lexical editor once after this Composer mounts. */
+  autoFocusComposer?: boolean
 }): JSX.Element {
   // The composer's unsent text, persisted per-Thread to localStorage (#60) so it
   // survives any unmount (cold↔live, agent eviction/re-warm, app restart, switching
@@ -208,6 +163,13 @@ export function Composer({
     images: pendingImages,
   }
   const inputRef = useRef<ComposerEditorHandle>(null)
+  const didAutoFocusRef = useRef(false)
+  useEffect(() => {
+    const editor = inputRef.current
+    if (!autoFocusComposer || didAutoFocusRef.current || !editor) return
+    didAutoFocusRef.current = true
+    editor.focus()
+  }, [autoFocusComposer])
   // Shell-style sent-prompt recall is per mounted Thread. The transcript owns the entries;
   // only the cursor + current unsent scratch are transient refs, so arrow navigation does not
   // add render work to the hot editor path.
@@ -651,24 +613,24 @@ export function Composer({
                 <span
                   key={contextKey(context)}
                   data-pending-context-chip
-                  title={chipTitle(context)}
+                  title={pendingContextChipTitle(context)}
                   className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] py-0.5 pr-1 pl-1.5 font-mono text-xs leading-none text-accent-text"
                 >
                   {context.kind === 'skill' ? (
                     <Sparkles className="size-3 shrink-0" aria-hidden />
                   ) : context.kind === 'file' ? (
                     <File className="size-3 shrink-0" aria-hidden />
-                  ) : context.kind === 'review' ? (
+                  ) : context.kind === 'review' || context.kind === 'message-selection' ? (
                     <MessageSquareText className="size-3 shrink-0" aria-hidden />
                   ) : context.kind === 'pasted' ? (
                     <Clipboard className="size-3 shrink-0" aria-hidden />
                   ) : (
                     <MousePointerClick className="size-3 shrink-0" aria-hidden />
                   )}
-                  <span className="truncate">{chipLabel(context)}</span>
+                  <span className="truncate">{pendingContextChipLabel(context)}</span>
                   <button
                     type="button"
-                    aria-label={`Remove ${chipLabel(context)}`}
+                    aria-label={pendingContextChipRemoveLabel(context)}
                     onClick={() => {
                       setPendingContexts((prev) => removeContext(prev, contextKey(context)))
                       if (context.kind === 'element' && context.imageId) {

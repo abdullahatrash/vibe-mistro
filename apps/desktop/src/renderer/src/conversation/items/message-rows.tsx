@@ -5,10 +5,11 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../../
 import { Response } from '../Response'
 import { matchInvokedCommand } from '../command-autocomplete'
 import { buildPromptCopyText, extractPromptContexts, pastedLabel } from '../pending-contexts'
+import { pendingContextChipLabel, pendingContextChipTitle } from '../pending-context-chip'
 import { useRowStreaming, useTimelineHandlers } from '../timeline-context'
 import type { AssistantItem, UserItem } from '../reducer'
 
-export function UserRow({ item }: { item: UserItem }): JSX.Element {
+export function UserRow({ item, selectable }: { item: UserItem; selectable: boolean }): JSX.Element {
   // The session's slash commands/skills (context, #386) — a leading `/name` match
   // renders a chip.
   const { availableCommands } = useTimelineHandlers()
@@ -17,7 +18,7 @@ export function UserRow({ item }: { item: UserItem }): JSX.Element {
   // RENDER time so the bubble shows the clean prose — live and on JSONL replay, which
   // ride the same text. User-typed inline `@path` mentions pass through untouched.
   const extractedContexts = extractPromptContexts(item.text)
-  const { cleanText, files, elements, reviews, pasted } = extractedContexts
+  const { cleanText, files, elements, reviews, pasted, selections } = extractedContexts
   const copyText = buildPromptCopyText(extractedContexts)
   // Skill/command chip: vibe-acp invokes a skill when the prompt opens with a
   // known `/name`, but gives NO wire-level acknowledgment — so we surface the
@@ -29,7 +30,12 @@ export function UserRow({ item }: { item: UserItem }): JSX.Element {
   // instead of spanning the pane. Echoed attachments (#100) re-home into the bubble.
   return (
     <div className="group flex flex-col items-end gap-1.5">
-      {(command || files.length > 0 || elements.length > 0 || reviews.length > 0 || pasted.length > 0) && (
+      {(command ||
+        files.length > 0 ||
+        elements.length > 0 ||
+        reviews.length > 0 ||
+        pasted.length > 0 ||
+        selections.length > 0) && (
         <div className="flex max-w-[80%] flex-wrap justify-end gap-1.5">
           {command && (
             <span
@@ -97,11 +103,29 @@ export function UserRow({ item }: { item: UserItem }): JSX.Element {
               <span className="truncate">{pastedLabel(paste)}</span>
             </span>
           ))}
+          {selections.map((selection) => (
+            // The sent-turn/replay mirror of the staged Message selection: compact
+            // count in the row, exact excerpt + source Thread/role on inspection.
+            <span
+              key={selection.id}
+              data-message-selection-chip
+              title={pendingContextChipTitle(selection)}
+              className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] px-1.5 py-0.5 font-mono text-xs leading-none text-accent-text"
+            >
+              <MessageSquareText className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">{pendingContextChipLabel(selection)}</span>
+            </span>
+          ))}
         </div>
       )}
       {/* Chip-only prompts (e.g. a bare long paste) skip the bubble — an empty pill reads broken. */}
       {(cleanText.length > 0 || (item.images && item.images.length > 0)) && (
-        <div className="max-w-[80%] rounded-2xl border border-border bg-surface px-3.5 py-2.5 text-[15px] leading-relaxed break-words whitespace-pre-wrap text-text-body">
+        <div
+          data-message-selection-content={selectable ? '' : undefined}
+          data-message-id={selectable ? item.id : undefined}
+          data-message-role={selectable ? 'user' : undefined}
+          className="max-w-[80%] rounded-2xl border border-border bg-surface px-3.5 py-2.5 text-[15px] leading-relaxed break-words whitespace-pre-wrap text-text-body"
+        >
           {item.images && item.images.length > 0 && (
             <div className="mb-2 flex flex-wrap justify-end gap-2">
               {item.images.map((img, i) => (
@@ -126,7 +150,15 @@ export function UserRow({ item }: { item: UserItem }): JSX.Element {
   )
 }
 
-export function AssistantRow({ item, index }: { item: AssistantItem; index: number }): JSX.Element {
+export function AssistantRow({
+  item,
+  index,
+  selectable,
+}: {
+  item: AssistantItem
+  index: number
+  selectable: boolean
+}): JSX.Element {
   // True while this row belongs to the streaming turn (activity context, #386).
   const streaming = useRowStreaming(index)
   // Assistant turn (#114): no bubble — full-width flowing markdown via the Response
@@ -134,7 +166,14 @@ export function AssistantRow({ item, index }: { item: AssistantItem; index: numb
   // `group` so the #116 actions bar reveals on hover of the whole answer.
   return (
     <div className="group flex flex-col gap-1.5">
-      <Response className="text-text-body" text={item.text} />
+      <div
+        data-message-selection-content={selectable ? '' : undefined}
+        data-message-id={selectable ? item.id : undefined}
+        data-message-role={selectable ? 'agent' : undefined}
+        className="contents"
+      >
+        <Response className="text-text-body" text={item.text} />
+      </div>
       {/* Actions bar (#116): a hover-reveal row under the answer, holding the Copy
           control (clipboard + anchored toast). Hidden while the answer streams (a
           half-written reply isn't copyable) and for an empty item. `focus-within`
