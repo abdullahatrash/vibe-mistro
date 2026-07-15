@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { routeThreadSelection, seedSessionId } from './thread-selection'
+import { routeThreadSelection, seedSessionId, shouldDiscardDraftThread } from './thread-selection'
 import type { ThreadMeta } from '../../../shared/ipc'
 
 /**
@@ -46,5 +46,58 @@ describe('seedSessionId (no double-mint on remount)', () => {
   it('falls back to the persisted cursor when nothing was bound this session', () => {
     expect(seedSessionId(thread('t-open', 'sess-1'), {})).toBe('sess-1')
     expect(seedSessionId(thread('t-fresh', null), {})).toBeNull()
+  })
+})
+
+describe('shouldDiscardDraftThread', () => {
+  const emptyDraft = {
+    selectedThread: { workspaceId: 'w1', threadId: 'draft' },
+    targetThread: { workspaceId: 'w1', threadId: 'existing' },
+    primaryThreadId: 'primary',
+    liveThreadIds: new Set(['primary', 'draft']),
+    boundSessions: {},
+    durableThreadIds: new Set(['existing']),
+    composerIsEmpty: true,
+    threadIsStreaming: false,
+  }
+
+  it('discards an empty renderer-only Draft Thread when selecting another Thread', () => {
+    expect(shouldDiscardDraftThread(emptyDraft)).toBe(true)
+  })
+
+  it('preserves a Draft Thread with staged composer content', () => {
+    expect(shouldDiscardDraftThread({ ...emptyDraft, composerIsEmpty: false })).toBe(false)
+  })
+
+  it('preserves the primary, bound, durable, current, and non-live Threads', () => {
+    expect(shouldDiscardDraftThread({ ...emptyDraft, primaryThreadId: 'draft' })).toBe(false)
+    expect(shouldDiscardDraftThread({ ...emptyDraft, boundSessions: { draft: 'session-draft' } })).toBe(false)
+    expect(shouldDiscardDraftThread({ ...emptyDraft, durableThreadIds: new Set(['draft']) })).toBe(false)
+    expect(
+      shouldDiscardDraftThread({
+        ...emptyDraft,
+        targetThread: { workspaceId: 'w1', threadId: 'draft' },
+      }),
+    ).toBe(false)
+    expect(shouldDiscardDraftThread({ ...emptyDraft, liveThreadIds: new Set(['primary']) })).toBe(false)
+    expect(shouldDiscardDraftThread({ ...emptyDraft, threadIsStreaming: true })).toBe(false)
+  })
+
+  it('discards the Draft Thread when selecting a Thread in another Workspace', () => {
+    expect(
+      shouldDiscardDraftThread({
+        ...emptyDraft,
+        targetThread: { workspaceId: 'w2', threadId: 'draft' },
+      }),
+    ).toBe(true)
+  })
+
+  it('discards the Draft Thread when leaving for a Workspace with no selected Thread yet', () => {
+    expect(
+      shouldDiscardDraftThread({
+        ...emptyDraft,
+        targetThread: { workspaceId: 'w2', threadId: null },
+      }),
+    ).toBe(true)
   })
 })

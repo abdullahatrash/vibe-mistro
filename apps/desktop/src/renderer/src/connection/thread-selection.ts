@@ -37,3 +37,52 @@ export function seedSessionId(
 ): string | null {
   return boundSessions[thread.id] ?? thread.sessionId
 }
+
+export interface ThreadIdentity {
+  workspaceId: string
+  threadId: string
+}
+
+export interface ThreadSelectionTarget {
+  workspaceId: string
+  threadId: string | null
+}
+
+export interface DraftThreadDiscardInput {
+  selectedThread: ThreadIdentity
+  targetThread: ThreadSelectionTarget
+  primaryThreadId: string | null
+  liveThreadIds: ReadonlySet<string>
+  boundSessions: Readonly<Record<string, string>>
+  durableThreadIds: ReadonlySet<string>
+  composerIsEmpty: boolean
+  threadIsStreaming: boolean
+}
+
+/**
+ * Whether selecting another Thread abandons the current Draft Thread. A Draft is
+ * safe to discard only while it is renderer-only (live, unbound, and absent from
+ * durable metadata), is not the connection's protected primary Thread, and has no
+ * staged composer content.
+ */
+export function shouldDiscardDraftThread({
+  selectedThread,
+  targetThread,
+  primaryThreadId,
+  liveThreadIds,
+  boundSessions,
+  durableThreadIds,
+  composerIsEmpty,
+  threadIsStreaming,
+}: DraftThreadDiscardInput): boolean {
+  const { threadId } = selectedThread
+  return (
+    (selectedThread.workspaceId !== targetThread.workspaceId || threadId !== targetThread.threadId) &&
+    threadId !== primaryThreadId &&
+    liveThreadIds.has(threadId) &&
+    boundSessions[threadId] === undefined &&
+    !durableThreadIds.has(threadId) &&
+    composerIsEmpty &&
+    !threadIsStreaming
+  )
+}

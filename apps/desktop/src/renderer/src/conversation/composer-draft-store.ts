@@ -528,6 +528,11 @@ export function clearComposerDraft(threadId: string): void {
   composerDraftStore.discard(threadId)
 }
 
+/** Whether a Thread has no sendable composer content, including staged structured content. */
+export function isComposerDraftEmpty(threadId: string): boolean {
+  return isEmptyDraft(composerDraftStore.getSnapshot(threadId))
+}
+
 /** Promote a bound Side Thread so its future composer drafts survive app restart. */
 export function promoteComposerDraftToPersistent(threadId: string): void {
   composerDraftStore.promoteToPersistent(threadId)

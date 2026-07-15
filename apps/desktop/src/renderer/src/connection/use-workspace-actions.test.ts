@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ThreadMeta } from '../../../shared/ipc'
 import {
+  _resetComposerDraftStore,
+  isComposerDraftEmpty,
+} from '../conversation/composer-draft-store'
+import { replayCache } from '../conversation/replay-cache'
+import { initialConversationState } from '../conversation/reducer'
+import {
   _resetSidePanelStore,
   getWorkspacePanel,
   openWorkspaceSideThreadSurface,
@@ -52,7 +58,40 @@ function openDurableSideThread(): void {
 describe('useWorkspaceActions Side Thread placement cleanup', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+    _resetComposerDraftStore(null)
+    replayCache.clear()
     _resetSidePanelStore(null)
+  })
+
+  it('discards a renderer-only Draft Thread from every renderer projection', () => {
+    const draftId = 'draft-thread'
+    const draftStore = _resetComposerDraftStore(null)
+    draftStore.setText(draftId, 'orphaned text')
+    replayCache.put(draftId, {
+      state: initialConversationState,
+      sessionId: null,
+      workspaceId: 'ws-a',
+    })
+    openWorkspaceSideThreadSurface('ws-a', draftId)
+    const d = deps()
+
+    useWorkspaceActions(d).discardDraftThread('ws-a', draftId)
+
+    expect(d.wtDispatch).toHaveBeenCalledWith({
+      type: 'remove',
+      workspaceId: 'ws-a',
+      threadId: draftId,
+    })
+    const updateStatuses = vi.mocked(d.setStatuses).mock.calls[0]?.[0]
+    expect(typeof updateStatuses).toBe('function')
+    if (typeof updateStatuses === 'function') {
+      expect(
+        updateStatuses({ [draftId]: { streaming: false, needsAttention: false } }),
+      ).toEqual({})
+    }
+    expect(isComposerDraftEmpty(draftId)).toBe(true)
+    expect(replayCache.take(draftId)).toBeNull()
+    expect(getWorkspacePanel('ws-a').surfaces).toEqual([])
   })
 
   it('closes a deleted Thread Surface after main confirms deletion', async () => {

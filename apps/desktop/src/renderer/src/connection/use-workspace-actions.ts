@@ -2,7 +2,7 @@ import type { Dispatch, SetStateAction } from 'react'
 import type { ListMetadataResult, ThreadMeta } from '../../../shared/ipc'
 import type { NavAction, NavState } from '../shell/nav-reducer'
 import { clearThreadStatus, type ThreadStatusMap } from '../conversation/thread-status'
-import { clearDraft } from '../conversation/composer-draft-store'
+import { clearComposerDraft, clearDraft } from '../conversation/composer-draft-store'
 import { replayCache } from '../conversation/replay-cache'
 import { closeWorkspaceSurface, removeWorkspacePanel } from '../side-panel/side-panel-store'
 import { agentIdOf, type ConnectionAction, type ConnectionMap } from './connections'
@@ -34,6 +34,7 @@ export interface WorkspaceActionsDeps {
 }
 
 export interface WorkspaceActions {
+  discardDraftThread(workspaceId: string, threadId: string): void
   deleteThread(thread: ThreadMeta): Promise<void>
   removeWorkspace(workspaceId: string): Promise<void>
   setThreadFlags(threadId: string, flags: { pinned?: boolean; archived?: boolean }): Promise<void>
@@ -42,6 +43,19 @@ export interface WorkspaceActions {
 
 export function useWorkspaceActions(deps: WorkspaceActionsDeps): WorkspaceActions {
   return {
+    /**
+     * Discard a renderer-only Draft Thread without calling main: it has no metadata,
+     * transcript, or ACP session to delete. Reconcile the same renderer projections
+     * as durable deletion so the abandoned id leaves zero session residue.
+     */
+    discardDraftThread(workspaceId, threadId) {
+      closeWorkspaceSurface(workspaceId, `thread:${threadId}`)
+      deps.wtDispatch({ type: 'remove', workspaceId, threadId })
+      deps.setStatuses((prev) => clearThreadStatus(prev, threadId))
+      clearComposerDraft(threadId)
+      replayCache.invalidate(threadId)
+    },
+
     /**
      * Delete a Thread from the unified list (TB6 + #48 safe-delete). Main removes its
      * metadata + JSONL and best-effort closes any live session. The sidebar only

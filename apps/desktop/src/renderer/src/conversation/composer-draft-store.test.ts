@@ -10,6 +10,7 @@ import {
   createComposerDraftStore,
   getComposerDraft,
   getDraft,
+  isComposerDraftEmpty,
   setComposerDraft,
   setDraft,
   promoteComposerDraftToPersistent,
@@ -310,6 +311,27 @@ describe('per-Thread isolation', () => {
 })
 
 describe('composer draft external store', () => {
+  it('treats structured composer content as non-empty even when its text field is blank', () => {
+    const store = _resetComposerDraftStore(null)
+    expect(isComposerDraftEmpty('draft')).toBe(true)
+
+    store.setDraft('draft', {
+      prompt: '',
+      inlineTokens: [],
+      contextAttachments: [
+        {
+          kind: 'pasted',
+          id: 'paste:1',
+          text: 'supporting context',
+        },
+      ],
+      images: [],
+      nonPersistedImageIds: [],
+    })
+
+    expect(isComposerDraftEmpty('draft')).toBe(false)
+  })
+
   it('notifies subscribers when a Thread draft changes and exposes per-Thread snapshots', () => {
     const storage = fakeStorage()
     const store = createComposerDraftStore(storage)

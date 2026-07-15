@@ -26,7 +26,14 @@ import {
   type WorkspaceThreadState,
 } from './connection/workspace-threads'
 import { ConnectedWorkspace } from './connection/ConnectedWorkspace'
-import { routeThreadSelection, seedSessionId, type ThreadView } from './connection/thread-selection'
+import {
+  routeThreadSelection,
+  seedSessionId,
+  shouldDiscardDraftThread,
+  type ThreadIdentity,
+  type ThreadSelectionTarget,
+  type ThreadView,
+} from './connection/thread-selection'
 import { planPrimaryThreadPromotion } from './connection/side-thread-promotion'
 import { reconcileRestoredSideThreadPlacement } from './connection/side-thread-restoration'
 import { useThreadControls } from './connection/use-thread-controls'
@@ -36,6 +43,7 @@ import { snapshotSideDraftControls } from './connection/side-thread-controls'
 import { setThreadStatus, type ThreadStatusMap } from './conversation/thread-status'
 import { Conversation } from './conversation/Conversation'
 import {
+  isComposerDraftEmpty,
   promoteComposerDraftToPersistent,
   stageMessageSelectionContext,
 } from './conversation/composer-draft-store'
@@ -52,7 +60,7 @@ import { Logo } from './shell/logo'
 import { firstRunState } from './shell/first-run'
 import { installBannerMessage } from './shell/install-banner'
 import { InstallBanner } from './shell/InstallBanner'
-import { findSelectedThread } from './shell/nav-reducer'
+import { findSelectedThread, type NavState } from './shell/nav-reducer'
 import { initialNavHistory, navHistoryReducer } from './shell/nav-history'
 import {
   getSidebarCollapsed,
@@ -186,6 +194,78 @@ export function App(): JSX.Element {
   }
 
   /**
+   * Identify the selected renderer-only Draft Thread that becomes abandoned by a
+   * navigation. Composer state is read only inside the user event, so App does not
+   * subscribe to every keystroke just to make this leave-time decision.
+   */
+  function findAbandonedSelectedDraft(
+    targetThread: ThreadSelectionTarget,
+  ): ThreadIdentity | null {
+    const workspaceId = nav.selectedWorkspaceId
+    const threadId = nav.selectedThreadId
+    if (!workspaceId || !threadId) return null
+    const wts = workspaceThreadStateFor(workspaceThreads, workspaceId)
+    if (!wts || wts.active !== threadId) return null
+    const conn = connections[workspaceId]
+    const primaryThreadId = conn?.status === 'connected' ? conn.thread.threadId : null
+    const durableThreadIds = new Set(threadsForWorkspace(recents, workspaceId).map((t) => t.id))
+    return shouldDiscardDraftThread({
+      selectedThread: { workspaceId, threadId },
+      targetThread,
+      primaryThreadId,
+      liveThreadIds: wts.live,
+      boundSessions: wts.bound,
+      durableThreadIds,
+      composerIsEmpty: isComposerDraftEmpty(threadId),
+      threadIsStreaming: statuses[threadId]?.streaming === true,
+    })
+      ? { workspaceId, threadId }
+      : null
+  }
+
+  /** Replace an abandoned Draft Thread in navigation and discard its renderer state. */
+  function replaceAbandonedDraft(
+    targetThread: ThreadSelectionTarget,
+    targetNav: NavState,
+  ): boolean {
+    const discarded = findAbandonedSelectedDraft(targetThread)
+    if (!discarded) return false
+    navDispatch({ type: 'replace-selection', target: targetNav, discarded })
+    actions.discardDraftThread(discarded.workspaceId, discarded.threadId)
+    return true
+  }
+
+  /** Navigate to a Thread, replacing an empty outgoing Draft instead of remembering it. */
+  function selectThreadInNavigation(targetThread: ThreadIdentity): void {
+    const targetNav: NavState = {
+      selectedWorkspaceId: targetThread.workspaceId,
+      selectedThreadId: targetThread.threadId,
+      view: 'conversation',
+    }
+    if (replaceAbandonedDraft(targetThread, targetNav)) return
+    navDispatch({
+      type: 'select-thread',
+      workspaceId: targetThread.workspaceId,
+      threadId: targetThread.threadId,
+    })
+  }
+
+  /** Navigate to a Workspace with no live Thread yet, discarding an empty outgoing Draft. */
+  function selectWorkspaceInNavigation(workspaceId: string): void {
+    if (nav.selectedWorkspaceId === workspaceId) {
+      navDispatch({ type: 'select-workspace', workspaceId })
+      return
+    }
+    const targetNav: NavState = {
+      selectedWorkspaceId: workspaceId,
+      selectedThreadId: null,
+      view: 'conversation',
+    }
+    if (replaceAbandonedDraft({ workspaceId, threadId: null }, targetNav)) return
+    navDispatch({ type: 'select-workspace', workspaceId })
+  }
+
+  /**
    * Select a Thread from the sidebar (TB3 #48): pin it in nav (the single source of
    * truth) and open it READY TO RESUME — no Continue step (#resume-on-first-prompt):
    *
@@ -213,7 +293,7 @@ export function App(): JSX.Element {
     if (promotion.panel !== currentPanel) {
       closeWorkspaceSurface(workspaceId, `thread:${threadId}`)
     }
-    navDispatch({ type: 'select-thread', workspaceId, threadId })
+    selectThreadInNavigation({ workspaceId, threadId })
     hostSelectedThread(workspaceId, threadId, promotion.view)
   }
 
@@ -260,10 +340,16 @@ export function App(): JSX.Element {
     const target =
       direction === 'history-back' ? navHistory.past.at(-1) : navHistory.future[0]
     if (!target) return
-    navDispatch({ type: direction })
     if (target.view === 'conversation' && target.selectedWorkspaceId && target.selectedThreadId) {
+      const targetThread = {
+        workspaceId: target.selectedWorkspaceId,
+        threadId: target.selectedThreadId,
+      }
+      if (!replaceAbandonedDraft(targetThread, target)) navDispatch({ type: direction })
       hostSelectedThread(target.selectedWorkspaceId, target.selectedThreadId)
+      return
     }
+    navDispatch({ type: direction })
   }
 
   // The Workspace/Thread lifecycle mutations (delete / remove-project / flags /
@@ -316,7 +402,7 @@ export function App(): JSX.Element {
       },
     })
     if (focus || selectionRef.current === workspaceId) {
-      navDispatch({ type: 'select-thread', workspaceId, threadId: state.thread.threadId })
+      selectThreadInNavigation({ workspaceId, threadId: state.thread.threadId })
     }
   }
 
@@ -333,7 +419,7 @@ export function App(): JSX.Element {
   function newThread(workspaceId: string): void {
     const threadId = crypto.randomUUID()
     wtDispatch({ type: 'open', workspaceId, threadId })
-    navDispatch({ type: 'select-thread', workspaceId, threadId })
+    selectThreadInNavigation({ workspaceId, threadId })
   }
 
   /**
@@ -451,8 +537,8 @@ export function App(): JSX.Element {
     // highlights it and the kept-mounted outlet shows it again; a never-connected
     // Workspace just pins the Workspace (its cold list drives the cold outlet).
     const wts = workspaceThreadStateFor(workspaceThreads, workspaceId)
-    if (wts) navDispatch({ type: 'select-thread', workspaceId, threadId: wts.active })
-    else navDispatch({ type: 'select-workspace', workspaceId })
+    if (wts) selectThreadInNavigation({ workspaceId, threadId: wts.active })
+    else selectWorkspaceInNavigation(workspaceId)
     // Ignore a select while this Workspace's connect is already in flight (a fast
     // double-click) — the ref read is synchronous, so both clicks see it.
     if (connectingRef.current.has(workspaceId)) return
@@ -496,7 +582,7 @@ export function App(): JSX.Element {
     // remount to show it.
     const warm = recents.find((w) => w.dir === workspaceDir)
     if (warm && connections[warm.id]?.status === 'connected') {
-      navDispatch({ type: 'select-workspace', workspaceId: warm.id })
+      selectWorkspace(warm.id)
       return
     }
     setOpening(true)
@@ -516,7 +602,7 @@ export function App(): JSX.Element {
         if (agentId) void window.api.stopAgent(agentId)
         return
       }
-      navDispatch({ type: 'select-workspace', workspaceId: ws.id })
+      selectWorkspaceInNavigation(ws.id)
       applyConnectResult(ws.id, result, true)
     } finally {
       setOpening(false)
@@ -540,7 +626,7 @@ export function App(): JSX.Element {
   async function continueColdThread(thread: ThreadMeta): Promise<void> {
     const workspace = recents.find((w) => w.id === thread.workspaceId)
     if (!workspace) return
-    navDispatch({ type: 'select-workspace', workspaceId: workspace.id })
+    selectWorkspaceInNavigation(workspace.id)
     connDispatch({ type: 'set', workspaceId: workspace.id, state: { status: 'connecting', workspaceDir: workspace.dir } })
     const result = await window.api.startThread({ workspaceDir: workspace.dir, continueThreadId: thread.id })
     // Main opened NO extra Thread — the continued Thread IS the connection Thread, so
@@ -749,7 +835,7 @@ export function App(): JSX.Element {
         threadStatuses={statuses}
         onContinue={() => {
           wtDispatch({ type: 'open', workspaceId: conn.workspaceId, threadId: activeThread.id })
-          navDispatch({ type: 'select-thread', workspaceId: conn.workspaceId, threadId: activeThread.id })
+          selectThreadInNavigation({ workspaceId: conn.workspaceId, threadId: activeThread.id })
         }}
         onCloseCold={() => selectThreadInWorkspace(conn.workspaceId, conn.threadId)}
         onAuthExpired={(authMethods) => toSignInPanel(conn.workspaceId, conn.agentId, conn.workspaceDir, authMethods)}

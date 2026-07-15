@@ -20,7 +20,15 @@ export interface NavHistoryState {
   future: NavState[]
 }
 
-export type NavHistoryAction = NavAction | { type: 'history-back' } | { type: 'history-forward' }
+export type NavHistoryAction =
+  | NavAction
+  | { type: 'history-back' }
+  | { type: 'history-forward' }
+  | {
+      type: 'replace-selection'
+      target: NavState
+      discarded: { workspaceId: string; threadId: string }
+    }
 
 export const initialNavHistory: NavHistoryState = {
   past: [],
@@ -36,6 +44,14 @@ export function navHistoryReducer(
   action: NavHistoryAction,
 ): NavHistoryState {
   switch (action.type) {
+    case 'replace-selection': {
+      const present = action.target
+      if (areNavStatesEqual(present, state.present)) return state
+      const filteredPast = state.past.filter((entry) => !selectsThread(entry, action.discarded))
+      const previous = filteredPast.at(-1)
+      const past = previous && areNavStatesEqual(previous, present) ? filteredPast.slice(0, -1) : filteredPast
+      return { past, present, future: [] }
+    }
     case 'history-back': {
       const previous = state.past.at(-1)
       if (previous === undefined) return state
@@ -64,4 +80,21 @@ export function navHistoryReducer(
       }
     }
   }
+}
+
+function selectsThread(
+  state: NavState,
+  thread: { workspaceId: string; threadId: string },
+): boolean {
+  return (
+    state.selectedWorkspaceId === thread.workspaceId && state.selectedThreadId === thread.threadId
+  )
+}
+
+function areNavStatesEqual(a: NavState, b: NavState): boolean {
+  return (
+    a.selectedWorkspaceId === b.selectedWorkspaceId &&
+    a.selectedThreadId === b.selectedThreadId &&
+    a.view === b.view
+  )
 }

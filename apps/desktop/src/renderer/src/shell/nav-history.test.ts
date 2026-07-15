@@ -72,6 +72,74 @@ describe('navHistoryReducer', () => {
     expect(back.present.selectedWorkspaceId).toBe('ws1')
   })
 
+  it('replaces an abandoned Draft Thread without leaving a duplicate back entry', () => {
+    const draft = run([
+      { type: 'select-thread', workspaceId: 'ws1', threadId: 'existing' },
+      { type: 'select-thread', workspaceId: 'ws1', threadId: 'draft' },
+    ])
+
+    const replaced = navHistoryReducer(draft, {
+      type: 'replace-selection',
+      target: {
+        selectedWorkspaceId: 'ws1',
+        selectedThreadId: 'existing',
+        view: 'conversation',
+      },
+      discarded: { workspaceId: 'ws1', threadId: 'draft' },
+    })
+
+    expect(replaced.present.selectedThreadId).toBe('existing')
+    expect(replaced.past).toEqual([initialNavState])
+    expect(replaced.future).toEqual([])
+  })
+
+  it('prunes every older navigation entry for the discarded Draft Thread', () => {
+    const draft = run([
+      { type: 'select-thread', workspaceId: 'ws1', threadId: 'existing' },
+      { type: 'select-thread', workspaceId: 'ws1', threadId: 'draft' },
+      { type: 'open-settings' },
+      { type: 'close-settings' },
+    ])
+
+    const replaced = navHistoryReducer(draft, {
+      type: 'replace-selection',
+      target: {
+        selectedWorkspaceId: 'ws1',
+        selectedThreadId: 'existing',
+        view: 'conversation',
+      },
+      discarded: { workspaceId: 'ws1', threadId: 'draft' },
+    })
+
+    expect(replaced.present.selectedThreadId).toBe('existing')
+    expect(replaced.past).toEqual([initialNavState])
+    expect(replaced.future).toEqual([])
+  })
+
+  it('replaces a Draft Thread with a Workspace-only selection', () => {
+    const draft = run([
+      { type: 'select-thread', workspaceId: 'ws1', threadId: 'draft' },
+    ])
+
+    const replaced = navHistoryReducer(draft, {
+      type: 'replace-selection',
+      target: {
+        selectedWorkspaceId: 'ws2',
+        selectedThreadId: null,
+        view: 'conversation',
+      },
+      discarded: { workspaceId: 'ws1', threadId: 'draft' },
+    })
+
+    expect(replaced.present).toEqual({
+      selectedWorkspaceId: 'ws2',
+      selectedThreadId: null,
+      view: 'conversation',
+    })
+    expect(replaced.past).toEqual([initialNavState])
+    expect(replaced.future).toEqual([])
+  })
+
   it('caps the past stack at MAX_NAV_HISTORY', () => {
     const actions: NavHistoryAction[] = []
     for (let i = 0; i < MAX_NAV_HISTORY + 10; i++) {

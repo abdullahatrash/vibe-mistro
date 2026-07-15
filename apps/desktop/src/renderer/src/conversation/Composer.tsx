@@ -10,7 +10,7 @@ import {
   type JSX,
   type KeyboardEvent,
 } from 'react'
-import { ArrowUp, Clipboard, File, Mic, MessageSquareText, MousePointerClick, Plus, Sparkles, Square, X } from 'lucide-react'
+import { ArrowUp, Clipboard, File, MessageSquareText, MousePointerClick, Plus, Sparkles, Square, X } from 'lucide-react'
 import type {
   FileEntry,
   ThreadConfigAxis,
@@ -734,7 +734,7 @@ export function Composer({
           />
 
           {/* Control row (prototype: 44px gap below the input). Attach + agent
-              controls left; mic + interrupt + gradient send right. */}
+              controls left; interrupt + gradient send right. */}
           {/* min-w-0 lets the AgentControls chips absorb the squeeze (they shrink +
               truncate) so the send button NEVER leaves the card in a narrow column. */}
           <div className="mt-[44px] flex min-w-0 items-center gap-3.5 @max-[560px]:gap-2">
@@ -761,10 +761,6 @@ export function Composer({
             />
 
             <div className="flex-1" />
-
-            {/* Decorative voice-input affordance from the prototype; not yet wired.
-                First thing to yield in a tight column (it does nothing yet). */}
-            <Mic className="size-[19px] shrink-0 text-muted @max-[400px]:hidden" aria-hidden />
 
             {isProcessing && boundSessionId && (
               // Interrupt the active turn (#103, ADR-0009): fire `session/cancel`. The
