@@ -16,11 +16,11 @@ export const badgeVariants = cva(
   {
     variants: {
       variant: {
-        default: 'bg-accent text-on-accent',
-        accent: 'bg-accent/10 text-accent-text',
-        destructive: 'bg-bad/10 text-bad',
-        ok: 'bg-ok/10 text-ok',
-        outline: 'border border-border text-text',
+        default: 'bg-primary text-primary-foreground',
+        accent: 'bg-primary/10 text-primary',
+        destructive: 'bg-destructive/10 text-destructive',
+        ok: 'bg-success/10 text-success',
+        outline: 'border border-border text-foreground',
       },
     },
     defaultVariants: {

@@ -27,7 +27,7 @@ export function FileRow({
   onRevert?: () => void
 }): JSX.Element {
   return (
-    <li className="group mx-2 flex items-center gap-1 rounded-md transition-colors hover:bg-accent/10">
+    <li className="group mx-2 flex items-center gap-1 rounded-md transition-colors hover:bg-primary/10">
       <input
         type="checkbox"
         checked={checked}
@@ -54,9 +54,9 @@ export function FileRow({
         </span>
         {(file.insertions > 0 || file.deletions > 0) && (
           <span className="shrink-0 tabular-nums text-[11px]">
-            {file.insertions > 0 && <span className="text-ok">+{file.insertions}</span>}
+            {file.insertions > 0 && <span className="text-success">+{file.insertions}</span>}
             {file.insertions > 0 && file.deletions > 0 && ' '}
-            {file.deletions > 0 && <span className="text-bad">−{file.deletions}</span>}
+            {file.deletions > 0 && <span className="text-destructive">−{file.deletions}</span>}
           </span>
         )}
       </button>
@@ -68,7 +68,7 @@ export function FileRow({
             file.untracked ? `Delete ${file.path} (untracked)` : `Revert changes to ${file.path}`
           }
           title={file.untracked ? 'Delete file (untracked)…' : 'Revert changes…'}
-          className="mr-1.5 inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-bad focus-visible:opacity-100"
+          className="mr-1.5 inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive focus-visible:opacity-100"
         >
           <Undo2 className="size-3.5" aria-hidden />
         </button>

@@ -1,80 +1,70 @@
 @import 'tailwindcss';
 @import './typeset.css';
 
-/* Scan streamdown's dist (#114) so Tailwind emits the utility classes it bakes into
-   its rendered markdown JSX — node_modules isn't scanned by default. Its classes are
-   themed onto our tokens via the semantic mappings appended to `@theme inline` below. */
+/* Scan streamdown's dist so Tailwind emits the utility classes embedded in its JSX. */
 @source '../../../node_modules/streamdown/dist';
 
+/* Theme state is expressed by a class on the document root. */
+@custom-variant dark (&:is(.dark *));
+
+@utility cta-brand {
+  background-image: var(--cta-gradient);
+}
+
 :root {
-  /* Mistral light-mode brand tokens — final-design values (docs/design-tokens.md).
-     Warm neutral ramp · softer gradient-forward orange · rounded.
-     Orange = fills / borders / gradients. --accent-text = orange TEXT (AA-safe). */
-  --bg: #fbfaf8;
+  color-scheme: light;
+  font-family: var(--font-sans);
+
+  /* Warm-neutral shell: semantic roles, not component-specific colours. */
+  --background: #fbfaf8;
+  --foreground: #1c1c1c;
+  --card: #ffffff;
+  --card-foreground: #20201e;
+  --popover: #ffffff;
+  --popover-foreground: #20201e;
+  --primary: #c4521d;
+  --primary-foreground: #ffffff;
+  --secondary: #f5f1ec;
+  --secondary-foreground: #33302c;
+  --muted: #f0ebe5;
+  --muted-foreground: #6b645d;
+  --accent: #ece4da;
+  --accent-foreground: #3d3128;
+  --destructive: #b42318;
+  --destructive-foreground: #ffffff;
+  --success: #1a7f37;
+  --success-foreground: #ffffff;
+  --highlight: #f8e6a0;
+  --highlight-foreground: #33270d;
+  --border: #e6ddd3;
+  --input: #ddd2c7;
+  --ring: #c4521d;
   --sidebar: #f5f3ef;
-  --surface: #fdfcfb;
-  --panel: #ffffff;
-  --border: #ecdfd3;
-  --border-muted: #eae3da;
+  --sidebar-foreground: #292623;
+  --sidebar-border: #e6ddd3;
 
-  --text: #1c1c1c;
-  --text-strong: #20201e;
-  --text-body: #33302c;
-  --text-secondary: #524d47;
-  --muted: #6b645d;
-  --placeholder: #a89f95;
-  --faint: #a79f96;
+  /* Warm Mistral identity. Primary is the accessible solid action; the flame
+     gradient is reserved for the composer CTA and brand artwork. */
+  --cta-gradient: linear-gradient(160deg, #e9793f, #c94f1d);
+  --cta-foreground: #ffffff;
+  --cta-shadow: rgb(200 90 30 / 0.3);
+  --accent-grad-logo: linear-gradient(#f6c445 0%, #ef8a3c 50%, #e2452a 100%);
+  --accent-grad-action: linear-gradient(160deg, #ee9b5b, #d65e28);
+  --accent-grad-avatar: linear-gradient(160deg, #ef9f5f, #d86632);
+  --shell-paint-from: #f4f0eb;
+  --shell-paint-to: #ebe5df;
+  --shell-paint: linear-gradient(160deg, var(--shell-paint-from), var(--shell-paint-to));
+  --shell-shadow-ambient: rgb(65 43 27 / 0.12);
+  --subtle-edge-shadow: rgb(65 43 27 / 0.04);
 
-  /* Terminal palette (docs/design-tokens.md). The app shell is light, while the
-     terminal intentionally keeps a familiar dark canvas with readable default
-     input and an explicit ANSI palette. */
+  /* Terminal deliberately stays dark in both app themes. */
   --terminal-background: #1c1b1a;
   --terminal-foreground: #d8d2ca;
   --terminal-green: #7fb56b;
   --terminal-blue: #6ba0d6;
   --terminal-gray: #a49c93;
 
-  --accent: #df6f38;
-  --accent-text: #cf6a3a;
-  --accent-emphasis: #e07a3e;
-  --accent-grad: linear-gradient(160deg, #ee9b5b, #df6f38);
-  --accent-grad-logo: linear-gradient(#f6c445 0%, #ef8a3c 50%, #e2452a 100%);
-  --accent-grad-action: linear-gradient(160deg, #ee9b5b, #df6f38);
-  --accent-grad-avatar: linear-gradient(160deg, #ef9f5f, #e07640);
-  /* Ink on the SOLID soft-orange fill (`.btn`, filled menu highlight, git
-     primary buttons). A warm near-black — white on the softer orange is only
-     ~3.25:1 (fails AA), whereas dark ink clears ~5:1 and matches the prior
-     behaviour. The prototype's white on-orange is the send *icon* on the
-     saturated `--accent-grad-action`, wired later (#117) with white directly. */
-  --on-accent: #241a12;
-
-  --active-bg: #ece4da;
-  --accent-shadow: rgba(200, 90, 30, 0.3);
-  /* The one SOLID filled tint (New-chat pill, #113) — distinct from the subtle
-     --accent-tint hover rgba below; do not use this for hover surfaces. */
-  --accent-fill: #f8e0cf;
-
-  --ok: #1a7f37;
-  --bad: #b42318;
-
-  /* Semantic tints (token-layer rgba; never raw rgba in component rules).
-     --accent-tint stays a SUBTLE low-alpha wash (hover/surface backgrounds across
-     ~10 existing rules) re-hued to the new soft orange — NOT the doc's solid
-     peach, which lives in --accent-fill above. */
-  --accent-tint: rgba(207, 106, 58, 0.08);
-  --accent-tint-border: rgba(207, 106, 58, 0.3);
-  --ok-tint: rgba(26, 127, 55, 0.1);
-  --ok-tint-border: rgba(26, 127, 55, 0.35);
-  --bad-tint: rgba(180, 35, 24, 0.08);
-  --bad-tint-border: rgba(180, 35, 24, 0.35);
-
-  /* Radius scale (reverses the old --radius: 0). Component-specific radii
-     (sm/md/pill/card/full) are bridged via @theme below; --radius is the
-     plain default the many hand-written `var(--radius)` rules resolve to. */
   --radius: 9px;
-
-  /* Type scale (docs/design-tokens.md §Typography). Token layer only — later
-     slices wire these into component rules; existing rules are untouched. */
   --fs-hero: 37px;
   --fs-workspace-title: 20px;
   --fs-composer-placeholder: 17px;
@@ -84,61 +74,76 @@
   --fs-section-header: 13px;
   --fs-timestamp: 13px;
   --fs-code: 13px;
-
-  /* Spacing scale (docs/design-tokens.md §Spacing scale): 2·4·6·8·10·12·14·16·
-     18·20·22·24·40·42·44 (micro 2–12; macro 14–24; hero 40–44). Tailwind v4's
-     generated --spacing (4px-based) already covers this range via `p-*`/`gap-*`
-     utilities — intentionally NOT redefining a parallel spacing var scheme here. */
-
-  font-family: var(--font-sans);
 }
 
-/* Bridge the brand tokens into Tailwind v4's theme so utilities resolve to the
-   SAME variables (the tokens above stay the single source of truth — `@theme
-   inline` emits `var(--…)` references rather than copying values). This makes
-   `bg-accent`, `text-accent-text`, `border-border`, `text-muted`, etc. paint in
-   brand colours. */
-@theme inline {
-  --color-bg: var(--bg);
-  --color-sidebar: var(--sidebar);
-  --color-panel: var(--panel);
-  --color-surface: var(--surface);
-  --color-border: var(--border);
-  --color-border-muted: var(--border-muted);
-  --color-text: var(--text);
-  --color-text-strong: var(--text-strong);
-  --color-text-body: var(--text-body);
-  --color-text-secondary: var(--text-secondary);
-  --color-muted: var(--muted);
-  --color-placeholder: var(--placeholder);
-  --color-faint: var(--faint);
-  --color-accent: var(--accent);
-  --color-accent-text: var(--accent-text);
-  --color-accent-emphasis: var(--accent-emphasis);
-  --color-on-accent: var(--on-accent);
-  --color-ok: var(--ok);
-  --color-bad: var(--bad);
+.dark {
+  color-scheme: dark;
+  /* Mistral's midnight system: values mirror the live mistral.ai dark palette. */
+  --background: #151524;
+  --foreground: oklch(92% 0.004 286.32);
+  --card: #242433;
+  --card-foreground: oklch(92% 0.004 286.32);
+  --popover: #343446;
+  --popover-foreground: oklch(96.7% 0.001 286.375);
+  --primary: #ff5229;
+  --primary-foreground: #151524;
+  --secondary: #242433;
+  --secondary-foreground: oklch(87.1% 0.006 286.286);
+  --muted: #343446;
+  --muted-foreground: oklch(70.5% 0.015 286.067);
+  --accent: #343446;
+  --accent-foreground: oklch(92% 0.004 286.32);
+  --destructive: #f66c60;
+  --destructive-foreground: #151524;
+  --success: #44ba82;
+  --success-foreground: #151524;
+  --highlight: #933800;
+  --highlight-foreground: #ffe8a2;
+  --border: #31313a;
+  --input: #474754;
+  --ring: #ff5229;
+  --sidebar: #151524;
+  --sidebar-foreground: oklch(92% 0.004 286.32);
+  --sidebar-border: #31313a;
+  --cta-gradient: linear-gradient(160deg, #ff8204, #ff5229);
+  --cta-foreground: #151524;
+  --cta-shadow: rgb(0 0 0 / 0.45);
+  --accent-grad-action: linear-gradient(160deg, #ff8204, #ff5229);
+  --accent-grad-avatar: linear-gradient(160deg, #ff8204, #ff5229);
+  --shell-paint-from: #242433;
+  --shell-paint-to: #151524;
+  --shell-shadow-ambient: rgb(0 0 0 / 0.55);
+  --subtle-edge-shadow: rgb(0 0 0 / 0.35);
+}
 
-  /* Streamdown's shadcn semantic tokens → our brand tokens (#114, spike #112). Its
-     rendered markdown styles with `text-primary` (links), `text-foreground`,
-     `text-muted-foreground`, `font-mono`, etc.; map them here so it paints in brand
-     colours. `--color-border` / `--color-sidebar` already exist above (code-block
-     container = `bg-sidebar`). NOTE the `muted` collision (spike caveat): our
-     `--color-muted` is a TEXT grey, so streamdown's `bg-muted` inline-code default is
-     overridden in the `Response` `inlineCode` component (→ `--accent-tint`), NOT here. */
-  --color-primary: var(--accent-text);
-  --color-primary-foreground: var(--on-accent);
-  --color-foreground: var(--text);
-  --color-background: var(--bg);
-  --color-muted-foreground: var(--muted);
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
   --font-mono: 'SF Mono', ui-monospace, 'Menlo', monospace;
 }
 
-/* Radius scale (docs/design-tokens.md §Radius) — reverses the old all-zero
-   pin so `rounded-*` utilities produce real corners. Declared as plain @theme
-   (not @theme inline) so these are literal px values, never a var(--radius-md)
-   self-reference against the :root token of the same name (TRAP 1: that
-   collision silently resolves to invalid → border-radius falls back to 0). */
 @theme {
   /* Fonts — Geist (Vercel), bundled OFFLINE via @fontsource-variable (imported in
      main.tsx; variable weight 100–900). Defined in `@theme` so `font-sans`/`font-mono`
@@ -165,12 +170,12 @@
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--background);
+  color: var(--foreground);
 }
 
 .card {
-  background: var(--panel);
+  background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
@@ -185,8 +190,8 @@ body {
 }
 
 .btn {
-  background: var(--accent-grad);
-  color: var(--on-accent);
+  background: var(--cta-gradient);
+  color: var(--primary-foreground);
   border: none;
   border-radius: var(--radius);
   padding: 6px 12px;
@@ -220,11 +225,11 @@ body {
 }
 
 .status__value {
-  color: var(--muted);
+  color: var(--muted-foreground);
 }
 
 .status__error {
-  color: var(--bad);
+  color: var(--destructive);
   font-size: 13px;
   line-height: 1.4;
   margin-top: 4px;
@@ -238,15 +243,15 @@ body {
 }
 
 .dot--ok {
-  background: var(--ok);
+  background: var(--success);
 }
 
 .dot--bad {
-  background: var(--bad);
+  background: var(--destructive);
 }
 
 .dot--pending {
-  background: var(--accent);
+  background: var(--primary);
   animation: pulse 1.2s ease-in-out infinite;
 }
 
@@ -326,12 +331,12 @@ body {
   .vm-shimmer {
     animation: none;
     background: none;
-    color: var(--accent-text);
+    color: var(--primary);
   }
 }
 
 .hint {
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -344,9 +349,9 @@ body {
 
 /* The read-only reopened-Thread view (TB3): a muted variant of the live conv. */
 .conv--cold .badge {
-  background: var(--accent-tint);
-  color: var(--accent-text);
-  border-color: var(--accent-tint-border);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 30%, transparent);
 }
 
 .thread {
@@ -367,9 +372,9 @@ body {
 }
 
 .badge {
-  background: var(--ok-tint);
-  color: var(--ok);
-  border: 1px solid var(--ok-tint-border);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  color: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 35%, transparent);
   border-radius: var(--radius);
   padding: 2px 10px;
   font-size: 11px;
@@ -384,7 +389,7 @@ body {
 }
 
 .chips__label {
-  color: var(--muted);
+  color: var(--muted-foreground);
   width: 56px;
   flex-shrink: 0;
 }
@@ -400,17 +405,17 @@ body {
   border-radius: var(--radius);
   padding: 2px 8px;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--muted-foreground);
 }
 
 .chip--active {
-  border-color: var(--accent);
-  color: var(--accent-text);
+  border-color: var(--primary);
+  color: var(--primary);
 }
 
 .alert {
-  border: 1px solid var(--bad-tint-border);
-  background: var(--bad-tint);
+  border: 1px solid color-mix(in srgb, var(--destructive) 35%, transparent);
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
   border-radius: var(--radius);
   padding: 12px;
   display: flex;
@@ -419,7 +424,7 @@ body {
 }
 
 .alert__title {
-  color: var(--bad);
+  color: var(--destructive);
   font-weight: 600;
   font-size: 13px;
 }
@@ -430,7 +435,7 @@ body {
 }
 
 .alert__hint {
-  color: var(--muted);
+  color: var(--muted-foreground);
   font-size: 12px;
   line-height: 1.4;
 }
@@ -476,14 +481,14 @@ body {
   padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--accent-tint);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
   font-size: 12px;
   line-height: 1.4;
-  color: var(--muted);
+  color: var(--muted-foreground);
 }
 
 .notice__icon {
-  color: var(--accent-text);
+  color: var(--primary);
   font-weight: 600;
 }
 
@@ -495,13 +500,13 @@ body {
   display: flex;
   gap: 16px;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--muted-foreground);
   padding-bottom: 4px;
   border-bottom: 1px solid var(--border);
 }
 
 .usage strong {
-  color: var(--text);
+  color: var(--foreground);
   font-weight: 600;
 }
 
@@ -532,7 +537,7 @@ body {
 .fallback__summary {
   cursor: pointer;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--muted-foreground);
   user-select: none;
 }
 
@@ -545,7 +550,7 @@ body {
 .fallback__body {
   margin: 6px 0 0;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--muted-foreground);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -558,21 +563,21 @@ body {
 
 .btn--ghost {
   background: transparent;
-  color: var(--muted);
+  color: var(--muted-foreground);
   border: 1px solid var(--border);
 }
 
 /* Interrupt (#103): an outline action distinct from the primary Send. */
 .btn--stop {
   background: transparent;
-  color: var(--text);
+  color: var(--foreground);
   border: 1px solid var(--border);
 }
 
 .recover {
   align-self: flex-start;
   background: transparent;
-  color: var(--muted);
+  color: var(--muted-foreground);
   border: 1px dashed var(--border);
   border-radius: var(--radius);
   padding: 4px 10px;
@@ -581,6 +586,6 @@ body {
 }
 
 .recover:hover {
-  color: var(--text);
-  border-color: var(--accent);
+  color: var(--foreground);
+  border-color: var(--primary);
 }

@@ -95,7 +95,7 @@ export function BranchMenu({
 
   return (
     <>
-      <div className="flex items-center gap-1.5 border-b border-border-muted px-3 py-2 text-[13px] text-muted">
+      <div className="flex items-center gap-1.5 border-b border-border px-3 py-2 text-[13px] text-muted-foreground">
         <Menu
           onOpenChange={(open) => {
             if (open) void loadBranches()
@@ -106,30 +106,30 @@ export function BranchMenu({
             title={busy ? 'Agent is working…' : branch}
             className={cn(
               'flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1 text-left transition-colors',
-              'hover:bg-accent/10 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent',
+              'hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent',
             )}
           >
             <GitBranch size={14} aria-hidden className="shrink-0" />
-            <span className="min-w-0 flex-1 truncate font-medium text-text">{branch}</span>
+            <span className="min-w-0 flex-1 truncate font-medium text-foreground">{branch}</span>
             <ChevronDown size={13} aria-hidden className="shrink-0" />
           </MenuTrigger>
           <MenuContent align="start" className="max-h-80 min-w-48 overflow-y-auto">
             {loading ? (
-              <div className="px-3 py-1.5 text-sm text-muted">Loading…</div>
+              <div className="px-3 py-1.5 text-sm text-muted-foreground">Loading…</div>
             ) : listError ? (
-              <div className="px-3 py-1.5 text-sm text-bad">{listError}</div>
+              <div className="px-3 py-1.5 text-sm text-destructive">{listError}</div>
             ) : branches && branches.length > 0 ? (
               branches.map((b) => (
                 <MenuItem key={b.name} onClick={() => void checkout(b.name)} disabled={b.current}>
                   <Check size={13} aria-hidden className={cn('shrink-0', b.current ? 'opacity-100' : 'opacity-0')} />
                   <span className="min-w-0 flex-1 truncate">{b.name}</span>
-                  {b.isRemote && <span className="shrink-0 text-[10px] uppercase text-muted">remote</span>}
+                  {b.isRemote && <span className="shrink-0 text-[10px] uppercase text-muted-foreground">remote</span>}
                 </MenuItem>
               ))
             ) : (
-              <div className="px-3 py-1.5 text-sm text-muted">No branches.</div>
+              <div className="px-3 py-1.5 text-sm text-muted-foreground">No branches.</div>
             )}
-            <MenuSeparator className="my-1 h-px bg-border-muted" />
+            <MenuSeparator className="my-1 h-px bg-border" />
             <MenuItem onClick={() => setCreating(true)}>
               <span className="w-3 shrink-0" aria-hidden />
               Create branch…
@@ -146,7 +146,7 @@ export function BranchMenu({
       </div>
 
       {creating && (
-        <div className="flex items-center gap-1.5 border-b border-border-muted px-3 py-2">
+        <div className="flex items-center gap-1.5 border-b border-border px-3 py-2">
           <Input
             autoFocus
             aria-label="New branch name"
@@ -179,7 +179,7 @@ export function BranchMenu({
       )}
 
       {opError && (
-        <p className="border-b border-border-muted px-3 py-2 text-[11px] text-bad" role="alert">
+        <p className="border-b border-border px-3 py-2 text-[11px] text-destructive" role="alert">
           {opError}
         </p>
       )}

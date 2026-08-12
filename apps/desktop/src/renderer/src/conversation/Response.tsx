@@ -101,7 +101,7 @@ export function Response({ text, className }: { text: string; className?: string
       inlineCode: ({ className: codeClassName, children }) => (
         <code
           className={cn(
-            'rounded-md border border-border bg-[var(--accent-tint)] px-1.5 py-0.5 font-mono text-[0.85em]',
+            'rounded-md border border-border bg-primary/10 px-1.5 py-0.5 font-mono text-[0.85em]',
             codeClassName,
           )}
         >
@@ -121,7 +121,7 @@ export function Response({ text, className }: { text: string; className?: string
             href={href}
             target="_blank"
             rel="noreferrer noopener"
-            className={cn('font-medium text-accent-text underline', linkClassName)}
+            className={cn('font-medium text-primary underline', linkClassName)}
           >
             {children}
           </a>

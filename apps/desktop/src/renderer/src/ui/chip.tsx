@@ -20,9 +20,9 @@ export function Chip({
       data-slot="chip"
       data-active={active || undefined}
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-lg px-1.5 py-0.5 text-sm text-muted transition-colors',
+        'inline-flex items-center gap-1.5 rounded-lg px-1.5 py-0.5 text-sm text-muted-foreground transition-colors',
         '[&_svg]:pointer-events-none [&_svg]:shrink-0',
-        active && 'text-accent-text',
+        active && 'text-primary',
         className,
       )}
       {...props}

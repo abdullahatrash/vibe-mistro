@@ -96,18 +96,19 @@ describe('formatScreenshotAnnotation', () => {
 
 describe('buildPickerScript', () => {
   it('produces a single IIFE expression that resolves a Promise', () => {
-    const script = buildPickerScript({ accent: '#ff8800' })
+    const script = buildPickerScript({ accent: '#ff8800', accentForeground: '#111111' })
     expect(script.trimStart().startsWith('(')).toBe(true)
     expect(script).toContain('new Promise')
   })
 
   it('embeds the accent color as a safely-quoted string', () => {
-    const script = buildPickerScript({ accent: '#ff8800' })
+    const script = buildPickerScript({ accent: '#ff8800', accentForeground: '#111111' })
     expect(script).toContain(JSON.stringify('#ff8800'))
+    expect(script).toContain(JSON.stringify('#111111'))
   })
 
   it('wires the load-bearing picker mechanics (hover, capture-phase click, Esc)', () => {
-    const script = buildPickerScript({ accent: '#ff8800' })
+    const script = buildPickerScript({ accent: '#ff8800', accentForeground: '#111111' })
     expect(script).toContain('elementsFromPoint')
     expect(script).toContain('getBoundingClientRect')
     expect(script).toContain('preventDefault')
@@ -117,10 +118,11 @@ describe('buildPickerScript', () => {
   })
 
   it('is resistant to a hostile accent value (JSON-encoded, quote escaped)', () => {
-    const script = buildPickerScript({ accent: '";alert(1)//' })
+    const script = buildPickerScript({ accent: '";alert(1)//', accentForeground: "';alert(2)//" })
     // JSON-encoding embeds the value as an escaped string literal — the `"` becomes `\"`,
     // so it can't break out of the string context into executable code.
     expect(script).toContain(JSON.stringify('";alert(1)//'))
+    expect(script).toContain(JSON.stringify("';alert(2)//"))
     expect(script).toContain('\\"') // the double-quote is backslash-escaped, not raw
   })
 })

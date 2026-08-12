@@ -105,12 +105,12 @@ export function PrSection({
   // Detached HEAD / before the first fetch: render nothing (no PR surface).
   if (detached || result === null) return null
   if (result === 'loading') {
-    return <p className="border-b border-border-muted px-3 py-1.5 text-[11px] text-muted">Checking pull request…</p>
+    return <p className="border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">Checking pull request…</p>
   }
   // gh missing / not authed / an unexpected gh failure: a subtle hint, not a crash.
   if (!result.ok) {
     return (
-      <p className="border-b border-border-muted px-3 py-1.5 text-[11px] text-muted" title={result.error}>
+      <p className="border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground" title={result.error}>
         {result.error}
       </p>
     )
@@ -123,11 +123,11 @@ export function PrSection({
   if (isDefault) return null
 
   return (
-    <div className="border-b border-border-muted px-3 py-2">
+    <div className="border-b border-border px-3 py-2">
       {!hasUpstream ? (
         // The push gate: `gh pr create` non-interactively can't prompt to push an
         // unpushed branch, and we never push on the user's behalf — so guide them first.
-        <p className="text-[11px] text-muted">Push your branch to GitHub to open a pull request.</p>
+        <p className="text-[11px] text-muted-foreground">Push your branch to GitHub to open a pull request.</p>
       ) : !creating ? (
         <Button
           type="button"
@@ -142,7 +142,7 @@ export function PrSection({
           }}
           disabled={busy}
           title={busy ? 'Agent is working…' : 'Create a pull request for this branch'}
-          className="-mx-2 text-muted hover:text-accent-text"
+          className="-mx-2 text-muted-foreground hover:text-primary"
         >
           <GitPullRequest className="size-3.5" aria-hidden />
           Create PR
@@ -168,11 +168,11 @@ export function PrSection({
             className="min-h-16 resize-y text-[13px]"
           />
           {createError && (
-            <p className="text-[11px] text-bad" role="alert">
+            <p className="text-[11px] text-destructive" role="alert">
               {createError}
             </p>
           )}
-          {busy && <p className="text-[11px] text-muted">Agent is working…</p>}
+          {busy && <p className="text-[11px] text-muted-foreground">Agent is working…</p>}
           <div className="flex items-center gap-2">
             <Button
               type="button"
@@ -191,7 +191,7 @@ export function PrSection({
                 setCreateError(null)
               }}
               disabled={submitting}
-              className="text-muted hover:text-accent-text"
+              className="text-muted-foreground hover:text-primary"
             >
               Cancel
             </Button>
@@ -205,9 +205,9 @@ export function PrSection({
 /** A PR's chip accent by gh state — open reads positive, merged accent, closed negative. */
 function prStateClass(state: string): string {
   const s = state.toUpperCase()
-  if (s === 'MERGED') return 'text-accent-text'
-  if (s === 'CLOSED') return 'text-bad'
-  return 'text-ok' // OPEN (and any unknown) reads as live.
+  if (s === 'MERGED') return 'text-primary'
+  if (s === 'CLOSED') return 'text-destructive'
+  return 'text-success' // OPEN (and any unknown) reads as live.
 }
 
 /**
@@ -218,17 +218,17 @@ function prStateClass(state: string): string {
  */
 function PrChip({ pr }: { pr: GhPr }): JSX.Element {
   return (
-    <div className="border-b border-border-muted px-3 py-2">
+    <div className="border-b border-border px-3 py-2">
       <a
         href={pr.url}
         target="_blank"
         rel="noreferrer"
         title={`#${pr.number} · ${pr.title} (${pr.state})`}
-        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors hover:bg-accent/10"
+        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] transition-colors hover:bg-primary/10"
       >
         <GitPullRequest className={cn('size-3.5 shrink-0', prStateClass(pr.state))} aria-hidden />
         <span className={cn('shrink-0 font-medium tabular-nums', prStateClass(pr.state))}>#{pr.number}</span>
-        <span className="min-w-0 flex-1 truncate text-text">{pr.title}</span>
+        <span className="min-w-0 flex-1 truncate text-foreground">{pr.title}</span>
       </a>
     </div>
   )

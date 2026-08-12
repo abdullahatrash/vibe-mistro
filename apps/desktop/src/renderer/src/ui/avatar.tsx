@@ -41,7 +41,7 @@ export function AvatarFallback({
     <BaseAvatar.Fallback
       data-slot="avatar-fallback"
       className={cn(
-        'flex size-full items-center justify-center text-sm text-on-accent',
+        'flex size-full items-center justify-center text-sm text-primary-foreground',
         className,
       )}
       {...props}

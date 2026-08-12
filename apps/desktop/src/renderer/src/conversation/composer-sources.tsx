@@ -39,11 +39,11 @@ export function createCommandSource(commands: readonly AcpCommand[]): Completion
     closeOnAccept: () => true,
     renderRow: (command) => (
       <>
-        <span className="text-[13px] font-semibold whitespace-nowrap text-accent-text">
+        <span className="text-[13px] font-semibold whitespace-nowrap text-primary">
           /{command.name}
         </span>
         {command.description && (
-          <span className="truncate text-xs text-muted">{command.description}</span>
+          <span className="truncate text-xs text-muted-foreground">{command.description}</span>
         )}
       </>
     ),
@@ -82,11 +82,11 @@ export function createPathSource({
     renderRow: (entry) => (
       <>
         {entry.kind === 'directory' ? (
-          <Folder className="size-3.5 shrink-0 text-muted" aria-hidden />
+          <Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
         ) : (
-          <File className="size-3.5 shrink-0 text-muted" aria-hidden />
+          <File className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
         )}
-        <span className="truncate text-[13px] text-text-body">
+        <span className="truncate text-[13px] text-foreground">
           {entry.path}
           {entry.kind === 'directory' && '/'}
         </span>

@@ -91,18 +91,18 @@ export function AllFilesDiffView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-1.5 border-b border-border-muted px-3 py-2">
+      <div className="flex items-center gap-1.5 border-b border-border px-3 py-2">
         <Button
           type="button"
           variant="ghost"
           size="xs"
           onClick={onBack}
-          className="-ml-1 shrink-0 text-muted hover:text-accent-text"
+          className="-ml-1 shrink-0 text-muted-foreground hover:text-primary"
         >
           <ArrowLeft className="size-3.5" aria-hidden />
           <span>Changes</span>
         </Button>
-        <span className="min-w-0 flex-1 truncate text-[13px] text-text">
+        <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
           All changes · {files.length} {files.length === 1 ? 'file' : 'files'}
         </span>
       </div>
@@ -113,7 +113,7 @@ export function AllFilesDiffView({
       {result?.truncated && <DiffTruncationBanner />}
 
       {loading && !result ? (
-        <p className="px-3 py-3 text-[13px] text-muted">Loading diff…</p>
+        <p className="px-3 py-3 text-[13px] text-muted-foreground">Loading diff…</p>
       ) : (
         // Review comments (#239): select lines in any file → inline note editor → a
         // pending-context chip in the active Thread's composer.

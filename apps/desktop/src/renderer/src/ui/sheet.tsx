@@ -13,7 +13,7 @@ import { cn } from '../lib/utils'
  * `Dialog.Viewport` (the flex container that pins the popup to an edge), so the structure
  * mirrors t3code's — Portal → Backdrop → Viewport → Popup — rather than needing a fallback.
  * We drop t3code's shadcn colour tokens (`bg-popover`, `bg-background/60`) for ours
- * (`bg-panel`, `bg-black/40`), and keep only the parts we use (no header/footer/title
+ * (`bg-card`, `bg-black/40`), and keep only the parts we use (no header/footer/title
  * helpers — the panel brings its own chrome).
  */
 export const Sheet = BaseDialog.Root
@@ -50,7 +50,7 @@ export function SheetPopup({
           data-slot="sheet-popup"
           className={cn(
             'relative flex h-full min-h-0 w-[min(42vw,28rem)] min-w-80 max-w-[28rem] flex-col overflow-hidden',
-            'border-l border-border bg-panel text-text shadow-lg outline-none',
+            'border-l border-border bg-card text-foreground shadow-lg outline-none',
             'transition-[opacity,translate] duration-200 ease-in-out',
             'data-ending-style:translate-x-8 data-ending-style:opacity-0',
             'data-starting-style:translate-x-8 data-starting-style:opacity-0',

@@ -15,12 +15,12 @@ describe('cn', () => {
 
   it('keeps the conditional class when the condition is true', () => {
     const active = true
-    expect(cn('text-muted', active && 'text-accent-text')).toBe('text-accent-text')
+    expect(cn('text-muted-foreground', active && 'text-primary')).toBe('text-primary')
   })
 
   it('drops the conditional class (and the base wins) when the condition is false', () => {
     const active = false
-    expect(cn('text-muted', active && 'text-accent-text')).toBe('text-muted')
+    expect(cn('text-muted-foreground', active && 'text-primary')).toBe('text-muted-foreground')
   })
 
   it('drops falsy inputs (false / null / undefined / empty)', () => {

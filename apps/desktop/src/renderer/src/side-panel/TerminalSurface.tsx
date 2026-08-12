@@ -184,7 +184,7 @@ export function TerminalSurface({
   }
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col bg-panel">
+    <div className="relative flex min-h-0 flex-1 flex-col bg-card">
       <div className="flex shrink-0 items-center justify-end gap-1 border-b border-border px-2 py-1">
         <TerminalAction
           label="Add selection to chat"
@@ -205,8 +205,8 @@ export function TerminalSurface({
         className="min-h-0 flex-1 px-2 py-1.5 [background:var(--terminal-background)] [color:var(--terminal-foreground)]"
       />
       {openError && (
-        <div className="absolute inset-0 flex items-center justify-center bg-panel p-6">
-          <p className="max-w-sm text-center text-xs leading-relaxed text-muted">{openError}</p>
+        <div className="absolute inset-0 flex items-center justify-center bg-card p-6">
+          <p className="max-w-sm text-center text-xs leading-relaxed text-muted-foreground">{openError}</p>
         </div>
       )}
     </div>
@@ -239,8 +239,8 @@ function TerminalAction({
       aria-label={label}
       title={label}
       className={cn(
-        'flex size-6 items-center justify-center rounded text-muted outline-none transition-colors',
-        'hover:bg-accent/10 hover:text-text-strong focus-visible:bg-accent/10',
+        'flex size-6 items-center justify-center rounded text-muted-foreground outline-none transition-colors',
+        'hover:bg-primary/10 hover:text-foreground focus-visible:bg-primary/10',
         'disabled:pointer-events-none disabled:opacity-40',
         '[&_svg]:size-3.5 [&_svg]:shrink-0',
       )}

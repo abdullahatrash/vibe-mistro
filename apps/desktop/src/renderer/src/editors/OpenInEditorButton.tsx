@@ -57,7 +57,7 @@ export function OpenInEditorButton({
   return (
     <div className="flex items-center gap-1.5">
       {error && (
-        <span role="status" className="text-xs text-bad">
+        <span role="status" className="text-xs text-destructive">
           {error}
         </span>
       )}

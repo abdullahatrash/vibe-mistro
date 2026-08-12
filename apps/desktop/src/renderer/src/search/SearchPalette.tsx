@@ -96,22 +96,22 @@ export function SearchPalette({
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => selectHit(hit)}
                 >
-                  <MessageSquare className="size-4 shrink-0 text-muted" aria-hidden />
+                  <MessageSquare className="size-4 shrink-0 text-muted-foreground" aria-hidden />
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="flex min-w-0 items-center gap-1.5">
-                      <span className="truncate text-text-strong">{hit.title ?? 'Untitled'}</span>
+                      <span className="truncate text-foreground">{hit.title ?? 'Untitled'}</span>
                       {hit.archived && (
                         <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
                           Archived
                         </Badge>
                       )}
                     </span>
-                    <span className="truncate text-[11px] text-faint">
+                    <span className="truncate text-[11px] text-muted-foreground">
                       {hit.workspaceName}
-                      {hit.snippet && <span className="text-muted"> · {hit.snippet}</span>}
+                      {hit.snippet && <span className="text-muted-foreground"> · {hit.snippet}</span>}
                     </span>
                   </span>
-                  <span className="flex shrink-0 flex-col items-end text-[11px] tabular-nums text-faint">
+                  <span className="flex shrink-0 flex-col items-end text-[11px] tabular-nums text-muted-foreground">
                     <span>{formatRelativeTime(hit.lastActiveAt, Date.now())}</span>
                     {typeof hit.hitCount === 'number' && hit.hitCount > 1 && (
                       <span>{hit.hitCount} matches</span>

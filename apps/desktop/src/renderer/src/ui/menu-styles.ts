@@ -12,7 +12,7 @@
  * width, padding, `z-50`, overflow — stays local at the call site.
  */
 export const menuSurfaceClass =
-  'rounded-md border border-border bg-panel text-sm text-text shadow-md outline-none'
+  'rounded-md border border-border bg-card text-sm text-foreground shadow-md outline-none'
 
 /**
  * The highlight-row ITEM tokens shared by MenuItem / MenuRadioItem / ContextMenuItem:
@@ -21,4 +21,4 @@ export const menuSurfaceClass =
  * local there.
  */
 export const menuItemClass =
-  'flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 outline-none data-[highlighted]:bg-accent data-[highlighted]:text-on-accent'
+  'flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 outline-none data-[highlighted]:bg-primary data-[highlighted]:text-primary-foreground'

@@ -30,13 +30,13 @@ export function FileChip({
   const position = link.line ? `L${link.line}${link.column ? `:C${link.column}` : ''}` : null
   const inner = (
     <>
-      <File className="size-3.5 shrink-0 text-accent-text" aria-hidden />
+      <File className="size-3.5 shrink-0 text-primary" aria-hidden />
       <span>{label}</span>
-      {position && <span className="text-muted">{position}</span>}
+      {position && <span className="text-muted-foreground">{position}</span>}
     </>
   )
   const chipClass = cn(
-    'inline-flex items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] px-1.5 py-0.5 align-text-bottom font-mono text-[0.85em] leading-none text-accent-text',
+    'inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-1.5 py-0.5 align-text-bottom font-mono text-[0.85em] leading-none text-primary',
     className,
   )
 
@@ -49,7 +49,7 @@ export function FileChip({
         onClick={() => openFile(link)}
         className={cn(
           chipClass,
-          'cursor-pointer outline-none transition-colors hover:bg-[var(--accent-tint-border)] focus-visible:ring-2 focus-visible:ring-accent/40',
+          'cursor-pointer outline-none transition-colors hover:bg-primary/30 focus-visible:ring-2 focus-visible:ring-primary/40',
         )}
       >
         {inner}

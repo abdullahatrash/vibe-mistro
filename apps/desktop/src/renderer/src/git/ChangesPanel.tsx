@@ -191,9 +191,9 @@ export function ChangesPanel({
   // must never strand the user with no way back to the card stack.
   if (!status || !status.isRepo) {
     return (
-      <aside className="flex min-h-0 flex-1 flex-col text-text">
+      <aside className="flex min-h-0 flex-1 flex-col text-foreground">
         <ReviewHeader onCollapse={onCollapse} onRefresh={refresh} />
-        <p className="px-3 py-3 text-[13px] text-muted">
+        <p className="px-3 py-3 text-[13px] text-muted-foreground">
           {!status ? 'Loading changes…' : 'Not a Git repository.'}
         </p>
       </aside>
@@ -363,7 +363,7 @@ export function ChangesPanel({
   // view each render, so sections track the list and churn drives its refetch.
   if (isActive && selectedPath !== null && view.files.length > 0) {
     return (
-      <aside className="flex min-h-0 flex-1 flex-col text-text">
+      <aside className="flex min-h-0 flex-1 flex-col text-foreground">
         <DiffWorkerProvider>
           <AllFilesDiffView
             workspaceDir={workspaceDir}
@@ -380,15 +380,15 @@ export function ChangesPanel({
   return (
     // The SHELL (SurfacePanel) owns the panel's width + border-l chrome now; this fills
     // it and scrolls internally — the shell column is viewport-height, not <main>-scrolled.
-    <aside className="flex min-h-0 flex-1 flex-col overflow-y-auto text-text">
+    <aside className="flex min-h-0 flex-1 flex-col overflow-y-auto text-foreground">
       <ReviewHeader count={view.fileCount} onCollapse={onCollapse} onRefresh={refresh} />
 
       {/* Environment (#119) — a STATIC placeholder gesturing at the mockup's fuller
           "Environment / Local / Sources" side-panel (styled chrome, non-functional,
           like the sidebar's Search/Scheduled/Plugins "Soon" rows). Not wired to
           anything; the live git surface begins at the branch header below. */}
-      <div className="border-b border-border-muted px-3 py-2.5">
-        <p className="mb-1 px-1 text-[11px] font-medium text-faint">Environment</p>
+      <div className="border-b border-border px-3 py-2.5">
+        <p className="mb-1 px-1 text-[11px] font-medium text-muted-foreground">Environment</p>
         <div className="flex flex-col gap-0.5">
           <EnvPlaceholder icon={<Monitor className="size-4" aria-hidden />}>Local</EnvPlaceholder>
           <EnvPlaceholder icon={<Boxes className="size-4" aria-hidden />}>Sources</EnvPlaceholder>
@@ -416,7 +416,7 @@ export function ChangesPanel({
       {/* Diff scope (#237): Working tree (live) vs Branch changes (`base...HEAD`, on
           demand) — persisted per Workspace. Branch scope swaps the list + commit area
           for the read-only range view; review keeps working after commits land. */}
-      <div className="flex items-center border-b border-border-muted px-3 py-2 text-[13px]">
+      <div className="flex items-center border-b border-border px-3 py-2 text-[13px]">
         <div className="flex overflow-hidden rounded-md border border-border">
           <button
             type="button"
@@ -424,8 +424,8 @@ export function ChangesPanel({
             onClick={() => updateDiffScope({ scope: 'working' })}
             className={
               diffScope.scope === 'working'
-                ? 'bg-accent/10 px-2.5 py-1 text-accent-text'
-                : 'px-2.5 py-1 text-muted transition-colors hover:text-accent-text'
+                ? 'bg-primary/10 px-2.5 py-1 text-primary'
+                : 'px-2.5 py-1 text-muted-foreground transition-colors hover:text-primary'
             }
           >
             Working tree
@@ -436,8 +436,8 @@ export function ChangesPanel({
             onClick={() => updateDiffScope({ scope: 'branch' })}
             className={
               diffScope.scope === 'branch'
-                ? 'bg-accent/10 px-2.5 py-1 text-accent-text'
-                : 'px-2.5 py-1 text-muted transition-colors hover:text-accent-text'
+                ? 'bg-primary/10 px-2.5 py-1 text-primary'
+                : 'px-2.5 py-1 text-muted-foreground transition-colors hover:text-primary'
             }
           >
             Branch changes
@@ -457,7 +457,7 @@ export function ChangesPanel({
           />
         </DiffWorkerProvider>
       ) : view.files.length === 0 ? (
-        <p className="px-3 py-3 text-[13px] text-muted">No changes — working tree clean.</p>
+        <p className="px-3 py-3 text-[13px] text-muted-foreground">No changes — working tree clean.</p>
       ) : (
         <ul className="flex flex-col gap-0.5 py-1.5">
           {view.files.map((file) => (
@@ -493,7 +493,7 @@ export function ChangesPanel({
           push / Push / Pull / View PR; the rest in the attached menu). Disabled while a
           turn streams (`busy`) or an action runs. git's reason surfaces inline. */}
       {diffScope.scope === 'working' && (view.files.length > 0 || quickAction.primary !== null) && (
-        <div className="flex flex-col gap-2 border-t border-border-muted px-3 py-2.5">
+        <div className="flex flex-col gap-2 border-t border-border px-3 py-2.5">
           {view.files.length > 0 && (
             <Textarea
               value={message}
@@ -510,7 +510,7 @@ export function ChangesPanel({
               }}
             />
           )}
-          {busy && <p className="text-[11px] text-muted">Agent is working…</p>}
+          {busy && <p className="text-[11px] text-muted-foreground">Agent is working…</p>}
           <QuickActions
             view={quickAction}
             commitCount={selectedPaths.length}
@@ -529,7 +529,7 @@ export function ChangesPanel({
                 setRevertTarget('all')
               }}
               disabled={busy || reverting}
-              className="self-start text-[11px] text-muted transition-colors hover:text-bad disabled:opacity-50"
+              className="self-start text-[11px] text-muted-foreground transition-colors hover:text-destructive disabled:opacity-50"
             >
               Revert all changes…
             </button>
@@ -561,7 +561,7 @@ export function ChangesPanel({
             </DialogDescription>
           </DialogHeader>
           {revertError && (
-            <p className="text-[11px] text-bad" role="alert">
+            <p className="text-[11px] text-destructive" role="alert">
               {revertError}
             </p>
           )}
@@ -597,7 +597,7 @@ export function ChangesPanel({
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-1.5">
-            <label htmlFor="guard-branch-name" className="text-[11px] font-medium text-muted">
+            <label htmlFor="guard-branch-name" className="text-[11px] font-medium text-muted-foreground">
               New branch name
             </label>
             <Input
@@ -608,7 +608,7 @@ export function ChangesPanel({
               className="text-[13px]"
             />
             {guardError && (
-              <p className="text-[11px] text-bad" role="alert">
+              <p className="text-[11px] text-destructive" role="alert">
                 {guardError}
               </p>
             )}
@@ -666,23 +666,23 @@ function ReviewHeader({
   onRefresh: () => void
 }): JSX.Element {
   return (
-    <div className="flex items-center gap-2 border-b border-border-muted px-3 py-2.5">
+    <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
       <button
         type="button"
         onClick={onCollapse}
         title="Collapse"
         aria-label="Collapse Review panel"
-        className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md text-left text-sm font-semibold text-text-strong"
+        className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md text-left text-sm font-semibold text-foreground"
       >
-        <PanelRightClose size={15} aria-hidden className="shrink-0 text-muted" />
+        <PanelRightClose size={15} aria-hidden className="shrink-0 text-muted-foreground" />
         <span>Changes</span>
         {count !== undefined && count > 0 && (
-          <Badge variant="outline" className="ml-0.5 rounded-full px-1.5 py-0 text-[11px] tabular-nums text-muted">
+          <Badge variant="outline" className="ml-0.5 rounded-full px-1.5 py-0 text-[11px] tabular-nums text-muted-foreground">
             {count}
           </Badge>
         )}
       </button>
-      <IconButton size="icon-sm" onClick={onRefresh} title="Refresh" aria-label="Refresh git status" className="text-muted">
+      <IconButton size="icon-sm" onClick={onRefresh} title="Refresh" aria-label="Refresh git status" className="text-muted-foreground">
         <RefreshCw className="size-3.5" aria-hidden />
       </IconButton>
     </div>
@@ -698,11 +698,11 @@ function EnvPlaceholder({ icon, children }: { icon: JSX.Element; children: strin
   return (
     <div
       title="Coming soon"
-      className="flex cursor-default items-center gap-2 rounded-md px-2 py-1 text-[13px] text-muted opacity-70"
+      className="flex cursor-default items-center gap-2 rounded-md px-2 py-1 text-[13px] text-muted-foreground opacity-70"
     >
-      <span className="shrink-0 text-muted">{icon}</span>
+      <span className="shrink-0 text-muted-foreground">{icon}</span>
       <span className="min-w-0 flex-1 truncate">{children}</span>
-      <span className="shrink-0 text-[10px] font-medium text-faint">Soon</span>
+      <span className="shrink-0 text-[10px] font-medium text-muted-foreground">Soon</span>
     </div>
   )
 }

@@ -83,7 +83,7 @@ export function BranchDiffView({
 
   if (currentBranch === null) {
     return (
-      <p className="px-3 py-3 text-[13px] text-muted">
+      <p className="px-3 py-3 text-[13px] text-muted-foreground">
         Branch changes needs a checked-out branch — HEAD is currently detached.
       </p>
     )
@@ -95,17 +95,17 @@ export function BranchDiffView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* The compare row: head → base picker. */}
-      <div className="flex items-center gap-1.5 border-b border-border-muted px-3 py-2 text-[13px]">
-        <span className="min-w-0 shrink truncate font-medium text-text" title={currentBranch}>
+      <div className="flex items-center gap-1.5 border-b border-border px-3 py-2 text-[13px]">
+        <span className="min-w-0 shrink truncate font-medium text-foreground" title={currentBranch}>
           {currentBranch}
         </span>
-        <ArrowRight className="size-3.5 shrink-0 text-muted" aria-hidden />
+        <ArrowRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <Menu>
           <MenuTrigger
             render={
               <button
                 type="button"
-                className="min-w-0 flex-1 truncate rounded-md border border-border px-2 py-1 text-left text-[13px] text-text transition-colors hover:bg-accent/10"
+                className="min-w-0 flex-1 truncate rounded-md border border-border px-2 py-1 text-left text-[13px] text-foreground transition-colors hover:bg-primary/10"
                 title="Choose the base ref to compare against"
               />
             }
@@ -125,17 +125,17 @@ export function BranchDiffView({
             </div>
             <MenuItem onClick={() => onBaseRefChange(null)}>
               <span className="min-w-0 flex-1 truncate">Automatic (default branch)</span>
-              {baseRef === null && <Check className="size-3.5 shrink-0 text-accent-text" aria-hidden />}
+              {baseRef === null && <Check className="size-3.5 shrink-0 text-primary" aria-hidden />}
             </MenuItem>
             <MenuSeparator />
             {filtered.map((b) => (
               <MenuItem key={b.name} onClick={() => onBaseRefChange(b.name)}>
                 <span className="min-w-0 flex-1 truncate">{b.name}</span>
-                {b.isRemote && <span className="shrink-0 text-[10px] text-faint">remote</span>}
-                {baseRef === b.name && <Check className="size-3.5 shrink-0 text-accent-text" aria-hidden />}
+                {b.isRemote && <span className="shrink-0 text-[10px] text-muted-foreground">remote</span>}
+                {baseRef === b.name && <Check className="size-3.5 shrink-0 text-primary" aria-hidden />}
               </MenuItem>
             ))}
-            {filtered.length === 0 && <p className="px-2 py-1.5 text-[12px] text-muted">No matching refs.</p>}
+            {filtered.length === 0 && <p className="px-2 py-1.5 text-[12px] text-muted-foreground">No matching refs.</p>}
           </MenuContent>
         </Menu>
       </div>
@@ -147,14 +147,14 @@ export function BranchDiffView({
 
       {/* Review comments work in BOTH scopes (#239): whatever the diff shows is quotable. */}
       {loading && !result ? (
-        <p className="px-3 py-3 text-[13px] text-muted">Loading branch diff…</p>
+        <p className="px-3 py-3 text-[13px] text-muted-foreground">Loading branch diff…</p>
       ) : result && !result.ok ? (
         // Friendly copy, raw git reason preserved in the tooltip (never a crash).
-        <p className="px-3 py-3 text-[13px] text-muted" title={result.error} role="alert">
+        <p className="px-3 py-3 text-[13px] text-muted-foreground" title={result.error} role="alert">
           Can’t compare against {baseRef ?? 'the default branch'} — pick another base ref.
         </p>
       ) : result && result.files.length === 0 ? (
-        <p className="px-3 py-3 text-[13px] text-muted">
+        <p className="px-3 py-3 text-[13px] text-muted-foreground">
           No changes against {result.baseRef}
           {prefs.ignoreWhitespace ? ' (whitespace-only changes hidden)' : ''}.
         </p>

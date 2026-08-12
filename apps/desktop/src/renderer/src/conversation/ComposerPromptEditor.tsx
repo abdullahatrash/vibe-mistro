@@ -180,7 +180,7 @@ export const ComposerPromptEditor = forwardRef<ComposerEditorHandle, ComposerPro
             contentEditable={
               <ContentEditable
                 className={cn(
-                  'min-h-[3rem] w-full resize-none bg-transparent p-0 text-[17px] leading-normal text-text outline-none',
+                  'min-h-[3rem] w-full resize-none bg-transparent p-0 text-[17px] leading-normal text-foreground outline-none',
                   'whitespace-pre-wrap break-words',
                   className,
                 )}
@@ -194,7 +194,7 @@ export const ComposerPromptEditor = forwardRef<ComposerEditorHandle, ComposerPro
               />
             }
             placeholder={
-              <div className="pointer-events-none absolute top-0 left-0 text-[17px] leading-normal text-placeholder">
+              <div className="pointer-events-none absolute top-0 left-0 text-[17px] leading-normal text-muted-foreground">
                 {placeholder}
               </div>
             }

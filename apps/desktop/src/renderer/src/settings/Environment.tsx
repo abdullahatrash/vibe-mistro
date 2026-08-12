@@ -19,7 +19,7 @@ export function Environment({
   const updateStatus = describeUpdateStatus(update)
   return (
     <div className="flex flex-col gap-2.5 rounded-[9px] border border-border p-3">
-      <div className="flex items-center justify-between text-[13px] font-semibold text-text-strong">
+      <div className="flex items-center justify-between text-[13px] font-semibold text-foreground">
         <span>Environment</span>
         <Button variant="ghost" size="xs" onClick={onRecheck} disabled={loading}>
           {loading ? 'Checking…' : 'Re-check'}
@@ -40,7 +40,7 @@ export function Environment({
             </li>
           )}
           {update?.updateAvailable && (
-            <li className="text-[13px] leading-normal text-faint">
+            <li className="text-[13px] leading-normal text-muted-foreground">
               Update with <CodeText text="uv tool upgrade mistral-vibe" /> (or{' '}
               <CodeText text="brew upgrade mistral-vibe" />), then Re-check.
             </li>

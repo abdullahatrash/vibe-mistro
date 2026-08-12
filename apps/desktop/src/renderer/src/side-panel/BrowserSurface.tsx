@@ -151,8 +151,10 @@ export function BrowserSurface({
     if (!view || !activeThreadId || picking) return
     setPicking(true)
     try {
-      const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#e8833a'
-      const raw: unknown = await view.executeJavaScript(buildPickerScript({ accent }), true)
+      const tokens = getComputedStyle(document.documentElement)
+      const accent = tokens.getPropertyValue('--primary').trim() || '#c65420'
+      const accentForeground = tokens.getPropertyValue('--primary-foreground').trim() || '#ffffff'
+      const raw: unknown = await view.executeJavaScript(buildPickerScript({ accent, accentForeground }), true)
       const picked = coercePickedElement(raw)
       if (!picked) return // cancelled (Esc/nav) or a malformed return — nothing to send
       // Screenshot AFTER the picker overlay is gone (the injected script tore it down
@@ -250,7 +252,7 @@ export function BrowserSurface({
   if (initialUrl === null) return <BrowserEmptyState onOpenUrl={openUrl} />
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-panel">
+    <div className="flex min-h-0 flex-1 flex-col bg-card">
       <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
         <BrowserAction label="Back" onClick={goBack} disabled={!canGoBack}>
           <ArrowLeft aria-hidden />
@@ -271,14 +273,14 @@ export function BrowserSurface({
             autoCapitalize="off"
             autoCorrect="off"
             className={cn(
-              'w-full rounded-md border border-transparent bg-accent/5 px-2.5 py-1 pr-7 text-xs text-text',
-              'placeholder:text-faint focus:outline-none focus-visible:border-accent/60 focus-visible:bg-surface',
+              'w-full rounded-md border border-transparent bg-primary/5 px-2.5 py-1 pr-7 text-xs text-foreground',
+              'placeholder:text-muted-foreground focus:outline-none focus-visible:border-primary/60 focus-visible:bg-secondary',
             )}
           />
           {load.status === 'loading' && (
             <Loader2
               aria-label="Loading"
-              className="pointer-events-none absolute right-2 top-1/2 size-3.5 -translate-y-1/2 animate-spin text-muted"
+              className="pointer-events-none absolute right-2 top-1/2 size-3.5 -translate-y-1/2 animate-spin text-muted-foreground"
             />
           )}
         </form>
@@ -306,7 +308,7 @@ export function BrowserSurface({
       </div>
       {/* Page title strip (surface chrome) — only when the guest reports one. */}
       {title && (
-        <div className="shrink-0 truncate border-b border-border px-3 py-1 text-[11px] text-muted" title={title}>
+        <div className="shrink-0 truncate border-b border-border px-3 py-1 text-[11px] text-muted-foreground" title={title}>
           {title}
         </div>
       )}
@@ -319,7 +321,7 @@ export function BrowserSurface({
           partition={deriveBrowserPartition(workspaceDir)}
           webpreferences={buildWebviewPreferencesAttribute()}
           useragent={stripElectronUserAgent(navigator.userAgent)}
-          className="size-full bg-white"
+          className="size-full bg-background"
         />
         {load.status === 'failed' && <UnreachableOverlay url={load.url} onRetry={retry} />}
       </div>
@@ -356,10 +358,10 @@ function BrowserEmptyState({ onOpenUrl }: { onOpenUrl: (url: string) => void }):
   }
 
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto bg-panel p-6">
+    <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto bg-card p-6">
       <div className="w-full max-w-sm text-center">
-        <h3 className="text-sm font-medium text-text-strong">Preview a dev server</h3>
-        <p className="mt-1 text-xs leading-relaxed text-muted">
+        <h3 className="text-sm font-medium text-foreground">Preview a dev server</h3>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
           Enter the URL of a local dev server — or any http(s) page.
         </p>
         <form onSubmit={submit}>
@@ -373,14 +375,14 @@ function BrowserEmptyState({ onOpenUrl }: { onOpenUrl: (url: string) => void }):
             autoCapitalize="off"
             autoCorrect="off"
             className={cn(
-              'mt-4 w-full rounded-md border border-border bg-surface px-3 py-1.5 text-[13px] text-text',
-              'placeholder:text-faint focus:outline-none focus-visible:border-accent/60',
+              'mt-4 w-full rounded-md border border-border bg-secondary px-3 py-1.5 text-[13px] text-foreground',
+              'placeholder:text-muted-foreground focus:outline-none focus-visible:border-primary/60',
             )}
           />
         </form>
         <div className="mt-5">
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-[11px] font-medium uppercase tracking-wide text-faint">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               Running locally
             </span>
             <button
@@ -388,7 +390,7 @@ function BrowserEmptyState({ onOpenUrl }: { onOpenUrl: (url: string) => void }):
               onClick={discover}
               aria-label="Refresh dev servers"
               title="Refresh"
-              className="flex size-5 items-center justify-center rounded text-muted outline-none transition-colors hover:bg-accent/10 hover:text-text-strong focus-visible:bg-accent/10 [&_svg]:size-3"
+              className="flex size-5 items-center justify-center rounded text-muted-foreground outline-none transition-colors hover:bg-primary/10 hover:text-foreground focus-visible:bg-primary/10 [&_svg]:size-3"
             >
               <RefreshCw aria-hidden className={scanning ? 'animate-spin' : undefined} />
             </button>
@@ -400,17 +402,17 @@ function BrowserEmptyState({ onOpenUrl }: { onOpenUrl: (url: string) => void }):
                   <button
                     type="button"
                     onClick={() => onOpenUrl(server.url)}
-                    className="flex w-full items-center gap-2 rounded-md border border-border bg-surface px-2.5 py-1.5 text-left text-xs outline-none transition-colors hover:bg-accent/10 focus-visible:border-accent/60 [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:text-muted"
+                    className="flex w-full items-center gap-2 rounded-md border border-border bg-secondary px-2.5 py-1.5 text-left text-xs outline-none transition-colors hover:bg-primary/10 focus-visible:border-primary/60 [&_svg]:size-3.5 [&_svg]:shrink-0 [&_svg]:text-muted-foreground"
                   >
                     <Globe aria-hidden />
-                    <span className="min-w-0 flex-1 truncate text-text">localhost:{server.port}</span>
-                    <span className="shrink-0 text-faint">{server.processName}</span>
+                    <span className="min-w-0 flex-1 truncate text-foreground">localhost:{server.port}</span>
+                    <span className="shrink-0 text-muted-foreground">{server.processName}</span>
                   </button>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="text-xs text-faint">
+            <p className="text-xs text-muted-foreground">
               {scanning ? 'Scanning…' : 'No dev servers detected.'}
             </p>
           )}
@@ -423,19 +425,19 @@ function BrowserEmptyState({ onOpenUrl }: { onOpenUrl: (url: string) => void }):
 /** The "can't reach this page" state over a failed guest, with a one-click Retry. */
 function UnreachableOverlay({ url, onRetry }: { url: string; onRetry: () => void }): JSX.Element {
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-panel p-6 text-center">
-      <TriangleAlert aria-hidden className="size-6 text-muted" />
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-card p-6 text-center">
+      <TriangleAlert aria-hidden className="size-6 text-muted-foreground" />
       <div>
-        <p className="text-sm font-medium text-text-strong">Can’t reach this page</p>
-        <p className="mt-1 max-w-xs truncate text-xs text-muted" title={url}>
+        <p className="text-sm font-medium text-foreground">Can’t reach this page</p>
+        <p className="mt-1 max-w-xs truncate text-xs text-muted-foreground" title={url}>
           {url}
         </p>
-        <p className="mt-1 text-xs text-muted">The dev server may be starting or stopped.</p>
+        <p className="mt-1 text-xs text-muted-foreground">The dev server may be starting or stopped.</p>
       </div>
       <button
         type="button"
         onClick={onRetry}
-        className="rounded-md border border-border bg-surface px-3 py-1 text-xs font-medium text-text outline-none transition-colors hover:bg-accent/10 focus-visible:border-accent/60"
+        className="rounded-md border border-border bg-secondary px-3 py-1 text-xs font-medium text-foreground outline-none transition-colors hover:bg-primary/10 focus-visible:border-primary/60"
       >
         Retry
       </button>
@@ -489,10 +491,10 @@ function BrowserAction({
       title={label}
       className={cn(
         'flex size-6 shrink-0 items-center justify-center rounded outline-none transition-colors',
-        'hover:bg-accent/10 hover:text-text-strong focus-visible:bg-accent/10',
+        'hover:bg-primary/10 hover:text-foreground focus-visible:bg-primary/10',
         'disabled:pointer-events-none disabled:opacity-40',
         '[&_svg]:size-3.5 [&_svg]:shrink-0',
-        active ? 'bg-accent/15 text-accent-text' : 'text-muted',
+        active ? 'bg-primary/15 text-primary' : 'text-muted-foreground',
       )}
     >
       {children}

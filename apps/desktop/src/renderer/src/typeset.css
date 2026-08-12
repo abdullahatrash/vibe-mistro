@@ -164,12 +164,8 @@
       font-weight: 600;
     }
     &:where(mark) {
-      background-color: color-mix(
-        in oklab,
-        oklch(0.86 0.17 95) 40%,
-        transparent
-      );
-      color: inherit;
+      background-color: var(--highlight);
+      color: var(--highlight-foreground);
       padding: 0.05em 0.15em;
       border-radius: 0.2em;
     }

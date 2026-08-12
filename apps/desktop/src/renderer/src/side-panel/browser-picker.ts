@@ -76,11 +76,13 @@ export function coercePickedElement(raw: unknown): PickedElement | null {
  * script runs only in a real browser world — unit tests cover its SHAPE, not its behavior (the
  * app-driving verification exercises the behavior).
  */
-export function buildPickerScript(config: { accent: string }): string {
+export function buildPickerScript(config: { accent: string; accentForeground: string }): string {
   const accent = JSON.stringify(config.accent)
+  const accentForeground = JSON.stringify(config.accentForeground)
   const marker = JSON.stringify('data-vibe-pick-ui')
   return `(() => {
   const ACCENT = ${accent};
+  const ACCENT_FOREGROUND = ${accentForeground};
   const MARKER = ${marker};
   return new Promise((resolve) => {
     const box = document.createElement('div');
@@ -88,7 +90,7 @@ export function buildPickerScript(config: { accent: string }): string {
     Object.assign(box.style, { position: 'fixed', zIndex: '2147483646', pointerEvents: 'none', boxSizing: 'border-box', border: '2px solid ' + ACCENT, background: ACCENT + '22', borderRadius: '2px', display: 'none' });
     const label = document.createElement('div');
     label.setAttribute(MARKER, '');
-    Object.assign(label.style, { position: 'fixed', zIndex: '2147483647', pointerEvents: 'none', background: ACCENT, color: '#fff', font: '11px/1.5 ui-monospace, monospace', padding: '1px 5px', borderRadius: '3px', display: 'none', maxWidth: '60vw', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
+    Object.assign(label.style, { position: 'fixed', zIndex: '2147483647', pointerEvents: 'none', background: ACCENT, color: ACCENT_FOREGROUND, font: '11px/1.5 ui-monospace, monospace', padding: '1px 5px', borderRadius: '3px', display: 'none', maxWidth: '60vw', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' });
     document.body.appendChild(box);
     document.body.appendChild(label);
     document.body.style.cursor = 'crosshair';

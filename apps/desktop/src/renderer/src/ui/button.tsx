@@ -6,25 +6,25 @@ import { cn } from '../lib/utils'
 /**
  * The CVA exemplar for the kit. Structure lifted from shadcn's base-ui `button.tsx`;
  * the semantic `cn-button-variant-*` theme tokens it ships are swapped for real
- * Tailwind utility strings resolved through OUR tokens (`bg-accent`, `text-on-accent`,
+ * Tailwind utility strings resolved through OUR tokens (`bg-primary`, `text-primary-foreground`,
  * `border-border`, …). Radii come from the new rounded scale (#110): text buttons
- * `rounded-md` (10px), icon buttons `rounded-sm` (7px). `text-on-accent` is the warm
+ * `rounded-md` (10px), icon buttons `rounded-sm` (7px). `text-primary-foreground` is the warm
  * dark ink (AA-safe on the softer orange), NOT white.
  */
 export const buttonVariants = cva(
-  'inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors outline-none select-none disabled:pointer-events-none disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-accent/40 [&_svg]:pointer-events-none [&_svg]:shrink-0',
+  'inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors outline-none select-none disabled:pointer-events-none disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-primary/40 [&_svg]:pointer-events-none [&_svg]:shrink-0',
   {
     variants: {
       variant: {
-        default: 'bg-accent text-on-accent hover:bg-accent/90',
-        outline: 'border border-border bg-transparent text-text hover:bg-accent/10',
-        secondary: 'border border-border bg-surface text-text hover:bg-accent/10',
-        ghost: 'text-text hover:bg-accent/10',
-        destructive: 'bg-bad text-white hover:bg-bad/90',
-        link: 'text-accent-text underline-offset-4 hover:underline',
+        default: 'bg-primary text-primary-foreground hover:bg-primary/90',
+        outline: 'border border-border bg-transparent text-foreground hover:bg-primary/10',
+        secondary: 'border border-border bg-secondary text-foreground hover:bg-primary/10',
+        ghost: 'text-foreground hover:bg-primary/10',
+        destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
+        link: 'text-primary underline-offset-4 hover:underline',
         // Interrupt action (#103) — an outline distinct from the primary Send;
         // mirrors the existing `.btn--stop` (transparent bg, muted border).
-        stop: 'border border-border bg-transparent text-text hover:bg-accent/10',
+        stop: 'border border-border bg-transparent text-foreground hover:bg-primary/10',
       },
       size: {
         default: 'h-9 px-4 py-2',

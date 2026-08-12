@@ -973,7 +973,7 @@ export function App(): JSX.Element {
   const isMac = navigator.userAgent.includes('Macintosh')
 
   return (
-    <div className="flex h-screen flex-col bg-bg text-text">
+    <div className="flex h-screen flex-col bg-background text-foreground">
       {/* Window chrome (#113): a draggable top bar. Back/forward walk the nav history
           (nav-history.ts); the top-right layout controls are live. The bar stays
           `-webkit-app-region: drag` so the window moves; every interactive control
@@ -1024,7 +1024,7 @@ export function App(): JSX.Element {
             part of the window's drag region like the rest of the bar. */}
         <div className="ml-2 flex items-center gap-2">
           <Logo size={20} />
-          <span className="text-[13.5px] font-semibold tracking-tight text-text-strong">
+          <span className="text-[13.5px] font-semibold tracking-tight text-foreground">
             Vibe Mistro
           </span>
         </div>
@@ -1049,7 +1049,7 @@ export function App(): JSX.Element {
             }
             aria-pressed={activePanel.isOpen}
             disabled={!selectedWs}
-            className={activePanel.isOpen ? 'bg-accent/15 text-accent-text' : undefined}
+            className={activePanel.isOpen ? 'bg-primary/15 text-primary' : undefined}
             onClick={() => {
               if (selectedWs) toggleWorkspacePanelVisibility(selectedWs)
             }}
@@ -1070,7 +1070,7 @@ export function App(): JSX.Element {
             }
             aria-pressed={terminalRevealed}
             disabled={!selectedWs}
-            className={terminalRevealed ? 'bg-accent/15 text-accent-text' : undefined}
+            className={terminalRevealed ? 'bg-primary/15 text-primary' : undefined}
             onClick={() => {
               if (selectedWs) toggleWorkspaceTerminalSurface(selectedWs)
             }}

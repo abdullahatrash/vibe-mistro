@@ -7,6 +7,7 @@ import { useAccountPlan } from '../auth/use-account-plan'
 import { Button } from '../ui/button'
 import { IconButton } from '../ui/icon-button'
 import { Environment } from './Environment'
+import { ThemeControl } from './ThemeControl'
 
 /** The selected Workspace's connected agent + its advertised auth, for the Account section. */
 export interface AccountInfo {
@@ -45,10 +46,10 @@ export function SettingsView({
         <IconButton aria-label="Back" title="Back" onClick={onClose}>
           <ArrowLeft className="size-4" aria-hidden />
         </IconButton>
-        <h1 className="text-[19px] font-semibold tracking-tight text-text-strong">Settings</h1>
+        <h1 className="text-[19px] font-semibold tracking-tight text-foreground">Settings</h1>
       </div>
       <section className="flex flex-col gap-2">
-        <h2 className="text-[13px] font-semibold text-faint">Account</h2>
+        <h2 className="text-[13px] font-semibold text-muted-foreground">Account</h2>
         <AccountSettings
           // Key by agentId so the auth reducer's seed resets per connection — a new
           // agent can't inherit the prior session's sign-out gate/in-flight state.
@@ -58,7 +59,14 @@ export function SettingsView({
         />
       </section>
       <section className="flex flex-col gap-2">
-        <h2 className="text-[13px] font-semibold text-faint">Environment</h2>
+        <h2 className="text-[13px] font-semibold text-muted-foreground">Appearance</h2>
+        <p className="text-[13px] text-muted-foreground">
+          Light, dark, or follow your OS appearance.
+        </p>
+        <ThemeControl />
+      </section>
+      <section className="flex flex-col gap-2">
+        <h2 className="text-[13px] font-semibold text-muted-foreground">Environment</h2>
         <Environment detect={detect} loading={loading} onRecheck={onRecheck} />
       </section>
     </div>
@@ -104,7 +112,7 @@ function AccountSettings({
 
   if (!account) {
     return (
-      <div className="rounded-[9px] border border-border p-3 text-[13px] text-muted">
+      <div className="rounded-[9px] border border-border p-3 text-[13px] text-muted-foreground">
         Not connected — open a project to manage your session.
       </div>
     )
@@ -114,14 +122,14 @@ function AccountSettings({
   return (
     <div className="flex flex-col gap-2.5 rounded-[9px] border border-border p-3">
       <div className="flex items-center gap-2 text-[13px]">
-        {!signingOut && <span className="size-[7px] shrink-0 rounded-full bg-ok" aria-hidden />}
-        <span className="font-semibold text-text-strong">
+        {!signingOut && <span className="size-[7px] shrink-0 rounded-full bg-success" aria-hidden />}
+        <span className="font-semibold text-foreground">
           {signingOut ? 'Signing out…' : 'Signed in to Mistral Vibe'}
         </span>
         {view.kind === 'signed-in' && view.identity && (
-          <span className="text-muted">{view.identity}</span>
+          <span className="text-muted-foreground">{view.identity}</span>
         )}
-        {!signingOut && plan && <span className="text-muted">{plan}</span>}
+        {!signingOut && plan && <span className="text-muted-foreground">{plan}</span>}
         <span className="flex-1" />
         {view.kind === 'signed-in' && view.signOutAvailable && (
           <Button variant="outline" size="sm" onClick={() => void signOut()}>
@@ -130,7 +138,7 @@ function AccountSettings({
         )}
       </div>
       {view.kind === 'signed-in' && view.error && (
-        <div className="text-[13px] text-bad">{view.error}</div>
+        <div className="text-[13px] text-destructive">{view.error}</div>
       )}
     </div>
   )

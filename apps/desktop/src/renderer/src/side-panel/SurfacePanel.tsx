@@ -302,7 +302,7 @@ function PanelBody({
       aria-label="Side panel"
       style={inline ? { width } : undefined}
       className={cn(
-        'relative flex h-full min-h-0 flex-col bg-panel text-text',
+        'relative flex h-full min-h-0 flex-col bg-card text-foreground',
         inline ? 'shrink-0 self-stretch border-l border-border' : 'w-full',
         dragging && 'select-none',
       )}
@@ -319,8 +319,8 @@ function PanelBody({
           onDoubleClick={resetWidth}
           className={cn(
             'absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize select-none [-webkit-app-region:no-drag]',
-            'after:absolute after:inset-y-0 after:left-1 after:w-px after:bg-transparent after:transition-colors after:content-[""] hover:after:bg-accent/40',
-            dragging && 'after:bg-accent/60',
+            'after:absolute after:inset-y-0 after:left-1 after:w-px after:bg-transparent after:transition-colors after:content-[""] hover:after:bg-primary/40',
+            dragging && 'after:bg-primary/60',
           )}
         />
       )}
@@ -489,7 +489,7 @@ function SurfaceTabStrip({
     <div
       role="tablist"
       aria-label="Open surfaces"
-      className="flex w-full shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-panel px-2 py-1.5"
+      className="flex w-full shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-card px-2 py-1.5"
     >
       {surfaces.map((surface, index) => {
         const active = surface.id === activeSurfaceId
@@ -506,8 +506,8 @@ function SurfaceTabStrip({
                 'group flex h-7 min-w-0 max-w-40 shrink-0 items-center gap-1.5 rounded-md pl-2 pr-1 text-[13px] transition-colors',
                 '[&_svg]:size-3.5 [&_svg]:shrink-0',
                 active
-                  ? 'bg-accent/15 text-text-strong'
-                  : 'text-muted hover:bg-accent/10 hover:text-text',
+                  ? 'bg-primary/15 text-foreground'
+                  : 'text-muted-foreground hover:bg-primary/10 hover:text-foreground',
               )}
             >
               <button
@@ -537,7 +537,7 @@ function SurfaceTabStrip({
                 aria-label={`Close ${label}`}
                 title={`Close ${label}`}
                 className={cn(
-                  'flex size-4 shrink-0 items-center justify-center rounded outline-none hover:bg-accent/20',
+                  'flex size-4 shrink-0 items-center justify-center rounded outline-none hover:bg-primary/20',
                   active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
                 )}
               >
@@ -565,7 +565,7 @@ function SurfaceTabStrip({
       <Menu>
         <MenuTrigger
           aria-label="Open a surface"
-          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted outline-none transition-colors hover:bg-accent/10 hover:text-text-strong focus-visible:bg-accent/10"
+          className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-primary/10 hover:text-foreground focus-visible:bg-primary/10"
         >
           <Plus className="size-4" aria-hidden />
         </MenuTrigger>
@@ -578,10 +578,10 @@ function SurfaceTabStrip({
               disabled={!enabled}
               onClick={enabled ? () => onOpen(card.target) : undefined}
             >
-              <span className="flex items-center gap-2 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted">
+              <span className="flex items-center gap-2 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground">
                 {card.icon}
                 {card.label}
-                {!card.live && <span className="text-[11px] font-medium text-faint">Soon</span>}
+                {!card.live && <span className="text-[11px] font-medium text-muted-foreground">Soon</span>}
               </span>
             </MenuItem>
             )
@@ -664,8 +664,8 @@ function LauncherGrid({
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
       <div className="w-full max-w-xl">
         <div className="mb-5 text-center">
-          <h3 className="text-sm font-medium text-text-strong">Open a surface</h3>
-          <p className="mt-1 text-xs text-muted">Choose what to show in the side panel.</p>
+          <h3 className="text-sm font-medium text-foreground">Open a surface</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Choose what to show in the side panel.</p>
         </div>
         <div className="grid grid-cols-2 gap-2">
           {CARDS.map((card) => (
@@ -696,22 +696,22 @@ function LauncherCard({ card, onClick }: { card: CardDef; onClick?: () => void }
       aria-disabled={inert || undefined}
       title={inert ? 'Coming soon' : card.label}
       className={cn(
-        'flex min-h-28 w-full flex-col items-start rounded-lg border border-border bg-surface p-4 text-left outline-none transition-colors',
-        '[&_svg]:size-5 [&_svg]:shrink-0 [&_svg]:text-muted',
+        'flex min-h-28 w-full flex-col items-start rounded-lg border border-border bg-secondary p-4 text-left outline-none transition-colors',
+        '[&_svg]:size-5 [&_svg]:shrink-0 [&_svg]:text-muted-foreground',
         inert
           ? 'cursor-default opacity-50'
-          : 'hover:bg-accent/10 focus-visible:bg-accent/10 [&_svg]:hover:text-text-strong',
+          : 'hover:bg-primary/10 focus-visible:bg-primary/10 [&_svg]:hover:text-foreground',
       )}
     >
       <span className="mb-3">{card.icon}</span>
       <span className="flex w-full items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-text">{card.label}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{card.label}</span>
         {card.hint && (
-          <kbd className="shrink-0 rounded-md text-[11px] font-medium tabular-nums text-faint">{card.hint}</kbd>
+          <kbd className="shrink-0 rounded-md text-[11px] font-medium tabular-nums text-muted-foreground">{card.hint}</kbd>
         )}
-        {inert && <span className="shrink-0 text-[11px] font-medium text-faint">Soon</span>}
+        {inert && <span className="shrink-0 text-[11px] font-medium text-muted-foreground">Soon</span>}
       </span>
-      <span className="mt-1 text-xs leading-relaxed text-muted">{card.description}</span>
+      <span className="mt-1 text-xs leading-relaxed text-muted-foreground">{card.description}</span>
     </button>
   )
 }

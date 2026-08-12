@@ -169,7 +169,7 @@ export function WorkspaceNav({
           the display-only sort order. The + stays available even with zero Workspaces,
           so the first project can still be opened from here. */}
       <div className="flex items-center justify-between px-3 py-1.5">
-        <span className="text-[13px] font-medium text-faint">Projects</span>
+        <span className="text-[13px] font-medium text-muted-foreground">Projects</span>
         <div className="flex items-center gap-0.5">
           <IconButton
             size="icon-xs"
@@ -188,7 +188,7 @@ export function WorkspaceNav({
             <MenuTrigger
               aria-label="Project list options"
               title="Project list options"
-              className="inline-flex size-6 items-center justify-center rounded-sm text-muted outline-none transition-colors hover:bg-accent/10 hover:text-text focus-visible:bg-accent/10 data-[popup-open]:bg-accent/10"
+              className="inline-flex size-6 items-center justify-center rounded-sm text-muted-foreground outline-none transition-colors hover:bg-primary/10 hover:text-foreground focus-visible:bg-primary/10 data-[popup-open]:bg-primary/10"
             >
               <Ellipsis className="size-4" aria-hidden />
             </MenuTrigger>
@@ -206,7 +206,7 @@ export function WorkspaceNav({
       </div>
 
       {workspaces.length === 0 ? (
-        <p className="px-3 py-1 text-[13px] leading-relaxed text-muted">
+        <p className="px-3 py-1 text-[13px] leading-relaxed text-muted-foreground">
           No workspaces yet. Open a project to begin.
         </p>
       ) : (
@@ -304,16 +304,16 @@ function ProjectRow({
     <Collapsible open={open} onOpenChange={(next) => onToggleOpen(workspace.id, next)}>
       {/* Header row: the fold trigger + a SIBLING ＋ (outside the trigger button, so
           clicking ＋ starts a thread rather than toggling the fold). */}
-      <div className="group/proj flex items-center gap-0.5 rounded-md pr-1 transition-colors hover:bg-accent/10">
-        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-3 py-[7px] text-left text-[14px] text-text-body outline-none focus-visible:bg-accent/10">
+      <div className="group/proj flex items-center gap-0.5 rounded-md pr-1 transition-colors hover:bg-primary/10">
+        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-3 py-[7px] text-left text-[14px] text-foreground outline-none focus-visible:bg-primary/10">
           <ChevronDown
             className={cn(
-              'size-4 shrink-0 text-muted transition-transform',
+              'size-4 shrink-0 text-muted-foreground transition-transform',
               !open && '-rotate-90',
             )}
             aria-hidden
           />
-          <Folder className="size-4 shrink-0 text-muted" aria-hidden />
+          <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <span className="flex-1 truncate" title={workspace.dir}>
             {workspace.displayName}
           </span>
@@ -351,12 +351,12 @@ function ProjectRow({
           <MenuTrigger
             aria-label={`${workspace.displayName} project actions`}
             title="Project actions"
-            className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted opacity-0 outline-none transition-opacity hover:bg-accent/10 hover:text-text focus-visible:opacity-100 group-hover/proj:opacity-100 data-[popup-open]:opacity-100"
+            className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground opacity-0 outline-none transition-opacity hover:bg-primary/10 hover:text-foreground focus-visible:opacity-100 group-hover/proj:opacity-100 data-[popup-open]:opacity-100"
           >
             <MoreVertical className="size-3.5" aria-hidden />
           </MenuTrigger>
           <MenuContent>
-            <MenuItem className="text-bad" onClick={() => setConfirmRemoveOpen(true)}>
+            <MenuItem className="text-destructive" onClick={() => setConfirmRemoveOpen(true)}>
               <Trash2 className="size-3.5" aria-hidden />
               Remove project
             </MenuItem>
@@ -414,12 +414,12 @@ function ProjectRow({
               <button
                 type="button"
                 onClick={() => setExpandedThreads((e) => !e)}
-                className="flex items-center gap-2 px-3 py-1 pl-[42px] text-left text-[13px] text-accent-text outline-none hover:underline"
+                className="flex items-center gap-2 px-3 py-1 pl-[42px] text-left text-[13px] text-primary outline-none hover:underline"
               >
                 <span>{expandedThreads ? 'Show less' : `Show more (${hiddenCount})`}</span>
                 {!expandedThreads && hiddenNeedsAttention && (
                   <span
-                    className="size-1.5 shrink-0 rounded-full bg-bad"
+                    className="size-1.5 shrink-0 rounded-full bg-destructive"
                     role="img"
                     aria-label="A hidden thread needs your attention"
                     title="A hidden thread needs your attention"
@@ -429,7 +429,7 @@ function ProjectRow({
             )}
           </ul>
         ) : archivedRows.length === 0 ? (
-          <div className="px-3 py-1 pl-[42px] text-[13px] text-muted">No threads yet</div>
+          <div className="px-3 py-1 pl-[42px] text-[13px] text-muted-foreground">No threads yet</div>
         ) : null}
 
         {/* Archived section (#133): a collapsible "Archived (N)" fold at the BOTTOM,
@@ -477,12 +477,12 @@ function ArchivedSection({
   const [open, setOpen] = useState(false)
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="mt-0.5">
-      <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-md px-3 py-1 pl-[26px] text-left text-[13px] text-faint outline-none transition-colors hover:bg-accent/10 focus-visible:bg-accent/10">
+      <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-md px-3 py-1 pl-[26px] text-left text-[13px] text-muted-foreground outline-none transition-colors hover:bg-primary/10 focus-visible:bg-primary/10">
         <ChevronDown
-          className={cn('size-3.5 shrink-0 text-muted transition-transform', !open && '-rotate-90')}
+          className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', !open && '-rotate-90')}
           aria-hidden
         />
-        <Archive className="size-3.5 shrink-0 text-muted" aria-hidden />
+        <Archive className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
         <span className="flex-1 truncate">Archived ({rows.length})</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -561,7 +561,7 @@ function NavThread({
           <span
             className={
               row.live
-                ? 'size-[7px] shrink-0 rounded-full bg-ok'
+                ? 'size-[7px] shrink-0 rounded-full bg-success'
                 : 'size-[7px] shrink-0 rounded-full bg-border'
             }
             aria-hidden
@@ -576,7 +576,7 @@ function NavThread({
               else if (e.key === 'Escape') cancelRename()
             }}
             onBlur={(e) => submitRename(e.currentTarget.value)}
-            className="min-w-0 flex-1 rounded-[3px] bg-transparent px-1 text-[13.5px] text-text outline-none ring-1 ring-accent"
+            className="min-w-0 flex-1 rounded-[3px] bg-transparent px-1 text-[13.5px] text-foreground outline-none ring-1 ring-primary"
           />
         </div>
       </li>
@@ -596,12 +596,12 @@ function NavThread({
         <span
           className={
             row.live
-              ? 'size-[7px] shrink-0 rounded-full bg-ok'
+              ? 'size-[7px] shrink-0 rounded-full bg-success'
               : 'size-[7px] shrink-0 rounded-full bg-border'
           }
           aria-hidden
         />
-        {pinned && <Pin className="size-3 shrink-0 text-muted" aria-label="Pinned" />}
+        {pinned && <Pin className="size-3 shrink-0 text-muted-foreground" aria-label="Pinned" />}
         <span className="flex-1 truncate">{threadLabel(row)}</span>
         {row.streaming && <LogoSnakeSpinner size={15} label="Streaming" />}
         {row.needsAttention && (
@@ -612,7 +612,7 @@ function NavThread({
         {/* Hidden on hover so the kebab (absolute, right-1) takes this spot instead of
             drawing ON TOP of the time; `invisible` keeps the space so nothing reflows. */}
         {timestamp && (
-          <span className="shrink-0 text-[13px] text-faint group-hover/thread:invisible">
+          <span className="shrink-0 text-[13px] text-muted-foreground group-hover/thread:invisible">
             {timestamp}
           </span>
         )}
@@ -624,7 +624,7 @@ function NavThread({
         <MenuTrigger
           aria-label="Thread actions"
           title="Thread actions"
-          className="absolute top-1/2 right-1 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-sm text-muted opacity-0 outline-none transition-opacity hover:bg-accent/10 hover:text-text focus-visible:opacity-100 group-hover/thread:opacity-100 data-[popup-open]:opacity-100"
+          className="absolute top-1/2 right-1 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground opacity-0 outline-none transition-opacity hover:bg-primary/10 hover:text-foreground focus-visible:opacity-100 group-hover/thread:opacity-100 data-[popup-open]:opacity-100"
         >
           <MoreVertical className="size-3.5" aria-hidden />
         </MenuTrigger>
@@ -646,7 +646,7 @@ function NavThread({
             {archived ? 'Unarchive' : 'Archive'}
           </MenuItem>
           {deletable && (
-            <MenuItem className="text-bad" onClick={() => void actions.deleteThread(row.thread)}>
+            <MenuItem className="text-destructive" onClick={() => void actions.deleteThread(row.thread)}>
               <Trash2 className="size-3.5" aria-hidden />
               Delete
             </MenuItem>

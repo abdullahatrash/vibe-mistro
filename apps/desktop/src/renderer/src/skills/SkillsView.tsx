@@ -63,21 +63,21 @@ export function SkillsView({
         <IconButton aria-label="Back" title="Back" onClick={onClose}>
           <ArrowLeft className="size-4" aria-hidden />
         </IconButton>
-        <h1 className="text-[19px] font-semibold tracking-tight text-text-strong">Skills</h1>
+        <h1 className="text-[19px] font-semibold tracking-tight text-foreground">Skills</h1>
       </div>
-      <p className="text-[13px] text-muted">
+      <p className="text-[13px] text-muted-foreground">
         The agent skills installed on this machine — invoked with <code>/name</code> in the
         composer. Project skills{workspaceName ? ` (${workspaceName})` : ''} shadow global ones
         of the same name. Click a skill to read its instructions.
       </p>
 
       {skills === null ? (
-        <div className="rounded-[9px] border border-border p-3 text-[13px] text-muted">
+        <div className="rounded-[9px] border border-border p-3 text-[13px] text-muted-foreground">
           Scanning skill folders…
         </div>
       ) : skills.length === 0 ? (
-        <div className="flex flex-col gap-2 rounded-[9px] border border-border p-4 text-[13px] text-muted">
-          <span className="flex items-center gap-2 font-semibold text-text-strong">
+        <div className="flex flex-col gap-2 rounded-[9px] border border-border p-4 text-[13px] text-muted-foreground">
+          <span className="flex items-center gap-2 font-semibold text-foreground">
             <Sparkles className="size-4" aria-hidden />
             No skills installed
           </span>
@@ -95,7 +95,7 @@ export function SkillsView({
             // buttons are invalid HTML); the row's hover wash lives on the <li>.
             <li
               key={skill.name}
-              className="flex items-start gap-3 rounded-[9px] border border-border p-3 transition-colors hover:bg-accent/10 focus-within:bg-accent/10"
+              className="flex items-start gap-3 rounded-[9px] border border-border p-3 transition-colors hover:bg-primary/10 focus-within:bg-primary/10"
             >
               <button
                 type="button"
@@ -103,11 +103,11 @@ export function SkillsView({
                 aria-label={`Open /${skill.name}`}
                 className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 text-left outline-none"
               >
-                <Sparkles className="mt-0.5 size-4 shrink-0 text-muted" aria-hidden />
+                <Sparkles className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <SkillHeading skill={skill} />
-                  <span className="text-[13px] text-muted">{skill.description}</span>
-                  <span className="truncate text-[11px] text-faint">{skill.path}</span>
+                  <span className="text-[13px] text-muted-foreground">{skill.description}</span>
+                  <span className="truncate text-[11px] text-muted-foreground">{skill.path}</span>
                 </span>
               </button>
               <RevealButton skill={skill} workspaceDir={workspaceDir} />
@@ -154,26 +154,26 @@ function SkillPreview({
         <IconButton aria-label="Back to skills" title="Back to skills" onClick={onBack}>
           <ArrowLeft className="size-4" aria-hidden />
         </IconButton>
-        <h1 className="min-w-0 truncate text-[19px] font-semibold tracking-tight text-text-strong">
+        <h1 className="min-w-0 truncate text-[19px] font-semibold tracking-tight text-foreground">
           /{skill.name}
         </h1>
         <SkillBadges skill={skill} />
         <span className="flex-1" />
         <RevealButton skill={skill} workspaceDir={workspaceDir} />
       </div>
-      <p className="text-[13px] text-muted">{skill.description}</p>
-      <p className="truncate text-[11px] text-faint">{skill.path}</p>
+      <p className="text-[13px] text-muted-foreground">{skill.description}</p>
+      <p className="truncate text-[11px] text-muted-foreground">{skill.path}</p>
 
       {markdown === undefined ? (
-        <div className="rounded-[9px] border border-border p-3 text-[13px] text-muted">
+        <div className="rounded-[9px] border border-border p-3 text-[13px] text-muted-foreground">
           Reading SKILL.md…
         </div>
       ) : markdown === null ? (
-        <div className="rounded-[9px] border border-border p-3 text-[13px] text-muted">
+        <div className="rounded-[9px] border border-border p-3 text-[13px] text-muted-foreground">
           Couldn’t read this skill’s file — it may have moved. Reveal it to inspect on disk.
         </div>
       ) : markdown === '' ? (
-        <div className="rounded-[9px] border border-border p-3 text-[13px] text-muted">
+        <div className="rounded-[9px] border border-border p-3 text-[13px] text-muted-foreground">
           This skill has no instructions beyond its frontmatter.
         </div>
       ) : (
@@ -188,7 +188,7 @@ function SkillPreview({
 function SkillHeading({ skill }: { skill: SkillInfo }): JSX.Element {
   return (
     <span className="flex min-w-0 items-center gap-1.5">
-      <span className="truncate text-[13px] font-semibold text-text-strong">/{skill.name}</span>
+      <span className="truncate text-[13px] font-semibold text-foreground">/{skill.name}</span>
       <SkillBadges skill={skill} />
     </span>
   )
@@ -204,7 +204,7 @@ function SkillBadges({ skill }: { skill: SkillInfo }): JSX.Element {
         {skill.scope === 'project' ? 'Project' : 'Global'}
       </Badge>
       {!skill.userInvocable && (
-        <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px] text-muted">
+        <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px] text-muted-foreground">
           not invocable
         </Badge>
       )}

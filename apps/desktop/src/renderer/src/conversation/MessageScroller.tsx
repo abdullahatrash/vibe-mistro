@@ -46,7 +46,7 @@ export function MessageScroller({
           type="button"
           onClick={() => void scrollToBottom()}
           aria-label="Scroll to latest"
-          className="absolute bottom-2 left-1/2 inline-flex size-8 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-panel text-muted shadow-md outline-none transition-colors hover:text-text"
+          className="absolute bottom-2 left-1/2 inline-flex size-8 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-card text-muted-foreground shadow-md outline-none transition-colors hover:text-foreground"
         >
           <ArrowDown className="size-4" aria-hidden />
         </button>

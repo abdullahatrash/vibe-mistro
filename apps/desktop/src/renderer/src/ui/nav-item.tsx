@@ -20,10 +20,10 @@ export function NavItem({
       data-slot="nav-item"
       data-active={active || undefined}
       className={cn(
-        'flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-[14px] text-text-body outline-none transition-colors',
-        '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:text-muted',
-        'hover:bg-accent/10 focus-visible:bg-accent/10',
-        active && 'bg-accent/15 font-semibold text-text-strong [&_svg]:text-text-strong',
+        'flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-[14px] text-foreground outline-none transition-colors',
+        '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:text-muted-foreground',
+        'hover:bg-primary/10 focus-visible:bg-primary/10',
+        active && 'bg-primary/15 font-semibold text-foreground [&_svg]:text-foreground',
         className,
       )}
       {...props}

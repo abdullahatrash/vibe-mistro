@@ -44,9 +44,9 @@ export function fileGlyph(file: GitFile): { glyph: string; label: string } {
 
 /** A glyph's accent: added/untracked read positive, deleted negative, else neutral. */
 export function glyphClass(glyph: string): string {
-  if (glyph === 'A' || glyph === 'U') return 'text-ok'
-  if (glyph === 'D') return 'text-bad'
-  return 'text-accent-text'
+  if (glyph === 'A' || glyph === 'U') return 'text-success'
+  if (glyph === 'D') return 'text-destructive'
+  return 'text-primary'
 }
 
 /** Sort rank by glyph so like-changes group together; ties break on path. */
