@@ -11,7 +11,7 @@ export function Panel({ className, ...props }: ComponentProps<'div'>): JSX.Eleme
     <div
       data-slot="panel"
       className={cn(
-        'flex h-full min-h-0 flex-col border-l border-border bg-panel text-text',
+        'flex h-full min-h-0 flex-col border-l border-border bg-card text-foreground',
         className,
       )}
       {...props}
@@ -24,7 +24,7 @@ export function PanelHeader({ className, ...props }: ComponentProps<'div'>): JSX
     <div
       data-slot="panel-header"
       className={cn(
-        'flex flex-none items-center gap-2 border-b border-border-muted px-4 py-3',
+        'flex flex-none items-center gap-2 border-b border-border px-4 py-3',
         className,
       )}
       {...props}
@@ -36,7 +36,7 @@ export function PanelTitle({ className, ...props }: ComponentProps<'div'>): JSX.
   return (
     <div
       data-slot="panel-title"
-      className={cn('flex-1 text-sm font-semibold text-text-strong', className)}
+      className={cn('flex-1 text-sm font-semibold text-foreground', className)}
       {...props}
     />
   )

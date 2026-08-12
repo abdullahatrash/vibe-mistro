@@ -23,15 +23,15 @@ export function SelectTrigger({
     <BaseSelect.Trigger
       data-slot="select-trigger"
       className={cn(
-        'flex h-9 w-fit items-center justify-between gap-2 rounded-md border border-border bg-surface px-3 text-sm text-text outline-none transition-colors',
-        'hover:bg-accent/10 focus-visible:border-accent disabled:pointer-events-none disabled:opacity-50',
+        'flex h-9 w-fit items-center justify-between gap-2 rounded-md border border-border bg-secondary px-3 text-sm text-foreground outline-none transition-colors',
+        'hover:bg-primary/10 focus-visible:border-primary disabled:pointer-events-none disabled:opacity-50',
         '[&_svg]:pointer-events-none [&_svg]:shrink-0',
         className,
       )}
       {...props}
     >
       {children}
-      <BaseSelect.Icon render={<ChevronDown className="size-4 text-muted" />} />
+      <BaseSelect.Icon render={<ChevronDown className="size-4 text-muted-foreground" />} />
     </BaseSelect.Trigger>
   )
 }
@@ -86,7 +86,7 @@ export function SelectItem({
       data-slot="select-item"
       className={cn(
         'relative flex cursor-default items-center gap-2 py-1.5 pr-8 pl-3 outline-none select-none',
-        'data-[highlighted]:bg-accent data-[highlighted]:text-on-accent',
+        'data-[highlighted]:bg-primary data-[highlighted]:text-primary-foreground',
         'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
         '[&_svg]:pointer-events-none [&_svg]:shrink-0',
         className,
@@ -108,7 +108,7 @@ export function SelectGroupLabel({
   return (
     <BaseSelect.GroupLabel
       data-slot="select-label"
-      className={cn('px-3 py-1.5 text-xs text-muted', className)}
+      className={cn('px-3 py-1.5 text-xs text-muted-foreground', className)}
       {...props}
     />
   )

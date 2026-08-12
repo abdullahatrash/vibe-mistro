@@ -37,7 +37,7 @@ export function EmptyState({
   if (state === 'needs-install') {
     return (
       <div className="flex max-w-[460px] flex-col items-start gap-3">
-        <div className="text-[15px] font-semibold text-text-strong">
+        <div className="text-[15px] font-semibold text-foreground">
           Install Mistral Vibe to get started
         </div>
         {/* Same canonical copy as the spawn-error hint + the persistent banner
@@ -59,8 +59,8 @@ export function EmptyState({
     return (
       <div className="mx-auto flex h-full max-w-[830px] flex-col items-center justify-center gap-6 text-center">
         <Logo size={52} />
-        <h1 className="text-[37px] font-semibold tracking-[-0.6px] text-text-strong">
-          Open a <span className="text-accent-emphasis">project</span> to begin
+        <h1 className="text-[37px] font-semibold tracking-[-0.6px] text-foreground">
+          Open a <span className="text-primary">project</span> to begin
         </h1>
         <p className="hint">
           Each project runs its own Mistral Vibe agent — open one to start your first thread.
@@ -68,13 +68,13 @@ export function EmptyState({
         <Button size="lg" onClick={onOpenProject} disabled={opening}>
           {opening ? 'Connecting…' : 'Open project'}
         </Button>
-        <div className="mt-2 w-full max-w-[500px] rounded-lg border border-border bg-surface px-4 py-3.5 text-left">
-          <div className="text-[13px] font-semibold text-text-strong">New to Mistral Vibe?</div>
-          <ol className="mt-2 flex flex-col gap-2 text-[13px] text-text-secondary">
+        <div className="mt-2 w-full max-w-[500px] rounded-lg border border-border bg-secondary px-4 py-3.5 text-left">
+          <div className="text-[13px] font-semibold text-foreground">New to Mistral Vibe?</div>
+          <ol className="mt-2 flex flex-col gap-2 text-[13px] text-muted-foreground">
             <li className="flex flex-col gap-1">
               <span>1. Install the CLI:</span>
               <span className="flex items-center gap-1.5 rounded-md border border-border bg-sidebar py-0.5 pr-0.5 pl-2">
-                <code className="min-w-0 flex-1 truncate font-mono text-[12px] text-text">
+                <code className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground">
                   {INSTALL_COMMAND}
                 </code>
                 <CopyCommandButton text={INSTALL_COMMAND} />
@@ -85,7 +85,7 @@ export function EmptyState({
             </li>
           </ol>
           <a
-            className="mt-2 inline-block text-[12px] text-accent-text underline-offset-2 hover:underline"
+            className="mt-2 inline-block text-[12px] text-primary underline-offset-2 hover:underline"
             href={INSTALL_DOCS_URL}
             target="_blank"
             rel="noreferrer"
@@ -102,9 +102,9 @@ export function EmptyState({
   return (
     <div className="mx-auto flex h-full max-w-[830px] flex-col items-center justify-center gap-6 text-center">
       <Logo size={52} />
-      <h1 className="text-[37px] font-semibold tracking-[-0.6px] text-text-strong">
+      <h1 className="text-[37px] font-semibold tracking-[-0.6px] text-foreground">
         {headline.lead}
-        {headline.name && <span className="text-accent-emphasis">{headline.name}</span>}
+        {headline.name && <span className="text-primary">{headline.name}</span>}
         {headline.tail}
       </h1>
       <p className="hint">
@@ -156,7 +156,7 @@ function CopyCommandButton({ text }: { text: string }): JSX.Element {
       title={feedback === 'failed' ? 'Failed to copy' : 'Copy'}
     >
       {feedback === 'copied' ? (
-        <Check className="size-3.5 text-ok" aria-hidden />
+        <Check className="size-3.5 text-success" aria-hidden />
       ) : (
         <Copy className="size-3.5" aria-hidden />
       )}

@@ -33,7 +33,7 @@ export function QuickActions({
   return (
     <div className="flex flex-col gap-2">
       {error && (
-        <p className="text-[11px] text-bad" role="alert">
+        <p className="text-[11px] text-destructive" role="alert">
           {error}
         </p>
       )}

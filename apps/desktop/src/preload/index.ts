@@ -83,6 +83,8 @@ import {
   type CheckVibeUpdateArgs,
   type VibeUpdateResult,
   type AppUpdateStatusEvent,
+  type SetThemeArgs,
+  type ThemeState,
 } from '../shared/ipc'
 
 /**
@@ -106,6 +108,9 @@ const api = {
   getAppUpdateStatus: (): Promise<AppUpdateStatusEvent> =>
     ipcRenderer.invoke(IPC.appUpdateGetStatus),
   appUpdateRestart: (): void => ipcRenderer.send(IPC.appUpdateRestart),
+  getTheme: (): Promise<ThemeState> => ipcRenderer.invoke(IPC.themeGet),
+  setTheme: (args: SetThemeArgs): Promise<ThemeState> => ipcRenderer.invoke(IPC.themeSet, args),
+  themeReady: (): void => ipcRenderer.send(IPC.themeReady),
   openWorkspaceDialog: (): Promise<string | null> => ipcRenderer.invoke(IPC.openWorkspaceDialog),
   startThread: (args: StartThreadArgs): Promise<StartThreadResult> =>
     ipcRenderer.invoke(IPC.startThread, args),
@@ -202,6 +207,7 @@ const api = {
   onAgentEvicted: subscribe<AgentEvictedEvent>(IPC.agentEvicted),
   onMenuAction: subscribe<MenuActionEvent>(IPC.menuAction),
   onAppUpdateStatus: subscribe<AppUpdateStatusEvent>(IPC.appUpdateStatus),
+  onThemeStatus: subscribe<ThemeState>(IPC.themeStatus),
   onGitStatus: subscribe<GitStatusEvent>(IPC.gitStatus),
   onGitActionProgress: subscribe<GitActionProgressEvent>(IPC.gitActionProgress),
 }

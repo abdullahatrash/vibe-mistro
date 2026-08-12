@@ -15,13 +15,13 @@ export function PermissionRow({ item }: { item: PermissionItem }): JSX.Element {
   // settled "You chose: …" state is unchanged; the wiring (`onPermission`, `item.options`,
   // `chosenName`) is behaviour-identical to the retired BEM version.
   return (
-    <div className="flex flex-col gap-2.5 rounded-lg border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] p-3">
-      <div className="flex items-center gap-1.5 text-[13px] font-semibold text-accent-text">
+    <div className="flex flex-col gap-2.5 rounded-lg border border-primary/30 bg-primary/10 p-3">
+      <div className="flex items-center gap-1.5 text-[13px] font-semibold text-primary">
         <ShieldAlert className="size-4 shrink-0" aria-hidden />
         <span>Permission request{item.toolCallId ? ` · ${item.toolCallId}` : ''}</span>
       </div>
       {item.chosenName ? (
-        <div className="flex items-center gap-1.5 text-[13px] text-muted">
+        <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
           <Check className="size-3.5 shrink-0" aria-hidden />
           <span>You chose: {item.chosenName}</span>
         </div>

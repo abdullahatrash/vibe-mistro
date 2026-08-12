@@ -50,7 +50,7 @@ export function PopoverTitle({
   return (
     <BasePopover.Title
       data-slot="popover-title"
-      className={cn('text-sm font-semibold text-text-strong', className)}
+      className={cn('text-sm font-semibold text-foreground', className)}
       {...props}
     />
   )
@@ -63,7 +63,7 @@ export function PopoverDescription({
   return (
     <BasePopover.Description
       data-slot="popover-description"
-      className={cn('text-sm text-muted', className)}
+      className={cn('text-sm text-muted-foreground', className)}
       {...props}
     />
   )

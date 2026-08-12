@@ -1,4 +1,14 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, type WebContents } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeImage,
+  nativeTheme,
+  shell,
+  type WebContents,
+} from 'electron'
 import electronUpdater, { type UpdateInfo } from 'electron-updater'
 import { mkdir } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
@@ -43,6 +53,10 @@ import {
   type ThreadStatusEvent,
   type ThreadTitleEvent,
   type AppUpdateStatusEvent,
+  isThemePreference,
+  type SetThemeArgs,
+  type ThemePreference,
+  type ThemeState,
 } from '../shared/ipc'
 import { detectVibe } from './vibe-detect'
 import { checkVibeUpdate } from './vibe-update'
@@ -102,6 +116,11 @@ import { clampWebviewAttachment } from './browser/webview-clamp'
 import { safeExternalUrl } from './files/safe-external-url'
 import { APP_DISPLAY_NAME, buildMenuTemplate } from './app-menu'
 import { applyPendingThreadControls } from './pending-thread-controls'
+import { resolveTheme, THEME_BACKGROUND } from './theme/resolve-theme'
+import {
+  DEFAULT_THEME_PREFERENCE,
+  ThemePreferenceStore,
+} from './theme/theme-store'
 
 // App identity: rename the app (menu roles, About panel) away from package.json's
 // `vibe-mistro`. Must run before `app.whenReady()`. `app.name` also derives the
@@ -231,6 +250,37 @@ function emitThreadTitle(event: ThreadTitleEvent): void {
 let appUpdateStatus: AppUpdateStatusEvent = APP_UPDATE_INITIAL
 /** Whether startAppUpdater actually armed the updater (packaged / mock-feed runs). */
 let appUpdaterEnabled = false
+
+/**
+ * Main owns theme preference and resolution so the first BrowserWindow can paint
+ * the correct background before its renderer exists. `nativeTheme.themeSource`
+ * is intentionally never changed; system appearance is read, not overridden.
+ */
+let themeState: ThemeState = {
+  preference: DEFAULT_THEME_PREFERENCE,
+  resolved: 'light',
+}
+let themeStore: ThemePreferenceStore | null = null
+
+/** Apply one main-owned transition and broadcast confirmed state to renderers. */
+function applyThemePreference(preference: ThemePreference): ThemeState {
+  const resolved = resolveTheme(preference, nativeTheme.shouldUseDarkColors)
+  const resolvedChanged = resolved !== themeState.resolved
+  const changed = resolvedChanged || preference !== themeState.preference
+  themeState = { preference, resolved }
+
+  if (changed) {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (resolvedChanged) win.setBackgroundColor(THEME_BACKGROUND[resolved])
+      if (!win.webContents.isDestroyed()) win.webContents.send(IPC.themeStatus, themeState)
+    }
+  }
+  return themeState
+}
+
+function refreshResolvedTheme(): void {
+  applyThemePreference(themeState.preference)
+}
 
 function applyUpdaterEvent(event: UpdaterEvent): void {
   const next = reduceUpdaterEvent(appUpdateStatus, event)
@@ -762,6 +812,7 @@ function createWindow(): void {
     minWidth: 900,
     minHeight: 600,
     show: false,
+    backgroundColor: THEME_BACKGROUND[themeState.resolved],
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     ...(process.platform === 'darwin' ? {} : { icon: APP_ICON_PNG }),
     webPreferences: {
@@ -775,7 +826,18 @@ function createWindow(): void {
     },
   })
 
-  win.on('ready-to-show', () => win.show())
+  // Theme-ready is the normal reveal path. If renderer startup fails before its
+  // handshake, degrade to a visible diagnostic window instead of staying hidden.
+  win.once('ready-to-show', () => {
+    if (win.isVisible()) return
+    const fallback = setTimeout(() => {
+      if (win.isDestroyed() || win.isVisible()) return
+      console.error('[theme] renderer readiness timed out; showing window fallback')
+      win.show()
+    }, 2_000)
+    win.once('show', () => clearTimeout(fallback))
+    win.once('closed', () => clearTimeout(fallback))
+  })
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
@@ -842,6 +904,21 @@ function registerIpc(deps: MainDeps): void {
   )
 
   ipcMain.handle(IPC.appUpdateGetStatus, (): AppUpdateStatusEvent => appUpdateStatus)
+
+  ipcMain.handle(IPC.themeGet, (): ThemeState => themeState)
+
+  ipcMain.handle(IPC.themeSet, (_event, args: SetThemeArgs): ThemeState => {
+    if (!isThemePreference(args?.preference)) return themeState
+    const next = applyThemePreference(args.preference)
+    void themeStore?.save(next.preference)
+    return next
+  })
+
+  // The renderer applies the confirmed root theme before mounting. Showing only
+  // after that handshake prevents a persisted dark preference flashing light.
+  ipcMain.on(IPC.themeReady, (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.show()
+  })
 
   ipcMain.on(IPC.appUpdateRestart, () => {
     // Only meaningful once a download is ready; a stray send is a no-op rather
@@ -1435,6 +1512,13 @@ app.whenReady().then(async () => {
 
   registerIpc(deps)
   startAppUpdater()
+
+  // Load before the first BrowserWindow so its pre-renderer paint matches the
+  // persisted preference. The store tolerates missing or malformed data.
+  themeStore = new ThemePreferenceStore(app.getPath('userData'))
+  applyThemePreference(await themeStore.load())
+  nativeTheme.on('updated', refreshResolvedTheme)
+
   createWindow()
 
   // The periodic sweep (TB5 #50): release any agent untouched past IDLE_EVICT_MS,

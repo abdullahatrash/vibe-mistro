@@ -23,9 +23,9 @@ export function InstallBanner({
   return (
     <div
       role="alert"
-      className="flex flex-none items-center gap-2.5 border-b border-[var(--bad-tint-border)] bg-[var(--bad-tint)] px-4 py-1.5 text-[13px] text-text"
+      className="flex flex-none items-center gap-2.5 border-b border-destructive/35 bg-destructive/10 px-4 py-1.5 text-[13px] text-foreground"
     >
-      <TriangleAlert className="size-4 flex-none text-bad" aria-hidden />
+      <TriangleAlert className="size-4 flex-none text-destructive" aria-hidden />
       <span className="min-w-0 flex-1">
         <CodeText text={message} />{' '}
         <a className="underline" href={INSTALL_DOCS_URL} target="_blank" rel="noreferrer">

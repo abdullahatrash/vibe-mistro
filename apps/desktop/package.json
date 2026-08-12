@@ -18,7 +18,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:update": "playwright test --update-snapshots",
-    "lint": "eslint .",
+    "lint": "eslint . && node scripts/check-theme-tokens.mjs",
     "dist": "electron-vite build && electron-builder --mac --arm64 --publish never",
     "dist:unsigned": "CSC_IDENTITY_AUTO_DISCOVERY=false bun run dist",
     "release": "electron-vite build && electron-builder --mac --arm64 --publish always",

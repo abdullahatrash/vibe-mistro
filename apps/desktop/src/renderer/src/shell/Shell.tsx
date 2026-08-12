@@ -196,8 +196,8 @@ export function Shell({
             onDoubleClick={resetWidth}
             className={cn(
               'absolute -left-1 top-0 h-full w-2 cursor-col-resize [-webkit-app-region:no-drag]',
-              'after:absolute after:inset-y-0 after:left-1 after:w-px after:bg-transparent after:transition-colors after:content-[""] hover:after:bg-accent/40',
-              dragging && 'after:bg-accent/60',
+              'after:absolute after:inset-y-0 after:left-1 after:w-px after:bg-transparent after:transition-colors after:content-[""] hover:after:bg-primary/40',
+              dragging && 'after:bg-primary/60',
             )}
           />
         </div>
@@ -238,7 +238,7 @@ function PrimaryNav({
         type="button"
         onClick={onNewThread}
         disabled={busy}
-        className="flex w-full items-center gap-2.5 rounded-lg bg-[var(--accent-fill)] px-3 py-2 text-left text-[14px] font-semibold text-accent-text outline-none transition-[filter] hover:brightness-[0.98] disabled:pointer-events-none disabled:opacity-50"
+        className="flex w-full items-center gap-2.5 rounded-lg bg-primary/15 px-3 py-2 text-left text-[14px] font-semibold text-primary outline-none transition-[filter] hover:brightness-[0.98] disabled:pointer-events-none disabled:opacity-50"
       >
         <SquarePen className="size-[18px]" aria-hidden />
         New chat
@@ -246,7 +246,7 @@ function PrimaryNav({
       <NavItem onClick={onOpenSearch}>
         <Search className="size-[18px]" aria-hidden />
         <span className="flex-1">Search</span>
-        <span className="text-[11px] font-medium text-faint">⌘K</span>
+        <span className="text-[11px] font-medium text-muted-foreground">⌘K</span>
       </NavItem>
       <NavItem onClick={onOpenSkills}>
         <Sparkles className="size-[18px]" aria-hidden />
@@ -270,7 +270,7 @@ function AccountChip({ onOpenSettings }: { onOpenSettings: () => void }): JSX.El
   const plan = planLabel(useAccountPlan())
   return (
     <Menu>
-      <MenuTrigger className="flex items-center gap-2.5 rounded-[9px] px-2 py-2 text-left outline-none transition-colors hover:bg-accent/10 focus-visible:bg-accent/10 data-[popup-open]:bg-accent/10">
+      <MenuTrigger className="flex items-center gap-2.5 rounded-[9px] px-2 py-2 text-left outline-none transition-colors hover:bg-primary/10 focus-visible:bg-primary/10 data-[popup-open]:bg-primary/10">
         {/* static avatar/name — Vibe exposes no identity to fill them with (ADR-0003). */}
         <span
           aria-hidden
@@ -280,12 +280,12 @@ function AccountChip({ onOpenSettings }: { onOpenSettings: () => void }): JSX.El
           V
         </span>
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-[14px] font-semibold text-text-strong">Your account</span>
-          <span className="truncate text-[12px] text-faint">
+          <span className="truncate text-[14px] font-semibold text-foreground">Your account</span>
+          <span className="truncate text-[12px] text-muted-foreground">
             {plan ? `Mistral Vibe · ${plan}` : 'Mistral Vibe'}
           </span>
         </span>
-        <ChevronDown className="size-4 shrink-0 text-muted" aria-hidden />
+        <ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
       </MenuTrigger>
       <MenuContent align="start" className="min-w-[200px]">
         <MenuItem onClick={onOpenSettings}>

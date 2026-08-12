@@ -129,7 +129,7 @@ export function MessageSelectionToolbar({
             aria-label="Message selection actions"
             initialFocus={false}
             finalFocus={false}
-            className="rounded-md border border-border bg-panel p-1 shadow-lg outline-none"
+            className="rounded-md border border-border bg-card p-1 shadow-lg outline-none"
           >
             <Button
               type="button"

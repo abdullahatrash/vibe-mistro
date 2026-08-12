@@ -25,12 +25,12 @@ describe('fileGlyph', () => {
 
 describe('glyphClass', () => {
   it('accents added/untracked positive, deleted negative, else neutral', () => {
-    expect(glyphClass('A')).toBe('text-ok')
-    expect(glyphClass('U')).toBe('text-ok')
-    expect(glyphClass('D')).toBe('text-bad')
-    expect(glyphClass('M')).toBe('text-accent-text')
-    expect(glyphClass('R')).toBe('text-accent-text')
-    expect(glyphClass('C')).toBe('text-accent-text')
+    expect(glyphClass('A')).toBe('text-success')
+    expect(glyphClass('U')).toBe('text-success')
+    expect(glyphClass('D')).toBe('text-destructive')
+    expect(glyphClass('M')).toBe('text-primary')
+    expect(glyphClass('R')).toBe('text-primary')
+    expect(glyphClass('C')).toBe('text-primary')
   })
 })
 

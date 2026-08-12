@@ -41,7 +41,7 @@ export function useJumpToItem(
         // Animations API, so no stylesheet coupling; cleans itself up on finish.
         el.animate(
           [
-            { backgroundColor: 'color-mix(in srgb, var(--accent) 18%, transparent)' },
+            { backgroundColor: 'color-mix(in srgb, var(--primary) 18%, transparent)' },
             { backgroundColor: 'transparent' },
           ],
           { duration: 1600, easing: 'ease-out' },

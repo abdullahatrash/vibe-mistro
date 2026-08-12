@@ -20,7 +20,7 @@ export function ReasoningRow({ item, index }: { item: ReasoningItem; index: numb
       open={open}
       onOpenChange={setOpen}
       toggleZone="header"
-      headerClassName="flex items-center gap-1.5 rounded-md px-0.5 py-0.5 text-[12px] text-muted outline-none transition-colors hover:bg-accent/10 focus-visible:bg-accent/10"
+      headerClassName="flex items-center gap-1.5 rounded-md px-0.5 py-0.5 text-[12px] text-muted-foreground outline-none transition-colors hover:bg-primary/10 focus-visible:bg-primary/10"
       header={
         <>
           <Brain className="size-3.5 shrink-0" aria-hidden />
@@ -30,7 +30,7 @@ export function ReasoningRow({ item, index }: { item: ReasoningItem; index: numb
       }
     >
       <Response
-        className="mt-1 ms-2 border-s border-border ps-3 text-[13px] leading-relaxed text-muted"
+        className="mt-1 ms-2 border-s border-border ps-3 text-[13px] leading-relaxed text-muted-foreground"
         text={item.text}
       />
     </FoldableRow>

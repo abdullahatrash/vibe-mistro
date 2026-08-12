@@ -109,7 +109,7 @@ export function SignInPanel({
     return (
       <SignInCard>
         <SignInLoading label="Signing in…" />
-        <p className="text-[13px] leading-relaxed text-muted">
+        <p className="text-[13px] leading-relaxed text-muted-foreground">
           Complete sign-in in your browser, then return here.
         </p>
         <Button variant="outline" size="sm" className="self-start" onClick={cancel}>
@@ -132,11 +132,11 @@ export function SignInPanel({
   // re-running the browser flow (#79) — for an out-of-band `vibe` CLI sign-in.
   return (
     <SignInCard>
-      <div className="text-sm font-semibold text-text-strong">Not signed in to Mistral Vibe</div>
+      <div className="text-sm font-semibold text-foreground">Not signed in to Mistral Vibe</div>
       {view.kind === 'sign-in' && view.description && (
-        <p className="text-[13px] leading-relaxed text-muted">{view.description}</p>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">{view.description}</p>
       )}
-      {view.kind === 'error' && <p className="text-[13px] leading-relaxed text-bad">{view.message}</p>}
+      {view.kind === 'error' && <p className="text-[13px] leading-relaxed text-destructive">{view.message}</p>}
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="default" onClick={() => void signIn(view.methodId)}>
           {view.kind === 'error' ? `Retry — ${view.methodName}` : view.methodName}
@@ -168,7 +168,7 @@ function SignInCard({ children }: { children: ReactNode }): JSX.Element {
  * checking / signing-out / opening). Copy is unchanged; only the look. */
 function SignInLoading({ label }: { label: string }): JSX.Element {
   return (
-    <div className="flex items-center gap-2.5 text-sm font-semibold text-text-strong">
+    <div className="flex items-center gap-2.5 text-sm font-semibold text-foreground">
       {/* Spinner is decorative here — the visible label carries the accessible name,
           so hide the spinner's own role=img to avoid a double screen-reader announce. */}
       <span aria-hidden className="inline-flex">

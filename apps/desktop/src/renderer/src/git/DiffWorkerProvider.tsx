@@ -1,6 +1,8 @@
-import { useMemo, type JSX, type ReactNode } from 'react'
-import { WorkerPoolContextProvider } from '@pierre/diffs/react'
+import { useEffect, useMemo, type JSX, type ReactNode } from 'react'
+import { useWorkerPool, WorkerPoolContextProvider } from '@pierre/diffs/react'
 import DiffsWorker from '@pierre/diffs/worker/worker.js?worker'
+import { getResolvedTheme, useResolvedTheme } from '../shell/resolved-theme-store'
+import { pierreThemeOptions } from './pierre-theme'
 
 /**
  * Mounts `@pierre/diffs`' web-worker pool around the diff viewer (#85, ADR-0008). The
@@ -13,12 +15,9 @@ import DiffsWorker from '@pierre/diffs/worker/worker.js?worker'
  * that news one up. Pool size is derived from `hardwareConcurrency`, clamped to 2-6 so a
  * many-core machine doesn't spawn a wasteful fleet and a single-core one still gets two.
  *
- * Brand is light-mode (CONTEXT.md), so we pin @pierre's `pierre-light` highlighter theme
- * and skip t3code's theme-sync effect entirely — there is no dark mode to follow. If a
- * dark mode ever lands, push the new theme at runtime via `useWorkerPool().setRenderOptions`
- * (verified against `WorkerPoolManager` in `node_modules/@pierre/diffs`) instead of
- * recreating the pool — `setRenderOptions` only re-registers the theme, it does not evict
- * the parsed-AST caches below, so a theme switch never triggers a re-parse.
+ * Theme: CSS cannot reach the worker highlighter. Initialize the singleton from the
+ * current resolved app theme, then push live flips through `setRenderOptions` rather
+ * than recreating the pool. Re-registering the theme preserves the parsed-AST caches.
  *
  * Scale tuning (#389, PRD #387): `totalASTLRUCacheSize` bounds the pool's own parsed-file/
  * parsed-diff LRU caches (keyed by the `cacheKey` callers attach — see `patch-cache-key.ts`),
@@ -28,14 +27,25 @@ import DiffsWorker from '@pierre/diffs/worker/worker.js?worker'
  * `WorkerPoolOptions`/`WorkerRenderingOptions` in `node_modules/@pierre/diffs/dist/worker/types.d.ts`.
  */
 
-/** @pierre's bundled light theme — matches the brand's light-mode surfaces. */
-const DIFF_THEME = 'pierre-light'
-
 /** Parsed-AST LRU entries kept across BOTH the file and diff caches (#389). */
 const AST_LRU_CACHE_SIZE = 240
 
 /** Lines longer than this render unhighlighted instead of hanging the tokenizer (#389). */
 const TOKENIZE_MAX_LINE_LENGTH = 1000
+
+/** Push a resolved-theme flip into the already-live singleton worker pool. */
+function DiffThemeSync(): null {
+  const pool = useWorkerPool()
+  const resolved = useResolvedTheme()
+
+  useEffect(() => {
+    void pool
+      ?.setRenderOptions({ theme: pierreThemeOptions(resolved).theme })
+      .catch((error: unknown) => console.error('[theme] failed to update diff workers:', error))
+  }, [pool, resolved])
+
+  return null
+}
 
 export function DiffWorkerProvider({ children }: { children?: ReactNode }): JSX.Element {
   // Clamp pool size to 2-6 from half the core count (mirrors t3code's heuristic): a
@@ -48,8 +58,12 @@ export function DiffWorkerProvider({ children }: { children?: ReactNode }): JSX.
   return (
     <WorkerPoolContextProvider
       poolOptions={{ workerFactory: () => new DiffsWorker(), poolSize, totalASTLRUCacheSize: AST_LRU_CACHE_SIZE }}
-      highlighterOptions={{ theme: DIFF_THEME, tokenizeMaxLineLength: TOKENIZE_MAX_LINE_LENGTH }}
+      highlighterOptions={{
+        theme: pierreThemeOptions(getResolvedTheme()).theme,
+        tokenizeMaxLineLength: TOKENIZE_MAX_LINE_LENGTH,
+      }}
     >
+      <DiffThemeSync />
       {children}
     </WorkerPoolContextProvider>
   )

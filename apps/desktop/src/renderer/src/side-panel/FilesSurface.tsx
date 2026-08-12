@@ -20,17 +20,13 @@ import { indexEntryKinds, selectedFilePath, toTreePaths } from './tree-paths'
 /** Map the tree's shadow-DOM theme onto our tokens (styles.css). */
 const TREE_UNSAFE_CSS = `
   :host {
-    /* The widget's defaults use CSS light-dark() (e.g. --trees-input-bg =
-       light-dark(#f8f8f8, #070707)); with no color-scheme pinned it followed the OS, so on a
-       dark-mode Mac the search field rendered near-black. vibe-mistro is a light-only app, so
-       pin the light branch here (scoped to the widget's shadow root) and paint the search
-       input on our warm inset surface to match the panel. */
-    color-scheme: light;
+    /* color-scheme inherits through the host from the app root, so the widget's
+       light-dark() internals follow Vibe Mistro's resolved theme rather than the OS. */
     --trees-input-bg-override: var(--sidebar);
     --trees-bg-override: transparent;
-    --trees-selected-bg-override: var(--accent-tint);
-    --trees-hover-bg-override: color-mix(in srgb, var(--accent) 8%, transparent);
-    --trees-border-color-override: var(--border-muted);
+    --trees-selected-bg-override: color-mix(in srgb, var(--primary) 12%, transparent);
+    --trees-hover-bg-override: color-mix(in srgb, var(--primary) 8%, transparent);
+    --trees-border-color-override: var(--border);
     --trees-font-family-override: inherit;
     --trees-font-size-override: 12.5px;
   }
@@ -131,20 +127,20 @@ export function FilesSurface({
       // virtualized and measures its scroll container, so a content-height (≈0) container renders
       // ZERO rows (the header/search still show). `flex-1` fills the column's height; `min-h-0`
       // lets it shrink below content so the inner tree can scroll. (Matches t3code's FileBrowserPanel.)
-      className="flex min-h-0 flex-1 flex-col text-text"
+      className="flex min-h-0 flex-1 flex-col text-foreground"
     >
-      <div className="flex items-center gap-2 border-b border-border-muted px-3 py-2.5">
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
         <button
           type="button"
           onClick={onCollapse}
           title="Collapse"
           aria-label="Collapse Files panel"
-          className="flex items-center gap-1.5 rounded-md text-left text-sm font-semibold text-text-strong"
+          className="flex items-center gap-1.5 rounded-md text-left text-sm font-semibold text-foreground"
         >
-          <PanelRightClose size={15} aria-hidden className="shrink-0 text-muted" />
+          <PanelRightClose size={15} aria-hidden className="shrink-0 text-muted-foreground" />
           <span>Files</span>
         </button>
-        <span className="min-w-0 flex-1 truncate text-[11px] text-faint" aria-live="polite">
+        <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground" aria-live="polite">
           {statusText}
           {data?.truncated ? ' · partial' : ''}
         </span>
@@ -153,7 +149,7 @@ export function FilesSurface({
           onClick={() => model.openSearch()}
           title="Search files"
           aria-label="Search files"
-          className="rounded-md p-1 text-muted outline-none transition-colors hover:bg-accent/10 hover:text-text-strong focus-visible:bg-accent/10"
+          className="rounded-md p-1 text-muted-foreground outline-none transition-colors hover:bg-primary/10 hover:text-foreground focus-visible:bg-primary/10"
         >
           <Search size={14} aria-hidden />
         </button>
@@ -163,14 +159,14 @@ export function FilesSurface({
           disabled={loading}
           title="Refresh files"
           aria-label="Refresh files"
-          className="rounded-md p-1 text-muted outline-none transition-colors hover:bg-accent/10 hover:text-text-strong focus-visible:bg-accent/10 disabled:opacity-50"
+          className="rounded-md p-1 text-muted-foreground outline-none transition-colors hover:bg-primary/10 hover:text-foreground focus-visible:bg-primary/10 disabled:opacity-50"
         >
           <RefreshCw size={14} aria-hidden className={cn(loading && 'animate-spin')} />
         </button>
       </div>
 
       {error ? (
-        <div className="flex flex-1 items-center justify-center px-6 py-10 text-center text-[13px] text-muted">
+        <div className="flex flex-1 items-center justify-center px-6 py-10 text-center text-[13px] text-muted-foreground">
           {error}
         </div>
       ) : (
@@ -178,7 +174,7 @@ export function FilesSurface({
           model={model}
           aria-label="Workspace files"
           className="min-h-0 flex-1 overflow-hidden"
-          style={{ ['--trees-fg-override' as string]: 'var(--text)' }}
+          style={{ ['--trees-fg-override' as string]: 'var(--foreground)' }}
         />
       )}
     </aside>

@@ -11,7 +11,7 @@ export function Card({ className, ...props }: ComponentProps<'div'>): JSX.Elemen
     <div
       data-slot="card"
       className={cn(
-        'flex flex-col gap-4 rounded-2xl border border-border bg-surface p-6 text-text shadow-sm',
+        'flex flex-col gap-4 rounded-2xl border border-border bg-secondary p-6 text-foreground shadow-sm',
         className,
       )}
       {...props}
@@ -27,7 +27,7 @@ export function CardTitle({ className, ...props }: ComponentProps<'div'>): JSX.E
   return (
     <div
       data-slot="card-title"
-      className={cn('font-semibold text-text-strong', className)}
+      className={cn('font-semibold text-foreground', className)}
       {...props}
     />
   )
@@ -35,7 +35,7 @@ export function CardTitle({ className, ...props }: ComponentProps<'div'>): JSX.E
 
 export function CardDescription({ className, ...props }: ComponentProps<'div'>): JSX.Element {
   return (
-    <div data-slot="card-description" className={cn('text-sm text-muted', className)} {...props} />
+    <div data-slot="card-description" className={cn('text-sm text-muted-foreground', className)} {...props} />
   )
 }
 

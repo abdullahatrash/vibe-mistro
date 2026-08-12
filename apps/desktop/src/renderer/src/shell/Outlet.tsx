@@ -28,8 +28,8 @@ export function TransientOutlet({
       return (
         <div className="mx-auto mt-14 flex max-w-[420px] flex-col items-center gap-2 text-center">
           <span className="dot dot--pending" aria-hidden />
-          <div className="text-sm font-semibold text-text-strong">Connecting…</div>
-          <div className="text-[13px] leading-relaxed text-muted">
+          <div className="text-sm font-semibold text-foreground">Connecting…</div>
+          <div className="text-[13px] leading-relaxed text-muted-foreground">
             Launching <code>vibe-acp</code> in <code>{connect.workspaceDir}</code> and running the
             ACP handshake.
           </div>

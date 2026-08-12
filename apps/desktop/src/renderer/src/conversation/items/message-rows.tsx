@@ -41,7 +41,7 @@ export function UserRow({ item, selectable }: { item: UserItem; selectable: bool
             <span
               data-command-chip
               title={command.description}
-              className="inline-flex items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] px-1.5 py-0.5 font-mono text-xs leading-none text-accent-text"
+              className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-xs leading-none text-primary"
             >
               <Sparkles className="size-3 shrink-0" aria-hidden />/{command.name}
             </span>
@@ -51,7 +51,7 @@ export function UserRow({ item, selectable }: { item: UserItem; selectable: bool
               key={file.path}
               data-file-chip
               title={file.path}
-              className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] px-1.5 py-0.5 font-mono text-xs leading-none text-accent-text"
+              className="inline-flex max-w-full items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-xs leading-none text-primary"
             >
               <File className="size-3 shrink-0" aria-hidden />
               <span className="truncate">{file.path}</span>
@@ -64,7 +64,7 @@ export function UserRow({ item, selectable }: { item: UserItem; selectable: bool
               title={[`<${element.tagName}>`, element.selector ?? '', element.text, element.pageUrl]
                 .filter((line) => line.length > 0)
                 .join('\n')}
-              className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] px-1.5 py-0.5 font-mono text-xs leading-none text-accent-text"
+              className="inline-flex max-w-full items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-xs leading-none text-primary"
             >
               <MousePointerClick className="size-3 shrink-0" aria-hidden />
               <span className="truncate">{element.selector ?? `<${element.tagName}>`}</span>
@@ -77,7 +77,7 @@ export function UserRow({ item, selectable }: { item: UserItem; selectable: bool
               key={review.id}
               data-review-chip
               title={[review.note, '', review.excerpt].join('\n')}
-              className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] px-1.5 py-0.5 font-mono text-xs leading-none text-accent-text"
+              className="inline-flex max-w-full items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-xs leading-none text-primary"
             >
               <MessageSquareText className="size-3 shrink-0" aria-hidden />
               <span className="truncate">
@@ -97,7 +97,7 @@ export function UserRow({ item, selectable }: { item: UserItem; selectable: bool
               key={paste.id}
               data-pasted-chip
               title={paste.text.length > 400 ? `${paste.text.slice(0, 400)}…` : paste.text}
-              className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] px-1.5 py-0.5 font-mono text-xs leading-none text-accent-text"
+              className="inline-flex max-w-full items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-xs leading-none text-primary"
             >
               <Clipboard className="size-3 shrink-0" aria-hidden />
               <span className="truncate">{pastedLabel(paste)}</span>
@@ -110,7 +110,7 @@ export function UserRow({ item, selectable }: { item: UserItem; selectable: bool
               key={selection.id}
               data-message-selection-chip
               title={pendingContextChipTitle(selection)}
-              className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] px-1.5 py-0.5 font-mono text-xs leading-none text-accent-text"
+              className="inline-flex max-w-full items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-xs leading-none text-primary"
             >
               <MessageSquareText className="size-3 shrink-0" aria-hidden />
               <span className="truncate">{pendingContextChipLabel(selection)}</span>
@@ -124,7 +124,7 @@ export function UserRow({ item, selectable }: { item: UserItem; selectable: bool
           data-message-selection-content={selectable ? '' : undefined}
           data-message-id={selectable ? item.id : undefined}
           data-message-role={selectable ? 'user' : undefined}
-          className="max-w-[80%] rounded-2xl border border-border bg-surface px-3.5 py-2.5 text-[15px] leading-relaxed break-words whitespace-pre-wrap text-text-body"
+          className="max-w-[80%] rounded-2xl border border-border bg-secondary px-3.5 py-2.5 text-[15px] leading-relaxed break-words whitespace-pre-wrap text-foreground"
         >
           {item.images && item.images.length > 0 && (
             <div className="mb-2 flex flex-wrap justify-end gap-2">
@@ -172,7 +172,7 @@ export function AssistantRow({
         data-message-role={selectable ? 'agent' : undefined}
         className="contents"
       >
-        <Response className="text-text-body" text={item.text} />
+        <Response className="text-foreground" text={item.text} />
       </div>
       {/* Actions bar (#116): a hover-reveal row under the answer, holding the Copy
           control (clipboard + anchored toast). Hidden while the answer streams (a
@@ -239,7 +239,7 @@ function MessageCopyButton({ text }: { text: string }): JSX.Element {
           render={
             <IconButton
               size="icon-xs"
-              className="text-muted hover:text-text"
+              className="text-muted-foreground hover:text-foreground"
               aria-label="Copy message"
               disabled={feedback === 'copied'}
               onClick={onCopy}
@@ -247,7 +247,7 @@ function MessageCopyButton({ text }: { text: string }): JSX.Element {
           }
         >
           {feedback === 'copied' ? (
-            <Check className="size-3.5 text-accent-text" aria-hidden />
+            <Check className="size-3.5 text-primary" aria-hidden />
           ) : (
             <Copy className="size-3.5" aria-hidden />
           )}

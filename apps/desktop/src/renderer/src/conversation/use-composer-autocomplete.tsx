@@ -215,7 +215,7 @@ export function CompletionPopover({
 }): JSX.Element {
   return (
     <ul
-      className="absolute right-0 bottom-full left-0 z-10 mb-2 max-h-56 list-none overflow-y-auto rounded-xl border border-border bg-panel p-1 shadow-lg"
+      className="absolute right-0 bottom-full left-0 z-10 mb-2 max-h-56 list-none overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-lg"
       role="listbox"
       aria-label={source.label}
     >
@@ -225,7 +225,7 @@ export function CompletionPopover({
           ref={i === activeIndex ? activeRowRef : null}
           role="option"
           aria-selected={i === activeIndex}
-          className={cn(source.rowClassName, i === activeIndex && 'bg-[var(--accent-tint)]')}
+          className={cn(source.rowClassName, i === activeIndex && 'bg-primary/10')}
           // mousedown (not click) so we accept BEFORE the textarea blurs.
           onMouseDown={(e) => {
             e.preventDefault()

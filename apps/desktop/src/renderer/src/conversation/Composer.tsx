@@ -545,7 +545,7 @@ export function Composer({
       <Card
         className={cn(
           'gap-0 p-0 shadow-xs transition-colors',
-          isDraggingFiles && 'border-accent bg-[var(--accent-tint)]',
+          isDraggingFiles && 'border-primary bg-primary/10',
         )}
         onDragEnter={onDragEnter}
         onDragOver={onDragOver}
@@ -562,14 +562,14 @@ export function Composer({
               {followUps.queued.map((m) => (
                 <div
                   key={m.id}
-                  className="flex items-center gap-2 rounded-lg border border-border bg-panel px-2 py-1"
+                  className="flex items-center gap-2 rounded-lg border border-border bg-card px-2 py-1"
                 >
-                  <span className="min-w-0 flex-1 truncate text-[13px] text-text">
+                  <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
                     {m.text
                       ? m.text
                       : `📎 ${m.images.length} image${m.images.length === 1 ? '' : 's'}`}
                     {m.text && m.images.length > 0 && (
-                      <span className="text-muted"> 📎 {m.images.length}</span>
+                      <span className="text-muted-foreground"> 📎 {m.images.length}</span>
                     )}
                   </span>
                   <IconButton
@@ -595,7 +595,7 @@ export function Composer({
                 <span
                   data-inline-token-chip
                   title={slashCommandToken.description}
-                  className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] py-0.5 pr-1 pl-1.5 font-mono text-xs leading-none text-accent-text"
+                  className="inline-flex max-w-full items-center gap-1 rounded-md border border-primary/30 bg-primary/10 py-0.5 pr-1 pl-1.5 font-mono text-xs leading-none text-primary"
                 >
                   <Sparkles className="size-3 shrink-0" aria-hidden />
                   <span className="truncate">/{slashCommandToken.name}</span>
@@ -603,7 +603,7 @@ export function Composer({
                     type="button"
                     aria-label={`Remove /${slashCommandToken.name}`}
                     onClick={() => setSlashCommandToken(null)}
-                    className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-sm text-accent-text outline-none hover:bg-[var(--accent-tint-border)]"
+                    className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-sm text-primary outline-none hover:bg-primary/30"
                   >
                     <X className="size-3" aria-hidden />
                   </button>
@@ -614,7 +614,7 @@ export function Composer({
                   key={contextKey(context)}
                   data-pending-context-chip
                   title={pendingContextChipTitle(context)}
-                  className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--accent-tint-border)] bg-[var(--accent-tint)] py-0.5 pr-1 pl-1.5 font-mono text-xs leading-none text-accent-text"
+                  className="inline-flex max-w-full items-center gap-1 rounded-md border border-primary/30 bg-primary/10 py-0.5 pr-1 pl-1.5 font-mono text-xs leading-none text-primary"
                 >
                   {context.kind === 'skill' ? (
                     <Sparkles className="size-3 shrink-0" aria-hidden />
@@ -637,7 +637,7 @@ export function Composer({
                         removeImage(context.imageId)
                       }
                     }}
-                    className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-sm text-accent-text outline-none hover:bg-[var(--accent-tint-border)]"
+                    className="inline-flex size-3.5 shrink-0 items-center justify-center rounded-sm text-primary outline-none hover:bg-primary/30"
                   >
                     <X className="size-3" aria-hidden />
                   </button>
@@ -663,7 +663,7 @@ export function Composer({
                       alt={img.name}
                     />
                     {sessionOnly && (
-                      <span className="absolute bottom-0 left-0 max-w-full rounded-tr-md rounded-bl-lg bg-panel/95 px-1 py-0.5 text-[9px] leading-none text-muted">
+                      <span className="absolute bottom-0 left-0 max-w-full rounded-tr-md rounded-bl-lg bg-card/95 px-1 py-0.5 text-[9px] leading-none text-muted-foreground">
                         Session only
                       </span>
                     )}
@@ -671,7 +671,7 @@ export function Composer({
                       type="button"
                       aria-label={`Remove ${img.name}`}
                       onClick={() => removeImage(img.id)}
-                      className="absolute -top-1.5 -right-1.5 inline-flex size-[18px] items-center justify-center rounded-full border border-border bg-panel text-text outline-none"
+                      className="absolute -top-1.5 -right-1.5 inline-flex size-[18px] items-center justify-center rounded-full border border-border bg-card text-foreground outline-none"
                     >
                       <X className="size-3" aria-hidden />
                     </button>
@@ -682,7 +682,7 @@ export function Composer({
           )}
 
           {draftPersistenceError && (
-            <p role="status" className="mb-3 text-xs text-bad">
+            <p role="status" className="mb-3 text-xs text-destructive">
               Draft changes are available now but could not be saved for the next app launch.
             </p>
           )}
@@ -795,7 +795,7 @@ export function Composer({
               }
               aria-label={followUps.sending ? 'Queue message' : 'Send message'}
               title={followUps.sending ? 'Queue' : 'Send'}
-              className="inline-flex size-9 shrink-0 items-center justify-center rounded-full text-white shadow-[0_1px_2px_var(--accent-shadow)] outline-none transition-opacity [background:var(--accent-grad-action)] hover:opacity-90 disabled:cursor-default disabled:opacity-40 @max-[560px]:size-8"
+              className="inline-flex size-9 shrink-0 items-center justify-center rounded-full shadow-[0_1px_2px_var(--cta-shadow)] outline-none transition-opacity [background:var(--accent-grad-action)] [color:var(--cta-foreground)] hover:opacity-90 disabled:cursor-default disabled:opacity-40 @max-[560px]:size-8"
             >
               <ArrowUp className="size-5 @max-[560px]:size-4" aria-hidden />
             </button>

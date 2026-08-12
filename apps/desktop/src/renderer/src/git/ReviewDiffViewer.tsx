@@ -18,6 +18,8 @@ import { buildPatchCacheKey } from './patch-cache-key'
 import { buildReviewDiffItemModels, type ReviewDiffFileMeta } from './diff-viewer-items'
 import { emitComposerInsertReviewComment } from '../conversation/composer-insert'
 import { locateRangeInPatch } from './review-comment'
+import { useResolvedTheme } from '../shell/resolved-theme-store'
+import { pierreThemeOptions } from './pierre-theme'
 
 /**
  * The ONE virtualized Review viewer (#388, PRD #387). Both scopes — the working-tree
@@ -43,9 +45,6 @@ import { locateRangeInPatch } from './review-comment'
 interface ReviewDraftMeta {
   kind: 'review-draft'
 }
-
-/** @pierre's light theme — matches the brand's light-mode surfaces (`DiffWorkerProvider`). */
-const DIFF_THEME = 'pierre-light'
 
 /** Which annotation side a range anchors to (the library's own convention). */
 function annotationSide(range: SelectedLineRange): 'additions' | 'deletions' {
@@ -75,6 +74,8 @@ export function ReviewDiffViewer({
   const [note, setNote] = useState('')
   const viewerRef = useRef<CodeViewHandle<ReviewDraftMeta>>(null)
   const scrolledRef = useRef(false)
+  const resolvedTheme = useResolvedTheme()
+  const diffTheme = pierreThemeOptions(resolvedTheme)
 
   // Parse each file's patch to `FileDiffMetadata`, memoized by `diffHash` across
   // refetches — an unchanged file keeps its parse (PRD #387: reuse parsed state).
@@ -186,8 +187,8 @@ export function ReviewDiffViewer({
       options={{
         diffStyle: prefs.diffStyle,
         overflow: prefs.wrap ? 'wrap' : 'scroll',
-        theme: DIFF_THEME,
-        themeType: 'light',
+        theme: diffTheme.theme,
+        themeType: diffTheme.themeType,
         stickyHeaders: true,
         // A drag opens the note editor; block a new selection while one is open.
         enableLineSelection: threadId !== null && !hasOpenDraft,
@@ -209,34 +210,34 @@ export function ReviewDiffViewer({
             className="flex w-full items-center gap-1.5 bg-background px-3 py-1.5 text-left"
           >
             {isCollapsed ? (
-              <ChevronRight className="size-3.5 shrink-0 text-muted" aria-hidden />
+              <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
             ) : (
-              <ChevronDown className="size-3.5 shrink-0 text-muted" aria-hidden />
+              <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
             )}
             {meta && (
               <span className={cn('w-3 shrink-0 text-center text-[11px] font-semibold', glyphClass(meta.glyph))}>
                 {meta.glyph}
               </span>
             )}
-            <span className="min-w-0 flex-1 truncate text-[13px] text-text" dir="rtl" title={path}>
+            <span className="min-w-0 flex-1 truncate text-[13px] text-foreground" dir="rtl" title={path}>
               {path}
             </span>
             {truncated && (
-              <span className="shrink-0 text-[11px] text-muted" title="Diff truncated — file too large">
+              <span className="shrink-0 text-[11px] text-muted-foreground" title="Diff truncated — file too large">
                 truncated
               </span>
             )}
             {meta && (
               <span className="shrink-0 text-[11px] tabular-nums">
-                {meta.insertions > 0 && <span className="text-ok">+{meta.insertions}</span>}{' '}
-                {meta.deletions > 0 && <span className="text-bad">−{meta.deletions}</span>}
+                {meta.insertions > 0 && <span className="text-success">+{meta.insertions}</span>}{' '}
+                {meta.deletions > 0 && <span className="text-destructive">−{meta.deletions}</span>}
               </span>
             )}
           </button>
         )
       }}
       renderAnnotation={() => (
-        <div className="flex w-full max-w-md flex-col gap-1.5 border-y border-border bg-surface p-2">
+        <div className="flex w-full max-w-md flex-col gap-1.5 border-y border-border bg-secondary p-2">
           <Textarea
             autoFocus
             aria-label={`Review comment on ${draft?.path ?? ''}`}
@@ -256,7 +257,7 @@ export function ReviewDiffViewer({
             }}
           />
           <div className="flex items-center justify-end gap-1.5">
-            <Button type="button" variant="ghost" size="xs" onClick={cancelDraft} className="text-muted">
+            <Button type="button" variant="ghost" size="xs" onClick={cancelDraft} className="text-muted-foreground">
               Cancel
             </Button>
             <Button type="button" size="xs" onClick={submitDraft} disabled={note.trim().length === 0}>

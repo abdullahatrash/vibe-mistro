@@ -43,7 +43,7 @@ export function TooltipContent({
         <BaseTooltip.Popup
           data-slot="tooltip-content"
           className={cn(
-            'z-50 w-fit max-w-xs rounded-sm bg-text px-2 py-1 text-xs text-bg shadow-md',
+            'z-50 w-fit max-w-xs rounded-sm bg-foreground px-2 py-1 text-xs text-background shadow-md',
             className,
           )}
           {...props}

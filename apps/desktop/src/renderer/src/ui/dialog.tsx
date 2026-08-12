@@ -42,7 +42,7 @@ export function DialogContent({
       <BaseDialog.Popup
         data-slot="dialog-content"
         className={cn(
-          'fixed top-1/2 left-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-panel p-6 text-text shadow-lg outline-none',
+          'fixed top-1/2 left-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-card p-6 text-foreground shadow-lg outline-none',
           className,
         )}
         {...props}
@@ -90,7 +90,7 @@ export function DialogTitle({
   return (
     <BaseDialog.Title
       data-slot="dialog-title"
-      className={cn('text-base font-semibold text-text-strong', className)}
+      className={cn('text-base font-semibold text-foreground', className)}
       {...props}
     />
   )
@@ -103,7 +103,7 @@ export function DialogDescription({
   return (
     <BaseDialog.Description
       data-slot="dialog-description"
-      className={cn('text-sm text-muted', className)}
+      className={cn('text-sm text-muted-foreground', className)}
       {...props}
     />
   )

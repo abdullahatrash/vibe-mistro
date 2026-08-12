@@ -39,9 +39,9 @@ export function UpdateReadyChip(): JSX.Element | null {
       onClick={() => window.api.appUpdateRestart()}
       title="Restart to apply the update (it also installs on quit)"
     >
-      <RefreshCw className="size-3.5 flex-none text-accent-text" aria-hidden />
+      <RefreshCw className="size-3.5 flex-none text-primary" aria-hidden />
       <span className="min-w-0 flex-1 truncate text-left">{label}</span>
-      <span className="flex-none text-muted">Restart</span>
+      <span className="flex-none text-muted-foreground">Restart</span>
     </Button>
   )
 }

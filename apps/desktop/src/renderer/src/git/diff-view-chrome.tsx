@@ -21,7 +21,7 @@ import type { DiffPrefs } from './diff-prefs-store'
  */
 export function DiffTruncationBanner(): JSX.Element {
   return (
-    <p role="alert" className="border-b border-border-muted bg-accent/5 px-3 py-2 text-[13px] text-muted">
+    <p role="alert" className="border-b border-border bg-primary/5 px-3 py-2 text-[13px] text-muted-foreground">
       Diff truncated — this change is too large to show in full. Some later files are omitted.
     </p>
   )
@@ -36,7 +36,7 @@ export function DiffToggles({
   onChange: (patch: Partial<DiffPrefs>) => void
 }): JSX.Element {
   return (
-    <div className="flex items-center gap-2 border-b border-border-muted px-3 py-2 text-[13px]">
+    <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-[13px]">
       <div className="flex overflow-hidden rounded-md border border-border">
         <ToggleButton active={prefs.diffStyle === 'unified'} onClick={() => onChange({ diffStyle: 'unified' })}>
           Stacked
@@ -52,7 +52,7 @@ export function DiffToggles({
         title={prefs.wrap ? 'Scroll long lines' : 'Wrap long lines'}
         className={cn(
           'shrink-0 rounded-md border border-border px-2.5 py-1 transition-colors',
-          prefs.wrap ? 'bg-accent/10 text-accent-text' : 'text-muted hover:text-accent-text',
+          prefs.wrap ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-primary',
         )}
       >
         Wrap
@@ -64,7 +64,7 @@ export function DiffToggles({
         title={prefs.ignoreWhitespace ? 'Show whitespace changes' : 'Hide whitespace changes'}
         className={cn(
           'ml-auto shrink-0 rounded-md border border-border px-2.5 py-1 transition-colors',
-          prefs.ignoreWhitespace ? 'bg-accent/10 text-accent-text' : 'text-muted hover:text-accent-text',
+          prefs.ignoreWhitespace ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-primary',
         )}
       >
         Ignore whitespace
@@ -90,7 +90,7 @@ function ToggleButton({
       aria-pressed={active}
       className={cn(
         'px-2.5 py-1 transition-colors',
-        active ? 'bg-accent/10 text-accent-text' : 'text-muted hover:text-accent-text',
+        active ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-primary',
       )}
     >
       {children}
