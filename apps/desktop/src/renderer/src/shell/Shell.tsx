@@ -11,6 +11,7 @@ import {
   getSidebarWidth,
   setSidebarWidth,
 } from './sidebar-width-store'
+import { useWideMode } from './wide-mode-store'
 import { cn } from '../lib/utils'
 import { planLabel } from '../auth/plan-label'
 import { useAccountPlan } from '../auth/use-account-plan'
@@ -81,6 +82,10 @@ export function Shell({
   /** Open the Skills browser (#259) — from the primary nav's Skills row. */
   onOpenSkills: () => void
 }): JSX.Element {
+  // Wide mode: apply the --conv-measure-max CSS variable before paint. The
+  // hook is called here (Shell is always mounted) so the variable stays in
+  // sync even when Settings isn't open; the toggle itself lives in SettingsView.
+  useWideMode()
   // The sidebar's EXPANDED width (#drag-to-resize): renderer-only UI state, seeded from
   // localStorage (clamped) and persisted on drag-release. `dragging` disables the
   // collapse width-transition so the aside tracks the pointer 1:1 with no lag, and
