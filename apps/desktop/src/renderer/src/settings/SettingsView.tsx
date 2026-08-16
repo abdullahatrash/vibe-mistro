@@ -65,9 +65,7 @@ export function SettingsView({
           Light, dark, or follow your OS appearance.
         </p>
         <ThemeControl />
-      </section>
-      <section className="flex flex-col gap-2">
-        <h2 className="text-[13px] font-semibold text-muted-foreground">Conversation width</h2>
+        <h3 className="pt-1 text-[13px] font-semibold text-muted-foreground">Conversation width</h3>
         <p className="text-[13px] text-muted-foreground">
           Standard caps the transcript at 830px; Wide lets it use the full outlet.
         </p>
