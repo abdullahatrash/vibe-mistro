@@ -57,7 +57,7 @@ export function EmptyState({
     // the outlet) so first run doesn't look like an afterthought; the CLI
     // install steps ride along in a quiet card for users who land here fresh.
     return (
-      <div className="mx-auto flex h-full max-w-[830px] flex-col items-center justify-center gap-6 text-center">
+      <div className="conv-measure flex h-full flex-col items-center justify-center gap-6 text-center">
         <Logo size={52} />
         <h1 className="text-[37px] font-semibold tracking-[-0.6px] text-foreground">
           Open a <span className="text-primary">project</span> to begin
@@ -100,7 +100,7 @@ export function EmptyState({
   // selected Workspace name in orange (`--accent-emphasis`).
   const headline = heroHeadline(workspaceName)
   return (
-    <div className="mx-auto flex h-full max-w-[830px] flex-col items-center justify-center gap-6 text-center">
+    <div className="conv-measure flex h-full flex-col items-center justify-center gap-6 text-center">
       <Logo size={52} />
       <h1 className="text-[37px] font-semibold tracking-[-0.6px] text-foreground">
         {headline.lead}

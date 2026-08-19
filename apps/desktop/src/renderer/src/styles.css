@@ -512,10 +512,12 @@ body {
 
 /* The conversation column's shared reading measure: transcript content and the
    Composer cap to the same centered width, so collapsing the sidebar/side panel
-   widens the outlet without the transcript sprawling past the composer. */
+   widens the outlet without the transcript sprawling past the composer.
+   --conv-measure-max is toggled by the wide-mode store (shell/wide-mode-store.ts);
+   when absent it falls back to the original 830px. */
 .conv-measure {
   width: 100%;
-  max-width: 830px;
+  max-width: var(--conv-measure-max, 830px);
   margin-inline: auto;
 }
 

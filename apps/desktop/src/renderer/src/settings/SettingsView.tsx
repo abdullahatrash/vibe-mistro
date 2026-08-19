@@ -8,6 +8,7 @@ import { Button } from '../ui/button'
 import { IconButton } from '../ui/icon-button'
 import { Environment } from './Environment'
 import { ThemeControl } from './ThemeControl'
+import { WideModeControl } from './WideModeControl'
 
 /** The selected Workspace's connected agent + its advertised auth, for the Account section. */
 export interface AccountInfo {
@@ -64,6 +65,11 @@ export function SettingsView({
           Light, dark, or follow your OS appearance.
         </p>
         <ThemeControl />
+        <h3 className="pt-1 text-[13px] font-semibold text-muted-foreground">Conversation width</h3>
+        <p className="text-[13px] text-muted-foreground">
+          Standard caps the transcript at 830px; Wide lets it use the full outlet.
+        </p>
+        <WideModeControl />
       </section>
       <section className="flex flex-col gap-2">
         <h2 className="text-[13px] font-semibold text-muted-foreground">Environment</h2>

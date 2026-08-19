@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { App } from './App'
 import { startThemeSync } from './shell/theme-sync'
+import { initWideMode } from './shell/wide-mode-store'
 // Geist (Vercel) — bundled offline via @fontsource-variable, before styles.css so the
 // @font-face rules (and their bundled woff2) are registered when the tokens reference them.
 import '@fontsource-variable/geist'
@@ -9,6 +10,10 @@ import '@fontsource-variable/geist-mono'
 import './styles.css'
 
 async function mountApp(): Promise<void> {
+  // Seed the wide-mode preference from localStorage before first paint so the
+  // --conv-measure-max CSS variable is correct when React commits the shell.
+  initWideMode(window.localStorage)
+
   // Resolve and apply main's confirmed theme while the BrowserWindow is hidden.
   // The subscription is armed before the read, so a concurrent OS update wins.
   const stopThemeSync = await startThemeSync(window.api)
