@@ -1,4 +1,4 @@
-import { useState, type JSX } from 'react'
+import { useEffect, useRef, useState, type JSX } from 'react'
 import {
   Brain,
   Check,
@@ -32,8 +32,10 @@ import {
   subagentSteps,
   subagentHeading,
   subagentTurnLabel,
+  subagentDetail,
 } from '../subagent'
 import { Response } from '../Response'
+import { formatElapsed } from '../working-time'
 import { useRowStreaming, useTimelineHandlers } from '../timeline-context'
 import {
   changeLinePreview,
@@ -94,6 +96,31 @@ export function ToolRow({ item, index }: { item: ToolItem; index: number }): JSX
 }
 
 /**
+ * Live elapsed for a running Subagent, in the WorkingRow idiom: mount time is
+ * the start, and the tick writes straight into the text node so a per-second
+ * clock never re-renders the conversation.
+ *
+ * Shown ONLY while running, and deliberately not persisted: a reopened Thread
+ * replays from our transcript log with no wall-clock, so a stored duration
+ * would either be missing or invented. Turns take over once settled.
+ */
+function SubagentElapsed(): JSX.Element {
+  const startRef = useRef(Date.now())
+  const textRef = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    const tick = (): void => {
+      if (textRef.current) {
+        textRef.current.textContent = formatElapsed((Date.now() - startRef.current) / 1000)
+      }
+    }
+    tick()
+    const id = window.setInterval(tick, 1000)
+    return () => window.clearInterval(id)
+  }, [])
+  return <span ref={textRef} className="text-[11px] text-muted-foreground tabular-nums" />
+}
+
+/**
  * A Vibe Subagent run (docs/acp-capture.md §15). Collapsed: which subagent, the
  * task it was given, turns used, live status. Expanded: the streamed step ledger
  * and its final answer as prose.
@@ -109,6 +136,8 @@ function SubagentToolRow({ item, index }: { item: ToolItem; index: number }): JS
   const meta = readSubagentMeta(item)
   const steps = subagentSteps(item)
   const turns = subagentTurnLabel(meta)
+  const running = status.state === 'running' || status.state === 'pending'
+  const detail = subagentDetail(meta, steps, running)
   const canExpand = steps.length > 0 || meta.response !== null
 
   return (
@@ -118,7 +147,7 @@ function SubagentToolRow({ item, index }: { item: ToolItem; index: number }): JS
       canExpand={canExpand}
       toggleZone="container"
       className={cn(
-        'flex flex-col rounded-md px-0.5 py-0.5 transition-colors',
+        'ms-2 flex flex-col rounded-md border-s-2 border-border/70 py-0.5 pe-0.5 ps-2 transition-colors',
         canExpand && 'cursor-pointer hover:bg-primary/10 focus-visible:bg-primary/10 outline-none',
       )}
       headerClassName="flex items-center gap-1.5 select-none"
@@ -131,12 +160,16 @@ function SubagentToolRow({ item, index }: { item: ToolItem; index: number }): JS
             <span className="min-w-0 shrink truncate font-medium text-foreground">
               {subagentHeading(meta)}
             </span>
-            {meta.task && (
-              <span className="min-w-0 flex-1 truncate text-muted-foreground">{meta.task}</span>
+            {detail && (
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">{detail}</span>
             )}
           </p>
           <span className="flex shrink-0 items-center gap-1.5">
-            {turns && <span className="text-[11px] text-muted-foreground">{turns}</span>}
+            {running ? (
+              <SubagentElapsed />
+            ) : (
+              turns && <span className="text-[11px] text-muted-foreground tabular-nums">{turns}</span>
+            )}
             {canExpand && <FoldChevron open={expanded} className="text-muted-foreground" />}
             <span className="flex size-4 shrink-0 items-center justify-center">
               <ToolStatusGlyph glyph={status.glyph} />

@@ -5,6 +5,7 @@ import {
   subagentSteps,
   subagentHeading,
   subagentTurnLabel,
+  subagentDetail,
 } from './subagent'
 import type { ToolItem } from './reducer'
 
@@ -197,5 +198,26 @@ describe('subagentHeading / subagentTurnLabel', () => {
     expect(subagentTurnLabel(readSubagentMeta(tool({ meta: { turn_count: 1 } })))).toBe('1 turn')
     expect(subagentTurnLabel(readSubagentMeta(tool({ meta: { turn_count: 5 } })))).toBe('5 turns')
     expect(subagentTurnLabel(readSubagentMeta(tool({ meta: {} })))).toBeNull()
+  })
+})
+
+describe('subagentDetail', () => {
+  const meta = { agent: 'explore', task: 'Summarise the project', childSessionId: null, turnCount: null, response: null }
+
+  it('shows the latest step while running, so a long run visibly progresses', () => {
+    expect(subagentDetail(meta, ['read_file: a.py', 'grep: 2 matches'], true)).toBe('grep: 2 matches')
+  })
+
+  it('falls back to the task when running but nothing has streamed yet', () => {
+    // Only SUCCEEDED child tool calls emit a line — an early run has an empty ledger.
+    expect(subagentDetail(meta, [], true)).toBe('Summarise the project')
+  })
+
+  it('returns to the task once settled', () => {
+    expect(subagentDetail(meta, ['grep: 2 matches'], false)).toBe('Summarise the project')
+  })
+
+  it('is null when there is neither task nor step', () => {
+    expect(subagentDetail({ ...meta, task: null }, [], true)).toBeNull()
   })
 })

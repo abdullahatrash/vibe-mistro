@@ -104,6 +104,27 @@ export function subagentTurnLabel(meta: SubagentMeta): string | null {
   return `${meta.turnCount} ${meta.turnCount === 1 ? 'turn' : 'turns'}`
 }
 
+/**
+ * The dimmed line beside the heading in the COLLAPSED row.
+ *
+ * While the Subagent runs it shows its latest step, so a long delegation
+ * visibly progresses instead of sitting frozen on its task for minutes. Once
+ * settled the task returns — that is what you want to read afterwards, and the
+ * steps are a fold away.
+ *
+ * Falls back to the task whenever no step has arrived yet: Vibe emits a line
+ * only for a SUCCEEDED child tool call, so an early or unlucky run can be
+ * several turns in with an empty ledger.
+ */
+export function subagentDetail(
+  meta: SubagentMeta,
+  steps: readonly string[],
+  running: boolean,
+): string | null {
+  if (running && steps.length > 0) return steps[steps.length - 1]
+  return meta.task
+}
+
 function metaOf(item: ToolItem): Record<string, unknown> | null {
   return asRecord(item.meta)
 }
