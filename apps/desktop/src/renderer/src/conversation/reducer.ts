@@ -75,6 +75,13 @@ export interface ToolItem {
   rawInput: unknown
   rawOutput: unknown
   content: unknown[]
+  /**
+   * The update's `_meta` blob, carried through VERBATIM and uninterpreted.
+   * Vibe tags a Subagent run here (`_meta.effect_kind`) rather than with its
+   * own `sessionUpdate` kind (§15); `subagent.ts` owns every reading of it.
+   * Optional, so old fold snapshots stay valid.
+   */
+  meta?: unknown
 }
 
 /** One option offered by `session/request_permission`. */
@@ -100,6 +107,14 @@ export interface PermissionItem {
   /** The option the user picked, or null while still pending. */
   chosenOptionId: string | null
   chosenName: string | null
+  /**
+   * True when `toolCallId` matches NO tool item we have — the signature of a
+   * request raised by a Subagent, whose tool call ids belong to a child session
+   * the client never sees (§15 finding F). Decided HERE because only the
+   * reducer holds the items to match against. Optional: absent means "not
+   * known to be an orphan", which is what every old snapshot means.
+   */
+  orphan?: boolean
 }
 
 /** A surfaced turn/agent failure — keeps a wedged turn from hiding the cause. */
@@ -189,7 +204,23 @@ export const REBOUND_NOTICE =
  * bump is one full re-fold per Thread, lazily, on its next open — never data
  * loss (snapshots are disposable projections of the transcript event log).
  */
-export const REDUCER_SCHEMA_VERSION = 1
+/**
+ * `_meta.effect_kind` marking a Subagent run (§15). Duplicated from
+ * `subagent.ts` deliberately: the reducer must not import the interpreter it
+ * feeds, and this one string is the whole coupling.
+ */
+const SUBAGENT_EFFECT_KIND = 'subagent'
+
+/**
+ * Bumped 1 -> 2 for CORRECTNESS, not shape (#430). The new `meta`/`orphan`
+ * fields are additive and optional, so an old blob still type-checks — but
+ * blobs written before the delta fix hold a TRUNCATED subagent step ledger
+ * (only the last frame's entry survived the old wholesale replace). Left at 1,
+ * those Threads would rehydrate the truncated ledger forever, i.e. the fix
+ * would skip exactly the conversations that motivated it. The bump forces one
+ * lazy re-fold from the transcript event log, which replays the deltas whole.
+ */
+export const REDUCER_SCHEMA_VERSION = 2
 
 export const initialConversationState: ConversationState = {
   items: [],
@@ -274,6 +305,8 @@ interface SessionUpdate {
   locations?: ToolLocation[]
   rawInput?: unknown
   rawOutput?: unknown
+  /** Vibe's out-of-band tagging; snake_case on the wire (§15). */
+  _meta?: unknown
 }
 
 function reduceAcpEvent(state: ConversationState, payload: unknown): ConversationState {
@@ -417,6 +450,11 @@ function applyToolCall(state: ConversationState, update: SessionUpdate): Convers
   )
   const existing = index >= 0 ? (state.items[index] as ToolItem) : null
 
+  // `_meta` arrives in pieces: the first frame has only `tool_name`+`effect_kind`,
+  // identity lands on the next one. Merge rather than replace so the subagent
+  // tag survives a later frame that omits it (§15 finding A).
+  const meta = mergeToolMeta(existing?.meta, update._meta)
+
   const merged: ToolItem = {
     kind: 'tool',
     id: `tool:${toolCallId}`,
@@ -427,7 +465,8 @@ function applyToolCall(state: ConversationState, update: SessionUpdate): Convers
     locations: Array.isArray(update.locations) ? update.locations : (existing?.locations ?? []),
     rawInput: update.rawInput !== undefined ? update.rawInput : existing?.rawInput,
     rawOutput: update.rawOutput !== undefined ? update.rawOutput : existing?.rawOutput,
-    content: Array.isArray(update.content) ? update.content : (existing?.content ?? []),
+    content: mergeToolContent(existing, update, meta),
+    meta,
   }
 
   if (existing) {
@@ -436,6 +475,40 @@ function applyToolCall(state: ConversationState, update: SessionUpdate): Convers
     return { ...state, items }
   }
   return { ...state, items: [...state.items, merged] }
+}
+
+/**
+ * Shallow-merge successive `_meta` payloads, newest wins per key.
+ */
+function mergeToolMeta(existing: unknown, incoming: unknown): unknown {
+  if (incoming === undefined) return existing
+  if (!isPlainRecord(existing) || !isPlainRecord(incoming)) return incoming
+  return { ...existing, ...incoming }
+}
+
+/**
+ * Merge a tool call's `content`.
+ *
+ * Subagents stream DELTAS — each `tool_call_update` carries only the newly
+ * produced entry, so replacing would show just the last fragment of the step
+ * ledger (§15 finding C, the bug this fixes). Every OTHER tool is left on
+ * replace: delta semantics are proven for subagents alone, and appending
+ * blindly would duplicate content in the file-change row.
+ */
+function mergeToolContent(
+  existing: ToolItem | null,
+  update: SessionUpdate,
+  meta: unknown,
+): unknown[] {
+  if (!Array.isArray(update.content)) return existing?.content ?? []
+  const isSubagent =
+    isPlainRecord(meta) && (meta.effect_kind ?? meta.effectKind) === SUBAGENT_EFFECT_KIND
+  if (!isSubagent || !existing) return update.content
+  return [...existing.content, ...update.content]
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
 function appendPermission(state: ConversationState, request: PermissionRequest): ConversationState {
@@ -447,8 +520,23 @@ function appendPermission(state: ConversationState, request: PermissionRequest):
     options: request.options,
     chosenOptionId: null,
     chosenName: null,
+    orphan: isOrphanToolCall(state, request.toolCallId),
   }
   return { ...state, items: [...state.items, item] }
+}
+
+/**
+ * Does this permission's `toolCallId` match no tool call we have seen?
+ *
+ * A Subagent's own permission requests arrive on the ROOT session carrying the
+ * CHILD session's tool call id, which the client never receives a `tool_call`
+ * for (§15 finding F) — so "matches nothing" is the only signal available that
+ * a Subagent is asking. A request with no `toolCallId` at all is NOT an orphan:
+ * that is an ordinary session-level prompt, not a mis-attributed one.
+ */
+function isOrphanToolCall(state: ConversationState, toolCallId: string | null): boolean {
+  if (toolCallId === null) return false
+  return !state.items.some((item) => item.kind === 'tool' && item.toolCallId === toolCallId)
 }
 
 function resolvePermission(
