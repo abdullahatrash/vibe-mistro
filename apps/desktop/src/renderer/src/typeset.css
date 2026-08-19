@@ -546,3 +546,13 @@
   margin-block-start: var(--typeset-flow);
   margin-block-end: 0;
 }
+
+/* A BARE table in prose is flush-left, so its first column aligns with the text
+   measure — that is what `th:first-child, td:first-child { padding-inline-start: 0 }`
+   above is for. Streamdown, though, frames its tables in a bordered, rounded,
+   scrollable card (`rounded-md border border-border`), and inside a frame flush-left
+   means the first column's text collides with the border. Restore the inline padding
+   there, matching the other cells. */
+.typeset-chat :where([data-streamdown='table-wrapper']) :is(th, td):first-child {
+  padding-inline-start: 1em;
+}

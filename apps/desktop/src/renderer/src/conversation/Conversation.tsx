@@ -603,9 +603,14 @@ export function Conversation({
           // Escape hatch: if a turn wedges (e.g. a permission prompt is dismissed
           // and `session/prompt` never resolves), deny any pending permission and
           // re-enable input instead of sticking disabled forever (carry-over #4).
-          <button className="recover" onClick={recover}>
-            Turn stuck? End it and re-enable input ▶
-          </button>
+          // `.conv-measure` is what aligns it with the Composer: `.conv` is the
+          // full-width column, so an unwrapped control sits flush against the
+          // window edge while everything else caps to the centered 830px measure.
+          <div className="conv-measure">
+            <button className="recover" onClick={recover}>
+              Turn stuck? End it and re-enable input ▶
+            </button>
+          </div>
         )}
 
         <Composer

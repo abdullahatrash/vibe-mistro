@@ -34,6 +34,16 @@ agent blocks until the user picks a Permission option (allow once / reject once 
 pending queue and answered by request id.
 _Avoid_: approval, confirmation, prompt (reserve "prompt" for the user's message to the agent).
 
+**Subagent**:
+A Vibe-spawned helper agent that runs inside a single turn of a Thread and reports back to it. Vibe
+owns it entirely — we neither spawn nor configure it; the model reaches it through Vibe's `task` tool.
+On the wire it is an ordinary tool call (`kind: "think"`, `_meta.effect_kind: "subagent"`), never its
+own ACP session, and it is capped at one level deep. Only two things about its work reach us: a live
+step line per successful tool call it makes, and its final response — its own messages and reasoning
+never leave Vibe (see `docs/acp-capture.md` §15).
+_Avoid_: sub-thread, child agent, task (that is Vibe's tool name, not the domain concept),
+parallel agent (that is our own multi-Thread orchestration, a different axis entirely).
+
 **Search**:
 Finding past conversations by what was said — matches Thread titles and the conversation proper
 (the user's prompts and the agent's replies), across all Workspaces. Never matches the agent's

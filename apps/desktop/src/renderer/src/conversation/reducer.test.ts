@@ -437,3 +437,275 @@ describe('system-notice', () => {
     expect(next.isProcessing).toBe(true)
   })
 })
+
+/**
+ * Seam A — Subagents (#430). Frames are verbatim from docs/acp-capture.md §15,
+ * a live capture against vibe-acp 2.24.1. These assert the conversation state a
+ * user would see, never how it was computed.
+ */
+describe('conversationReducer — subagents (§15)', () => {
+  const TOOL_ID = '8FuX35f6u'
+
+  /** The bare opening frame: no agent, no task, no rawInput (§15 finding A). */
+  const OPEN = update({
+    sessionUpdate: 'tool_call',
+    toolCallId: TOOL_ID,
+    title: 'Running subagent',
+    kind: 'think',
+    status: 'in_progress',
+    _meta: { tool_name: 'task', effect_kind: 'subagent' },
+  })
+
+  /** Identity lands one frame later. */
+  const IDENTIFY = update({
+    sessionUpdate: 'tool_call_update',
+    toolCallId: TOOL_ID,
+    kind: 'think',
+    status: 'in_progress',
+    title: 'Running explore agent: Summarise what this project does',
+    rawInput: { task: 'Summarise what this project does', agent: 'explore' },
+    _meta: {
+      tool_name: 'task',
+      effect_kind: 'subagent',
+      agent: 'explore',
+      task: 'Summarise what this project does',
+    },
+  })
+
+  function progress(text: string): unknown {
+    return update({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: TOOL_ID,
+      status: 'in_progress',
+      content: [{ type: 'content', content: { type: 'text', text } }],
+    })
+  }
+
+  function feedAll(frames: unknown[]): ConversationState {
+    return frames.reduce<ConversationState>(feed, initialConversationState)
+  }
+
+  function toolItem(state: ConversationState, toolCallId = TOOL_ID): ToolItem {
+    const item = state.items.find(
+      (i): i is ToolItem => i.kind === 'tool' && i.toolCallId === toolCallId,
+    )
+    if (!item) throw new Error(`no tool item ${toolCallId}`)
+    return item
+  }
+
+  it('carries _meta through and merges it across frames', () => {
+    const state = feedAll([OPEN, IDENTIFY])
+    expect(state.items).toHaveLength(1)
+    expect(toolItem(state).meta).toMatchObject({
+      effect_kind: 'subagent',
+      agent: 'explore',
+      task: 'Summarise what this project does',
+    })
+  })
+
+  it('keeps the subagent tag when a later frame omits _meta entirely', () => {
+    const bare = update({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: TOOL_ID,
+      status: 'completed',
+    })
+    const state = feedAll([OPEN, bare])
+    expect(toolItem(state).meta).toMatchObject({ effect_kind: 'subagent' })
+  })
+
+  it('ACCUMULATES the step ledger — the bug this slice fixes', () => {
+    // §15 finding C: each frame carries ONE new entry, not the running list.
+    const state = feedAll([
+      OPEN,
+      IDENTIFY,
+      progress('read_file: Read 3 lines from alpha.py'),
+      progress('read_file: Read 4 lines from beta.js'),
+      progress('grep: 2 matches'),
+    ])
+    expect(toolItem(state).content).toHaveLength(3)
+  })
+
+  it('still REPLACES content for a non-subagent tool', () => {
+    // The regression guard: appending blindly would duplicate diffs in the
+    // file-change row, the most-used row in the app.
+    const edit = (path: string) =>
+      update({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'edit-1',
+        kind: 'edit',
+        status: 'in_progress',
+        content: [{ type: 'diff', path, oldText: 'a', newText: 'b' }],
+      })
+    const state = feedAll([
+      update({ sessionUpdate: 'tool_call', toolCallId: 'edit-1', kind: 'edit', status: 'pending' }),
+      edit('one.ts'),
+      edit('two.ts'),
+    ])
+    expect(toolItem(state, 'edit-1').content).toHaveLength(1)
+  })
+
+  it('surfaces the final response and turn count on completion', () => {
+    const done = update({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: TOOL_ID,
+      status: 'completed',
+      rawOutput: { response: 'It is a desktop app.', turnsUsed: 5, completed: true },
+      _meta: { effect_kind: 'subagent', turn_count: 5, response: 'It is a desktop app.' },
+    })
+    const state = feedAll([OPEN, IDENTIFY, done])
+    const item = toolItem(state)
+    expect(item.status).toBe('completed')
+    expect(item.meta).toMatchObject({ turn_count: 5, response: 'It is a desktop app.' })
+  })
+
+  it('surfaces an interrupted subagent as failed', () => {
+    // §15: completed:false maps to ACP "failed" even though the effect finished.
+    const state = feedAll([
+      OPEN,
+      update({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: TOOL_ID,
+        status: 'failed',
+        rawOutput: { response: 'partial', turnsUsed: 2, completed: false },
+      }),
+    ])
+    expect(toolItem(state).status).toBe('failed')
+  })
+
+  it('keeps a parallel fan-out as two independent items', () => {
+    // §15 finding G: distinct toolCallIds, freely interleaved, one finishing
+    // early must not make the other look finished.
+    const openTwo = (id: string) =>
+      update({
+        sessionUpdate: 'tool_call',
+        toolCallId: id,
+        kind: 'think',
+        status: 'in_progress',
+        _meta: { tool_name: 'task', effect_kind: 'subagent', agent: 'explore' },
+      })
+    const state = feedAll([
+      openTwo('6CjZc36Mi'),
+      openTwo('nUL83qaSJ'),
+      update({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: '6CjZc36Mi',
+        status: 'completed',
+        content: [{ type: 'content', content: { type: 'text', text: 'grep: done' } }],
+      }),
+    ])
+    expect(state.items.filter((i) => i.kind === 'tool')).toHaveLength(2)
+    expect(toolItem(state, '6CjZc36Mi').status).toBe('completed')
+    expect(toolItem(state, 'nUL83qaSJ').status).toBe('in_progress')
+    expect(toolItem(state, 'nUL83qaSJ').content).toHaveLength(0)
+  })
+
+  it('leaves a malformed _meta as an ordinary tool item', () => {
+    const state = feedAll([
+      update({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'plain-1',
+        kind: 'read',
+        status: 'pending',
+        _meta: 'nonsense',
+      }),
+    ])
+    const item = toolItem(state, 'plain-1')
+    expect(item.kind).toBe('tool')
+    expect(item.meta).toBe('nonsense')
+  })
+})
+
+describe('conversationReducer — orphan permission requests (§15 finding F)', () => {
+  function permission(toolCallId: string | null): unknown {
+    return {
+      jsonrpc: '2.0',
+      id: 7,
+      method: 'session/request_permission',
+      params: {
+        sessionId: SESSION_ID,
+        ...(toolCallId === null ? {} : { toolCall: { toolCallId } }),
+        options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
+      },
+    }
+  }
+
+  function permissionItem(state: ConversationState): PermissionItem {
+    const item = state.items.find((i): i is PermissionItem => i.kind === 'permission')
+    if (!item) throw new Error('no permission item')
+    return item
+  }
+
+  it('flags a request whose toolCallId matches nothing — a subagent asking', () => {
+    // The child session's tool call id; the client never received a tool_call for it.
+    const state = feed(initialConversationState, permission('v1KK2WmAn'))
+    expect(permissionItem(state).orphan).toBe(true)
+  })
+
+  it('does NOT flag a request that matches a tool call we have', () => {
+    const withTool = feed(
+      initialConversationState,
+      update({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'EcjzekVw0',
+        kind: 'edit',
+        status: 'pending',
+      }),
+    )
+    const state = feed(withTool, permission('EcjzekVw0'))
+    expect(permissionItem(state).orphan).toBe(false)
+  })
+
+  it('does NOT flag a request carrying no toolCallId at all', () => {
+    // A session-level prompt is not mis-attributed, just unlinked.
+    const state = feed(initialConversationState, permission(null))
+    expect(permissionItem(state).orphan).toBe(false)
+  })
+
+  it('still answers by requestId, orphan or not', () => {
+    const asked = feed(initialConversationState, permission('v1KK2WmAn'))
+    const answered = conversationReducer(asked, {
+      type: 'resolve-permission',
+      requestId: 7,
+      optionId: 'allow',
+      name: 'Allow',
+    })
+    expect(permissionItem(answered).chosenOptionId).toBe('allow')
+    expect(permissionItem(answered).orphan).toBe(true)
+  })
+})
+
+describe('conversationReducer — user_message_chunk echo (#438)', () => {
+  it('ignores the echo instead of adding a fallback row under every message', () => {
+    const state = feed(
+      initialConversationState,
+      update({
+        sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text: 'Summarise this project' },
+        messageId: 'u1',
+      }),
+    )
+    expect(state.items).toHaveLength(0)
+  })
+
+  it('leaves an optimistic user message untouched — no duplicate', () => {
+    const sent = conversationReducer(initialConversationState, {
+      type: 'send-prompt',
+      id: 'local-1',
+      text: 'Summarise this project',
+    })
+    const state = feed(
+      sent,
+      update({
+        sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text: 'Summarise this project' },
+        messageId: 'u1',
+      }),
+    )
+    expect(state.items.filter((i) => i.kind === 'user')).toHaveLength(1)
+  })
+
+  it('still falls back for genuinely unknown kinds — nothing else is silenced', () => {
+    const state = feed(initialConversationState, update({ sessionUpdate: 'some_future_kind' }))
+    expect(state.items.map((i) => i.kind)).toEqual(['fallback'])
+  })
+})

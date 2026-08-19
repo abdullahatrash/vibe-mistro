@@ -705,3 +705,302 @@ The probe answers every `session/request_permission` with `reject_once` and refu
 or `_auth/signOut`. Scratch profile names are prefixed `zz-probe-` so they can never shadow a Vibe
 builtin (a custom profile whose **file stem equals a builtin name overrides that builtin** — source
 `registry.py` logs `Custom agent '%s' overrides builtin agent`; deliberately **not** probed).
+## 15. Subagents — the `task` tool on the wire (captured 2026-08-19 via `scripts/spike-subagent.ts`, vibe-acp **2.24.1**)
+
+LIVE capture against a scratch workspace (`/tmp/vibe-subagent-ws` — README.md + alpha.py + beta.js +
+gamma.txt). Four phases: (1) one `explore` subagent in **auto-approve**, (2) one under the session's
+own default posture (the probe sends no `session/set_mode` at all — NOT the retired `default` mode
+id, see §14), (3) a **parallel fan-out** of two, (4) `session/load` **replay** of phase 1. Every frame below is
+verbatim from that run.
+
+A subagent is an agent profile with `agent_type = "subagent"` — the same profile system §14 covers,
+which is why subagents do NOT appear in `availableModes`: the ACP layer filters that list to primary
+profiles only. Built-in subagent: **`explore`** (read-only,
+`enabled_tools = ["grep","read_file","skill"]`). The model reaches it through a tool named **`task`**
+with input `{task, agent}`.
+
+### A — it is an ORDINARY `tool_call`, `kind: "think"` ✅ confirmed
+
+There is **no new `sessionUpdate` kind**. A subagent run is one `tool_call` + a stream of
+`tool_call_update`s on the SAME `toolCallId`. `kind` is **`"think"`**.
+
+```json
+<<< {"jsonrpc":"2.0","method":"session/update","params":{
+  "sessionId":"bbc711a4-ae6b-8cb6-81c5-9f95bab8a526",
+  "update":{
+    "toolCallId":"8FuX35f6u",
+    "title":"Running subagent",
+    "kind":"think",
+    "status":"in_progress",
+    "_meta":{"tool_name":"task","effect_kind":"subagent"},
+    "sessionUpdate":"tool_call"}}}
+```
+
+The **very first `tool_call` frame carries no `agent` / `task` / `rawInput`** — only
+`tool_name` + `effect_kind`, with the placeholder title `"Running subagent"`. The identity arrives on
+the *next* frame (a `tool_call_update`), and `child_session_id` on the one after that:
+
+```json
+<<< {"update":{
+  "toolCallId":"8FuX35f6u","kind":"think","status":"in_progress",
+  "title":"Running explore agent: Summarise what this project does by reading README.md, alpha.py and beta.js",
+  "rawInput":{"task":"Summarise what this project does by reading README.md, alpha.py and beta.js","agent":"explore"},
+  "_meta":{"tool_name":"task","effect_kind":"subagent",
+           "agent":"explore",
+           "task":"Summarise what this project does by reading README.md, alpha.py and beta.js"},
+  "sessionUpdate":"tool_call_update"}}
+
+<<< {"update":{
+  "toolCallId":"8FuX35f6u","kind":"think","status":"in_progress",
+  "title":"Running explore agent: …","rawInput":{…},
+  "_meta":{"tool_name":"task","effect_kind":"subagent","agent":"explore","task":"…",
+           "child_session_id":"178132b8-4e9f-1fe3-9c4a-a32c2722d5e8"},
+  "sessionUpdate":"tool_call_update"}}
+```
+
+⇒ **Do not detect a subagent by the title.** Detect it by `_meta.effect_kind === "subagent"` (or
+`_meta.tool_name === "task"`), which is present from the first frame, and expect `agent`/`task`/
+`child_session_id` to be **filled in late**.
+
+### B — `_meta` is **snake_case**, sits **on the update object** ✅ confirmed
+
+`_meta` hangs directly off `params.update` (a sibling of `toolCallId`/`status`/`content`), NOT nested
+under `rawInput`/`toolCall`/anything else. Keys are **snake_case** — `tool_name`, `effect_kind`,
+`child_session_id`, `turn_count`, `response` — even though the surrounding ACP fields
+(`toolCallId`, `rawInput`, `rawOutput`) are camelCase. The camelCase twins live only inside
+`rawOutput` (`turnsUsed`). Same trap as the `mime_type` one in §11: **Vibe extension fields are
+snake_case; ACP-standard fields are camelCase.**
+
+Terminal frame — `_meta.turn_count` + `_meta.response` and `rawOutput` appear together:
+
+```json
+<<< {"update":{
+  "toolCallId":"8FuX35f6u","kind":"think","status":"completed",
+  "content":[{"content":{"text":"Completed in 5 turns","type":"text"},"type":"content"}],
+  "rawOutput":{"response":"```\nWidget Factory\n├── README.md: \"turns orders into widgets\"\n…","turnsUsed":5,"completed":true},
+  "_meta":{"tool_name":"task","effect_kind":"subagent","agent":"explore","task":"…",
+           "child_session_id":"178132b8-4e9f-1fe3-9c4a-a32c2722d5e8",
+           "turn_count":5,
+           "response":"```\nWidget Factory\n├── README.md: \"turns orders into widgets\"\n…"},
+  "sessionUpdate":"tool_call_update"}}
+```
+
+### C — 🚨 `content` is **DELTA, NOT cumulative** — this is a live bug in our reducer
+
+Every progress `tool_call_update` carries a **one-element** `content` array holding **only the new
+entry**. Prior entries are never re-sent. Two consecutive frames, verbatim and unabridged, from the
+phase-1 run:
+
+```json
+<<< 2026-08-19T08:15:53.276Z
+{"jsonrpc":"2.0","method":"session/update","params":{
+ "sessionId":"bbc711a4-ae6b-8cb6-81c5-9f95bab8a526",
+ "update":{"toolCallId":"8FuX35f6u","kind":"think","status":"in_progress",
+  "content":[{"content":{"text":"read_file: Read 3 lines from alpha.py","type":"text"},"type":"content"}],
+  "_meta":{…,"child_session_id":"178132b8-…"},"sessionUpdate":"tool_call_update"}}}
+
+<<< 2026-08-19T08:15:53.277Z
+{"jsonrpc":"2.0","method":"session/update","params":{
+ "sessionId":"bbc711a4-ae6b-8cb6-81c5-9f95bab8a526",
+ "update":{"toolCallId":"8FuX35f6u","kind":"think","status":"in_progress",
+  "content":[{"content":{"text":"read_file: Read 4 lines from beta.js","type":"text"},"type":"content"}],
+  "_meta":{…,"child_session_id":"178132b8-…"},"sessionUpdate":"tool_call_update"}}}
+```
+
+The second frame does **not** contain `"read_file: Read 3 lines from alpha.py"`. The full observed
+sequence was three separate single-entry frames (`README.md` → `alpha.py` → `beta.js`) and then the
+terminal `"Completed in 5 turns"` frame — again a **single**-entry array that does **not** carry the
+three progress lines.
+
+⇒ **The renderer's wholesale REPLACE of `content` on every `tool_call_update` shows only the last
+fragment and silently drops the rest.** For `effect_kind:"subagent"` the reducer must **APPEND** new
+`content` entries to the existing list, keyed by `toolCallId`.
+(Whether non-subagent tools are cumulative was NOT re-tested here — this section only proves the
+subagent case. Treat "append for subagent" as the narrow, verified change.)
+
+### D — progress entries: one line per **successful** subagent tool call
+
+Exactly the shape hypothesised — an ACP `ToolCallContent` of `type:"content"` wrapping a text block:
+
+```json
+{"type":"content","content":{"type":"text","text":"read_file: Read 3 lines from README.md"}}
+```
+Note the **field order on the wire is `content` first, then `type`** (irrelevant to parsing, but it is
+what the raw frames look like). Observed texts across the runs:
+`"read_file: Read 3 lines from README.md"`, `"read_file: Read 4 lines from beta.js"`,
+`"grep: Searched beta\\.js (1 match)"`, `"grep: Searched .* (11 matches)"`, and the terminal
+`"Completed in 5 turns"` / `"Completed in 6 turns"`.
+
+**Failed subagent tool calls emit NO content entry.** Phase 1's child session recorded
+`tool_calls_succeeded: 3, tool_calls_failed: 9` (the model wasted 9 calls probing a scratchpad path),
+yet exactly **3** progress entries reached the wire. So the progress stream is a partial view: the
+client cannot count subagent steps from it, and `_meta.turn_count` (5) matches neither the entry
+count (3) nor the tool-call count (12).
+
+### E — **no subagent assistant text or reasoning reaches the wire at all**
+
+Only the one-line progress summaries and the final `response`. The child's own reasoning lives solely
+in its on-disk log (§I). Grepping the full phase-1 frame capture for distinctive child reasoning
+strings (`"The user wants me to summarize what the project does"`, `"scratchpad directory"`,
+`"grep search timed out"`) returned **0 hits** — while all three are present verbatim in
+`agents/explore_…/messages.jsonl`. There is **no** `agent_message_chunk` / `agent_thought_chunk` for
+the child, and **no** `session/update` tagged with the `child_session_id`. Every notification in the
+turn carries the ROOT `sessionId`.
+
+### F — permissions: the `task` call is NOT gated, but the SUBAGENT'S tools ARE — on the ROOT session, with an **unknown `toolCallId`**
+
+**The `task` tool itself raises no `session/request_permission`.** Under the default posture the task
+tool_call `s9JsbnwLb` streamed straight to `in_progress` with no gate — the `task` tool ships with
+`allowlist = ["explore"]`, which resolves to permission `ALWAYS` for the built-in subagent. (A custom
+subagent not on the allowlist would presumably gate; not captured.)
+
+**The subagent's own tool calls DO raise `session/request_permission`, on the ROOT session, and
+`params.toolCall` contains ONLY a `toolCallId` the client has never seen:**
+
+```json
+<<< {"jsonrpc":"2.0","id":0,"method":"session/request_permission","params":{
+  "sessionId":"4df1f09e-2d1c-7fa7-4ee9-38835fe1e800",
+  "toolCall":{"toolCallId":"v1KK2WmAn"},
+  "options":[
+    {"optionId":"allow_once","name":"Allow once","kind":"allow_once"},
+    {"optionId":"allow_always","name":"Allow for remainder of this session","kind":"allow_always",
+     "_meta":{"required_permissions":[{"scope":"outside_directory",
+       "invocation_pattern":"/private/var/folders/…/vibe-scratchpad-4df1f09e-wzcu4ww0/*",
+       "session_pattern":"/private/var/folders/…/vibe-scratchpad-4df1f09e-wzcu4ww0/*",
+       "label":"outside workdir (/private/var/folders/…/vibe-scratchpad-4df1f09e-wzcu4ww0/*)"}]}},
+    {"optionId":"allow_always_permanent","name":"Always allow","kind":"allow_always","_meta":{…}},
+    {"optionId":"reject_once","name":"Deny","kind":"reject_once"}]}}
+```
+
+`params.toolCall` is **`{toolCallId}` and nothing else** — no `title`, no `kind`, no `rawInput`, no
+`_meta`, no `agent`, and **no reference to the parent `task` toolCallId**. In the default-mode run the
+three gated ids were `LEWz9LBLq`, `VPSPomuCr`, `v1KK2WmAn`; the task's own id was `s9JsbnwLb`. **None
+of the gated ids ever appeared in a `tool_call` update.** They are the *child* session's tool-call ids
+— proved against disk: phase 1's permission `{"toolCallId":"KE8X8vsM8"}` matches
+`agents/explore_…/messages.jsonl` line `{"role":"tool","name":"read_file","tool_call_id":"KE8X8vsM8",…}`.
+
+⇒ **A permission-request UI that renders `toolCall.title` / looks the id up in its conversation state
+will render an EMPTY, unattributable prompt for every subagent tool.** The only correlation available
+to the client is "a `task` tool call is currently `in_progress`" — attribute the request to the
+in-flight subagent, and expect no title. With a parallel fan-out (§G) even that is ambiguous: two
+subagents in flight, and the request names neither.
+
+**Root Mode does NOT propagate into the subagent.** Phase 1 ran with `session/set_mode` →
+`auto-approve` (root profile `{"name":"auto-approve","overrides":{"bypass_tool_permissions":true,…}}`)
+and still received **9** permission requests from the child. The subagent runs under its OWN profile
+(`explore`, safety `safe`), whose tool permissions gate independently of the root Mode. **Auto-approve
+is not an escape hatch for subagent permission traffic.**
+
+### G — parallel fan-out: two independent `toolCallId`s, freely interleaved ✅
+
+One assistant message emitting two `task` calls produces two `tool_call` frames back-to-back, then
+two independent update streams, each with its own `child_session_id`:
+
+```json
+<<< 08:19:15.552  {"update":{"toolCallId":"6CjZc36Mi","title":"Running subagent","kind":"think","status":"in_progress",
+                   "_meta":{"tool_name":"task","effect_kind":"subagent"},"sessionUpdate":"tool_call"}}
+<<< 08:19:15.555  {"update":{"toolCallId":"nUL83qaSJ","title":"Running subagent","kind":"think","status":"in_progress",
+                   "_meta":{"tool_name":"task","effect_kind":"subagent"},"sessionUpdate":"tool_call"}}
+```
+
+and the progress streams interleave arbitrarily:
+
+```json
+<<< 08:20:11.667 {"update":{"toolCallId":"6CjZc36Mi","status":"in_progress",
+  "content":[{"content":{"text":"grep: Searched .+ (0 matches)","type":"text"},"type":"content"}],
+  "_meta":{…,"agent":"explore","task":"Read alpha.py and describe what it does",
+           "child_session_id":"9a5c4f3a-2791-8b10-b3ee-7c39cbd11bb2"},"sessionUpdate":"tool_call_update"}}
+
+<<< 08:20:53.085 {"update":{"toolCallId":"nUL83qaSJ","status":"in_progress",
+  "content":[{"content":{"text":"grep: Searched beta\\.js (0 matches)","type":"text"},"type":"content"}],
+  "_meta":{…,"agent":"explore","task":"Read beta.js and describe what it does",
+           "child_session_id":"1cfbf44e-7cad-02c9-a7b1-7b02fe082314"},"sessionUpdate":"tool_call_update"}}
+```
+
+Lifecycles are fully independent: `6CjZc36Mi` reached `status:"completed"` (`"Completed in 6 turns"`)
+at **08:20:30**, while `nUL83qaSJ` kept streaming progress until **08:21:5x**. ⇒ subagent state must
+be keyed by `toolCallId` (never "the current subagent"), and the UI must tolerate N concurrent panels.
+
+### H — `session/load` replays the subagent, but **only the condensed content**
+
+Resuming phase 1's session in a fresh process replays the subagent as a **single `tool_call`** frame
+(NOT `tool_call_update`) already in its terminal state, with `_meta` and `rawOutput` **fully intact**:
+
+```json
+<<< {"update":{
+ "toolCallId":"8FuX35f6u",
+ "title":"Running explore agent: Summarise what this project does by reading README.md, alpha.py and beta.js",
+ "kind":"think","status":"completed",
+ "content":[
+   {"content":{"text":"response: ```\nWidget Factory\n…\nturns_used: 5\ncompleted: True","type":"text"},"type":"content"},
+   {"content":{"text":"Completed in 5 turns","type":"text"},"type":"content"}],
+ "rawInput":{"task":"…","agent":"explore"},
+ "rawOutput":{"response":"…","turnsUsed":5,"completed":true},
+ "_meta":{"tool_name":"task","effect_kind":"subagent","agent":"explore","task":"…",
+          "child_session_id":"178132b8-4e9f-1fe3-9c4a-a32c2722d5e8","turn_count":5,"response":"…"},
+ "sessionUpdate":"tool_call"}}
+```
+
+**The three live progress lines (`read_file: …`) are NOT replayed** — replay substitutes a 2-entry
+list: a flattened `"response: …\nturns_used: 5\ncompleted: True"` blob plus `"Completed in 5 turns"`.
+So the live and replayed content arrays differ in both length and text. Since our own transcript log
+is the reopen source of truth (ADR-0019), **we must persist the appended progress entries ourselves**
+if we want them after a reopen; Vibe will not give them back. Replay also appends the usual
+`checkpoint:resume` pseudo tool_call (`_meta:{"checkpoint_kind":"resume"}`).
+
+### I — on disk: the child session is a nested session directory
+
+`~/.vibe/logs/session/session_<yyyymmdd>_<hhmmss>_<short-parent-id>/` gains an **`agents/`**
+subdirectory, one directory per subagent run:
+
+```
+session_20260819_081428_bbc711a4/
+├── messages.jsonl
+├── meta.json
+└── agents/
+    └── explore_20260819_081433_178132b8/   #  <agent>_<timestamp>_<short-child-id>
+        ├── messages.jsonl
+        └── meta.json
+```
+The parallel run produced two sibling directories under one `agents/`. The child `messages.jsonl` is
+**JSONL, one chat message per line** (18 lines for a 5-turn run), same shape as the parent's:
+`{role, content, injected, message_id}` for `user`; `{role, content, injected, reasoning_content,
+reasoning_message_id, tool_calls, message_id}` for `assistant`; `{role, content, injected, name,
+tool_call_id[, tool_result]}` for `tool`. The child `meta.json` carries
+`{session_id, parent_session_id, …, stats:{steps, tool_calls_succeeded, tool_calls_failed, …},
+agent_profile, system_prompt, tools_available}`, and the PARENT `meta.json` gains the link:
+```json
+"child_sessions":[{"session_id":"178132b8-…","tool_call_id":"8FuX35f6u",
+                   "agent":"explore","relative_path":"agents/explore_20260819_081433_178132b8"}]
+```
+**Reported for information only — do not build on it.** It is an internal log directory, not a
+protocol surface: nothing here is exposed over ACP, and `tool_call_id` ↔ `session_id` correlation
+should come from `_meta.child_session_id` on the wire, not from disk.
+
+### Infra — same `node`-not-`bun` gotcha as §9–§12
+`bun build scripts/spike-subagent.ts --target=node --outfile=/tmp/spike-sub.mjs && node /tmp/spike-sub.mjs --phase=all`
+(`--phase=1|2|3|4`, `--ws=<dir>`, `--log=<file>`). The probe wraps `AcpClient`'s `spawn` so every stdin
+write and stdout line is teed verbatim in both directions. LIVE — costs credits; it only sends
+`session/*` + `_auth/status` and answers `fs/*` + permissions, so it is safe under the house rules.
+
+### Client posture — three gaps we design AROUND, not fixes we wait for
+
+Findings C, F and H are Vibe-side behaviours, **not defects in our client**, and we have decided not
+to file them upstream. They are permanent constraints on any subagent UI we build. Recorded here so a
+later session does not mistake the resulting UI for something half-finished:
+
+1. **Root Mode does not propagate to a subagent** (F). A Thread in `auto-approve` still gets the
+   child's Permission requests. Do NOT auto-answer them on the user's behalf to "restore"
+   auto-approve — that would silently grant tool permissions the user never saw, on a request we
+   cannot even attribute.
+2. **A subagent's Permission request is unattributable** (F). `params.toolCall` is `{toolCallId}`
+   and nothing else, and that id belongs to the *child* session, so it matches no `tool_call` we ever
+   received. There is no child id on the callback. Label such a request honestly ("from a subagent")
+   and never print the raw id or imply WHICH subagent asked — during a fan-out (G) it names neither.
+3. **`session/load` does not replay the live progress lines** (H). Harmless for us: per ADR-0019 we
+   replay from our OWN transcript event log, never from `session/load`. Do not "optimise" replay onto
+   `session/load` — it would silently lose the step ledger.
+
+The child session directory (I) is the only place the subagent's real transcript exists. It stays
+off-limits: reading it would couple us to an unversioned internal format, which is exactly what
+ADR-0002 forbids.
