@@ -1,0 +1,76 @@
+# The four gates every slice must pass before it is considered done
+# (`lint && typecheck && build && test`, per CLAUDE.md), enforced on every pull
+# request and on every push to `main`.
+#
+# Why this exists: until now the gates were only ever run locally, so nothing
+# independently verified a branch. #427 is what that costs — the Model picker was
+# dead against the shipping `vibe-acp` and no check noticed, because the wire
+# shapes had drifted under code that still type-checked fine on someone's laptop.
+# With several worktrees in flight at once, two branches can also each be green
+# alone and broken together; only a merge-time check catches that.
+#
+# Deliberately NOT here: `test:e2e` (Playwright — slow, needs browsers, and is a
+# pre-release check rather than a per-PR one) and any packaging/signing step
+# (that is `build-linux-artifact.yml` and `release.yml`).
+name: Gates
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+# A new push to the same branch makes the previous run obsolete — cancel it
+# rather than paying for a result nobody will read. `main` is excluded from
+# cancellation so its history keeps a result for every commit.
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  gates:
+    name: lint · typecheck · build · test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Bun is the package manager and the test runner (CLAUDE.md) — but NOT the
+      # runtime the app ships on, so it is not the whole story; see setup-node.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # `node:sqlite` (persistence, ADR-0019) needs Node >= 22.5, and the runner
+      # image's default Node is not guaranteed to be that. Pin it so a green run
+      # here means the same thing as a green run locally.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # `postinstall` fixes the node-pty exec bit and patches the dev Electron —
+      # both are load-bearing, so never install with --ignore-scripts here.
+      - name: Install dependencies
+        run: bun install
+
+      # Each gate is its own step so a failure names itself in the UI. They run
+      # even after an earlier one fails (`!cancelled()`), so one run reports every
+      # problem instead of making you fix them one push at a time.
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        if: ${{ !cancelled() }}
+        run: bun run typecheck
+
+      - name: Build
+        if: ${{ !cancelled() }}
+        run: bun run build
+
+      - name: Test
+        if: ${{ !cancelled() }}
+        run: bun run test
