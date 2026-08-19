@@ -93,9 +93,11 @@ feature code.
   the agent blocks until the user answers. Queued and answered by JSON-RPC **request id**. Reserve the
   word "prompt" for the user's message to the agent.
 
-- **Agent controls** — a Thread's **Mode** (approval posture: default/plan/accept-edits/auto-approve/chat),
-  **Model**, and **Reasoning effort**, surfaced from `session/new` and changed via `session/set_mode` /
-  `set_model` / `set_config_option`. Sticky per-Thread; Vibe-owned/display-from-session-state (`docs/adr/0007`).
+- **Agent controls** — a Thread's **Mode** (approval posture: ask/plan/accept-edits/auto-approve),
+  **Model**, and **Reasoning effort**, surfaced from `session/new`'s `configOptions` and all changed via
+  `session/set_config_option` (`configId` = mode/model/thinking). Sticky per-Thread;
+  Vibe-owned/display-from-session-state (`docs/adr/0007`). Minimum supported `vibe`: **2.24.x** — these
+  shapes moved between minor releases (#427, acp-capture §14.0).
 
 The renderer owns canonical conversation state; main forwards raw ACP `session/update` without
 interpreting it (`docs/adr/0001`).

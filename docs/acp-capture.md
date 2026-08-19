@@ -1,8 +1,12 @@
-# ACP capture — real `vibe-acp` 2.18.0 traffic
+# ACP capture — real `vibe-acp` traffic
 
-Ground-truth JSON-RPC captured by driving `vibe-acp` directly (stdio) on 2026-06-29, vibe 2.18.0.
-These supersede any guessed shapes in [vibe-acp-protocol.md](./vibe-acp-protocol.md). Field names are
-**verbatim**.
+Ground-truth JSON-RPC captured by driving `vibe-acp` directly (stdio). **Each section names the
+version it was captured against** — §1–§12 are vibe 2.18.x (2026-06-29 onward), §13–§14 are vibe
+**2.24.1** (2026-08). These supersede any guessed shapes in
+[vibe-acp-protocol.md](./vibe-acp-protocol.md). Field names are **verbatim**.
+
+> **Read §14.0 first.** Three things drifted between 2.18.0 and 2.24.1 (mode ids, the `models` block,
+> `session/set_model`), so §2 and §10 are stale where §14.0 says so.
 
 Capture method: a Node probe spawned `vibe-acp`, sent `initialize` → `session/new` → `session/prompt`,
 served the agent's `fs/*` requests, and answered `session/request_permission`. (Scripts were
@@ -37,6 +41,10 @@ resume/fork/list are available.
 ---
 
 ## 2. `session/new` (client → agent)
+
+> ⚠️ **Partly stale (2.18.0).** At 2.24.1 the mode list is `ask`/`plan`/`accept-edits`/`auto-approve`
+> (no `default`, no `chat`) and the top-level `models` block is **gone**. See §14.0 for the current
+> verbatim result.
 
 **Request**: `{"id":2,"method":"session/new","params":{"cwd":"<abs path>","mcpServers":[]}}`
 
@@ -342,6 +350,10 @@ Electron (which is why the app itself was unaffected). To re-run the probe:
 
 ## 10. Agent controls — change Mode / Model / Reasoning effort (captured 2026-06-30 via the #65 spike, vibe-acp 2.18.0)
 
+> ⚠️ **Partly stale (2.18.0).** At 2.24.1 `session/set_model` is **gone** (`-32601`) and there is no
+> `models` block; Mode ids changed (`default` → `ask`, `chat` removed); `session/set_mode` silently
+> no-ops on an unknown id. See §14.0 and §14.4.
+
 `session/new` (§2) returns the current values + options as `modes`, `models`, and `configOptions`
 (ids `mode` / `model` / `thinking`). The **5 modes** are `default` (requires approval for tool
 executions), `plan` (read-only — exploration/planning), `accept-edits` (auto-approves file edits only),
@@ -443,3 +455,253 @@ Streaming stops immediately. So `stopReason` has (at least) two values: **`end_t
 
 ### Infra — same `node`-not-`bun` gotcha as §9/§10/§11
 `bun build scripts/spike-cancel-steer.ts --target=node --outfile=/tmp/spike-cs.mjs && node /tmp/spike-cs.mjs`. Read-only (`chat` mode — the agent can't touch the workspace); sends only `session/*` + `_auth/status` (no auth/creds/writes). Safe under the house rules.
+
+---
+
+## 13. `session/list` — saved CLI + ACP sessions (confirmed 2026-08-12, vibe-acp 2.24.1)
+
+Vibe implements the standard `session/list` request. Sending `{}` (no `cwd`) lists the global
+saved-session index; supplying `cwd` filters it. The response is:
+
+```json
+{"sessions":[{"sessionId":"…","cwd":"/abs/workspace","title":"…","updatedAt":"2026-08-11T12:00:00+00:00"}]}
+```
+
+The implementation is backed by Vibe's reconciled `.session_index.json`; clients must use this ACP
+surface and must not parse `~/.vibe/logs/session` directly. Current Vibe returns all sessions in one
+response (it accepts but ignores `cursor`). Builds predating the method reject with JSON-RPC `-32601`;
+Mistro treats that as discovery unavailable, not a launch failure.
+
+Some older indexed rows intentionally return `cwd:""` (and legacy malformed rows may omit `cwd`).
+Mistro keeps those rows in the discovered count and reports each as a visible partial failure. It
+does not invent a directory: a Workspace is a real filesystem boundary, and loading a session under
+an arbitrary cwd would make file tools operate in the wrong context.
+
+Opening a listed session uses the existing `session/load` contract (§9). Its historical
+`session/update` replay now includes `user_message_chunk` as well as agent/reasoning/tool updates;
+Mistro captures that replay once, atomically, into its own transcript log so later cold opens remain
+process-free. Text blocks are reconstructed normally; historical image/resource blocks that ACP does
+not provide as reusable local attachment data are retained honestly. Inline image bytes and local
+image resource links are copied into Mistro's file-backed AttachmentStore before transcript import;
+SQLite holds only the attachment filename/mime ref, never base64. They render as normal user-message
+thumbnails. Image `data:` resource links and image blobs inside embedded resources take the same
+file-backed path. All other embedded blobs, binary block data, and non-image data URIs are stripped
+to descriptive metadata or an explicit unavailable placeholder before the atomic transcript insert.
+Non-image filesystem/remote resource links retain both label and URI; an image without reusable
+bytes is rendered as an explicit unavailable-attachment placeholder.
+
+---
+
+## 14. Agent profiles as ACP modes + 2.24.1 drift (captured 2026-08-19 via the #420 probe, vibe-acp **2.24.1**)
+
+Captured by `apps/desktop/scripts/spike-agent-profiles.ts` against the installed binary
+(`vibe 2.24.1`, source read at v2.24.2), signed in, workspace `/tmp/vibe-probe-420-cwd`.
+Rebuild + run: `bun build scripts/spike-agent-profiles.ts --target=node --outfile=/tmp/spike-agents.mjs
+&& node /tmp/spike-agents.mjs --phase=all` (same `node`-not-`bun` gotcha as §9–§12).
+The probe writes ONLY `zz-probe-*` scratch files into `~/.vibe/agents/` + `~/.vibe/prompts/` and
+deletes them on exit.
+
+### 14.0 DRIFT — corrections to §2 and §10 (2.18.0 → 2.24.1)
+
+Three load-bearing things changed since the 2.18.0 capture. §2/§10 are stale on all three.
+
+| Was (2.18.0) | Is (2.24.1) |
+|---|---|
+| 5 modes: `default`, `plan`, `accept-edits`, `auto-approve`, `chat` | **4** modes: **`ask`**, `plan`, `accept-edits`, `auto-approve`. `default` was **renamed `ask`**; **`chat` is gone**. |
+| `session/new` result carries a top-level **`models`** block (`currentModelId` / `availableModels`) | **No `models` key at all.** Model lives ONLY in `configOptions[id="model"]` (`currentValue` + `options[].value`). |
+| `session/set_model` `{sessionId, modelId}` → `{}` | **`session/set_model` no longer exists** → `-32601 "Method not found"`, `data:{"method":"session/set_model"}`. Model changes go through `session/set_config_option` `{sessionId, configId:"model", value}`. |
+
+Verbatim `session/new` result at 2.24.1 (fresh temp cwd, no custom profiles):
+
+```json
+{"sessionId":"a6bb0b67-645d-3f62-2e40-0d62f1609e26",
+ "modes":{"currentModeId":"ask","availableModes":[
+   {"id":"ask","name":"Ask","description":"Requires approval for tool executions"},
+   {"id":"plan","name":"Plan","description":"Read-only agent for exploration and planning"},
+   {"id":"accept-edits","name":"Accept Edits","description":"Auto-approves file edits only"},
+   {"id":"auto-approve","name":"Auto Approve","description":"Auto-approves all tool executions"}]},
+ "configOptions":[
+   {"id":"mode","name":"Session Mode","category":"mode","type":"select","currentValue":"ask",
+    "options":[{"value":"ask","name":"Ask","description":"…"}, …]},
+   {"id":"model","name":"Model","category":"model","type":"select","currentValue":"mistral-medium-3.5",
+    "options":[{"value":"mistral-medium-3.5","name":"mistral-medium-3.5","description":"mistral-vibe-cli-latest"},
+               {"value":"devstral-small","name":"devstral-small","description":"devstral-small-latest"},
+               {"value":"local","name":"local","description":"devstral"}]},
+   {"id":"thinking","name":"Thinking","category":"thinking","type":"select","currentValue":"medium",
+    "options":[{"value":"off","name":"Off"},{"value":"low","name":"Low"},{"value":"medium","name":"Medium"},
+               {"value":"high","name":"High"},{"value":"max","name":"Max"}]}],
+ "_meta":{"workspace_trust":{"status":"untrusted","details":null}}}
+```
+
+`initialize` is unchanged from §1 except `agentInfo.version:"2.24.1"` — same `agentCapabilities`
+(`loadSession:true`, `promptCapabilities{image:true,audio:false,embeddedContext:true}`,
+`sessionCapabilities{list,fork,close}`) and the same single `browser-auth` method.
+`configOptions[].options[]` now also carry a **`description`** (2.18 showed only `value`), and the
+model option's `description` is the underlying model name (e.g. `mistral-vibe-cli-latest`).
+
+Note the two builtin profiles that are **NOT** offered as modes: `explore` (it is
+`agent_type = "subagent"`) and `lean` (`install_required = true`) — see 14.2.
+
+#### The setters, re-probed while fixing #427 (2026-08-19, vibe 2.24.1)
+
+`session/set_config_option` is now the setter for **all three** axes, and it is the only one that
+validates:
+
+| Call | Result |
+|---|---|
+| `session/set_config_option {sessionId, configId:"model", value:"devstral-small"}` | OK — result is the session's **full updated `configOptions` array** (2.18 returned `{}`) |
+| `session/set_config_option {…, configId:"mode", value:"plan"}` | OK, same shape |
+| `session/set_config_option {…, configId:"thinking", value:"low"}` | OK, same shape |
+| any of the three with an unadvertised value | `-32602 "Unsupported config option <id>='<value>'"` |
+| `session/set_model {sessionId, modelId}` | `-32601 "Method not found"`, `data:{"method":"session/set_model"}` |
+| `session/set_mode {sessionId, modeId:"zz-not-a-mode"}` | **`{}`** — a bogus id is a SILENT no-op, indistinguishable from success |
+
+⇒ Prefer `set_config_option` wherever the result is load-bearing (e.g. re-asserting Mode after
+`session/load`, which §10 Q2 / §14.5 say is still required). `session/set_mode` remains only as a
+fallback for an agent that advertises no `mode` config option.
+
+⚠️ **A Model change writes THROUGH to the user's global default.** After
+`set_config_option {configId:"model", value:"devstral-small"}`, `~/.vibe/config.toml`'s `active_model`
+was rewritten and the NEXT `session/new` (fresh process) reported `devstral-small` as its current
+model. So the Model axis is a user-level setting with a per-session override, not a purely per-session
+one — worth remembering wherever we treat agent controls as per-Thread state (ADR-0007). `thinking`
+behaved the same way; Mode did not (a new session comes back at `ask`).
+
+### 14.1 A custom `*.toml` profile DOES become an ACP mode
+
+Dropping `~/.vibe/agents/zz-probe-bot.toml`:
+
+```toml
+display_name = "ZZ Probe Bot"
+description = "Throwaway probe profile for issue 420"
+safety = "safe"
+system_prompt_id = "zz-probe-prompt"
+```
+
+makes the very next `session/new` (fresh process) return it **appended after the builtins**, in both
+`modes.availableModes` and `configOptions[id="mode"].options`:
+
+```json
+{"id":"zz-probe-bot","name":"ZZ Probe Bot","description":"Throwaway probe profile for issue 420"}
+```
+
+**Field mapping (verbatim, verified):**
+
+| ACP field | Source |
+|---|---|
+| `id` (and `configOptions` `value`) | the **file stem** — `zz-probe-bot.toml` → `zz-probe-bot`. The TOML has no `name` key. |
+| `name` | `display_name`; when absent, the stem title-cased: `zz-probe-minimal-fields.toml` → `"Zz Probe Minimal Fields"`. |
+| `description` | `description`; when absent, the **empty string** `""` (not null, not omitted). |
+
+Ordering is filesystem `glob` order, **not** alphabetical (a `zz-probe-minimal-fields` file appeared
+before `zz-probe-bot`). Builtins always come first; do not rely on the order of the custom tail.
+
+### 14.2 Profiles that are silently NOT offered
+
+Everything below is dropped **without any wire signal** — no error, no `session/update`, nothing on
+`vibe-acp`'s stderr. The only trace is a `WARNING` in `~/.vibe/logs/vibe.log`:
+
+| Case | Offered? | `vibe.log` line (verbatim) |
+|---|---|---|
+| `agent_type = "subagent"` | no | (none — filtered at `build_mode_state`, not at load) |
+| `system_prompt_id` naming a missing `.md` | no | `Failed to load agent at …/zz-probe-missing-prompt.toml: 1 validation error for VibeConfigSchema\n  Value error, Invalid system_prompt_id value: 'zz-probe-does-not-exist'. Must be one of the available prompts ("cli", "explore", "tests", "lean", "minimal"), or correspond to a .md file in /Users/…/.vibe/prompts (available: "zz-probe-prompt")` |
+| malformed TOML | no | `Failed to load agent at …/zz-probe-broken.toml: Expected '=' after a key in a key/value pair (at line 2, column 6)` (plus a `Failed to migrate agent profile …` traceback from the migration pass that runs first) |
+
+⇒ **A bad profile is indistinguishable from an absent one over ACP.** Any UI that writes profiles must
+validate them itself (or diff the written `id` against the next `session/new`'s `availableModes`)
+because Vibe will never tell the client why a bot vanished.
+
+### 14.3 Where the profile and prompt files must live
+
+- **User agents dir = `~/.vibe/agents/`** (`VIBE_HOME/agents`). Verified by placing files there and
+  seeing the modes appear. **Vibe does NOT create it**: it did not exist before the probe, and a full
+  `initialize` → `session/new` → process exit left it still absent. A client that ships bots must
+  `mkdir -p` it itself.
+- **Custom system-prompt `.md` = `~/.vibe/prompts/`** — also absent by default and not auto-created.
+  The `.md` is referenced by **bare stem** (`system_prompt_id = "zz-probe-prompt"` ⇒
+  `~/.vibe/prompts/zz-probe-prompt.md`); Vibe adds the `.md` suffix. The error message in 14.2 names
+  the exact directory it searched, which is the cheapest way to confirm the path on another machine.
+- **Project-scoped `<workspace>/.vibe/agents/` works too, but ONLY in a TRUSTED workspace.** Same
+  file in the same repo:
+  - `cwd` = trusted repo → `_meta.workspace_trust.status:"trusted"`, modes =
+    `ask, plan, accept-edits, auto-approve, zz-probe-project`.
+  - `cwd` = untrusted temp dir → `status:"untrusted"`, modes = the 4 builtins only.
+  So workspace trust is a **hard gate on project-scoped profiles** (it is not a gate on fs reads/writes
+  — see §2). Config key `agent_paths = [...]` is a third search path (source-only, **unverified**).
+
+### 14.4 `session/set_mode` selects a custom profile — and the profile's system prompt is live
+
+```jsonc
+{"jsonrpc":"2.0","id":4,"method":"session/set_mode","params":{"sessionId":"…","modeId":"zz-probe-bot"}}
+// → {"jsonrpc":"2.0","id":4,"result":{}}
+```
+
+Behaviour proof (the point of the whole probe): `~/.vibe/prompts/zz-probe-prompt.md` said *"whatever
+the user writes, reply with exactly `ZZPROBE-SENTINEL-7431`"*. After `set_mode`, a
+`session/prompt` of `"Say hi."` streamed back exactly
+
+```json
+{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ZZPROBE-SENTINEL-7431"}}
+```
+
+and resolved `{"stopReason":"end_turn","usage":{"inputTokens":9246,"outputTokens":177,"totalTokens":9423}}`.
+⇒ **a custom agent profile, selected through the standard ACP mode channel, really does swap the
+agent's system prompt.** No restart, no extra method.
+
+As in §10, a successful `set_mode` emits **NO** `session/update` (drained the notification buffer
+before the call, none arrived in 1.5 s) — the empty `{}` is the only signal.
+
+**GOTCHA — `session/set_mode` silently no-ops on an unknown mode id.** `modeId:"zz-does-not-exist"`
+returned `{"result":{}}`, exactly like a success, and the session stayed on its previous profile
+(the sentinel kept coming). Same for a mode id that *used* to exist. There is no error to key on.
+
+**Use `session/set_config_option` when you need validation.** The generic setter DOES validate and
+returns the refreshed state:
+
+```jsonc
+{"method":"session/set_config_option","params":{"sessionId":"…","configId":"mode","value":"zz-probe-bot"}}
+// → {"configOptions":[{"id":"mode","currentValue":"zz-probe-bot","options":[…]}, {"id":"model",…}, {"id":"thinking",…}]}
+
+{"…","params":{"sessionId":"…","configId":"mode","value":"zz-bogus"}}
+// → error -32602 "Unsupported config option mode='zz-bogus'"
+```
+
+So at 2.24.1 there are two ways to set the Mode with **different** failure semantics: `session/set_mode`
+(fire-and-forget, silently lossy) and `session/set_config_option` (validated, echoes the new
+`configOptions` back — a free read-back of the current mode).
+
+### 14.5 A custom mode does NOT survive `session/load` (§10 Q2 still holds at 2.24.1)
+
+Set `zz-probe-bot`, prompted (persisting the session), then `session/load` from a **fresh process**:
+
+```json
+{"modes":{"currentModeId":"ask","availableModes":[…,{"id":"zz-probe-bot","name":"ZZ Probe Bot","description":"…"}]}, …}
+```
+
+`currentModeId` came back **`ask`**, not `zz-probe-bot` — the profile is still *offered*, just not
+*selected*. Identical to the 2.18 finding (with `default` → `ask`). ⇒ the per-Thread re-assert
+choreography (ADR-0007) is still required, and must re-assert **custom** modes too.
+
+### 14.6 Editing or deleting a profile mid-session
+
+With a live session already switched to `zz-probe-bot`:
+
+| Action (mid-session) | Effect |
+|---|---|
+| Delete `~/.vibe/agents/zz-probe-bot.toml` | **The live session is unaffected** — the next `session/prompt` still answered with the sentinel. The resolved profile lives in the session's runtime config, not in the file. |
+| Delete `~/.vibe/prompts/zz-probe-prompt.md` | **Also unaffected** — still the sentinel. The system prompt text is already resolved into the running session. |
+| `session/new` in the **same still-running process**, after the delete | The new session does **NOT** list `zz-probe-bot`. ⇒ **the agent registry is re-scanned per `session/new`, not cached at process start** — a client can add or remove bots without restarting `vibe-acp`, as long as it opens a new session. |
+| `session/set_mode` to the just-deleted id, on the live session | `{}` (the silent no-op of 14.4) — the session stays on the profile it already had. |
+
+⇒ Editing a profile file **never** disturbs a running Thread, and never needs an agent restart to be
+picked up by the next Thread. The failure mode to design for is the opposite one: a mode id we cached
+per-Thread can vanish from `availableModes` between sessions, and re-asserting it will fail *silently*.
+
+### 14.7 Safety note on the probe
+
+The probe answers every `session/request_permission` with `reject_once` and refuses
+`fs/write_text_file`, so the agent cannot touch the workspace. It sends only `initialize`,
+`_auth/status` (read), `session/{new,load,prompt,set_mode,set_config_option}` — never `authenticate`
+or `_auth/signOut`. Scratch profile names are prefixed `zz-probe-` so they can never shadow a Vibe
+builtin (a custom profile whose **file stem equals a builtin name overrides that builtin** — source
+`registry.py` logs `Custom agent '%s' overrides builtin agent`; deliberately **not** probed).

@@ -63,14 +63,18 @@ export interface VibeUpdateResult {
   error: string | null
 }
 
-/** A selectable agent mode from `session/new` (e.g. `default`, `plan`). */
+/** A selectable agent mode from `session/new` (e.g. `ask`, `plan`). */
 export interface AcpMode {
   id: string
   name: string
   description?: string
 }
 
-/** A selectable model from `session/new`. */
+/**
+ * A selectable model. Sourced from `session/new`'s `configOptions[id="model"]` at
+ * vibe-acp 2.24.1 (`modelId` = the option's `value`); the top-level `models` block
+ * it used to come from is gone (#427, acp-capture §14.0).
+ */
 export interface AcpModel {
   modelId: string
   name: string

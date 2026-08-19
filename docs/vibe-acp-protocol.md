@@ -11,10 +11,16 @@ same protocol Zed/JetBrains/Neovim use to drive Vibe. Our `src/main/acp/client.t
   what `vibe-acp` implements; confirm exact param shapes against the running binary
   (`vibe-acp` + the ACP schema) before finalizing each method.
 
-> ✅ **Confirmed against vibe-acp 2.18.0** (live capture). The **verbatim** message shapes are in
+> ✅ **Confirmed against vibe-acp 2.18.0** (live capture), with the agent-controls methods
+> re-confirmed against **2.24.1** (acp-capture §14.0, #427). The **verbatim** message shapes are in
 > [acp-capture.md](./acp-capture.md) — treat that as authoritative; this page is the narrative map.
 > A few items remain unverified (trust grant, `session/cancel`). The mode/model/thinking change
 > methods and `session/load` are now confirmed (acp-capture §9, §10).
+>
+> ⚠️ **Minimum supported `vibe`: 2.24.x.** These shapes move between MINOR releases — 2.24.1 removed
+> `session/set_model` and the `session/new` `models` block outright (#427). The app degrades rather
+> than crashes on an older binary (it falls back to the legacy dedicated setters and logs any axis
+> the agent stops advertising), but 2.24.x is what we build and verify against.
 
 ---
 
@@ -25,13 +31,13 @@ same protocol Zed/JetBrains/Neovim use to drive Vibe. Our `src/main/acp/client.t
 | Method | Purpose |
 |---|---|
 | `initialize` | Handshake. Agent returns `agentCapabilities` (`loadSession`, `promptCapabilities.image`), `agentInfo`, `authMethods` (`browser-auth`). camelCase params. |
-| `session/new` | Create a session for a workspace. Params `{cwd, mcpServers}`. Returns `sessionId`, `modes`, `models`, `configOptions`, `_meta.workspace_trust`. |
+| `session/new` | Create a session for a workspace. Params `{cwd, mcpServers}`. Returns `sessionId`, `modes`, `configOptions`, `_meta.workspace_trust`. (The top-level `models` block is **gone** at 2.24.1 — Model lives in `configOptions[id="model"]`. §14.0) |
 | `session/load` | Load/resume an existing session (capability `loadSession:true`). Params `{sessionId, cwd, mcpServers}`; replays history as `session/update`s then resolves session-new-shaped (acp-capture §9). |
 | `session/prompt` | Send user input `{sessionId, prompt:[{type:"text",text}]}`; streams `session/update`; resolves with `{stopReason, usage, userMessageId}`. |
 | `session/cancel` | Cancel the active turn. **Shape unverified.** |
-| `session/set_mode` | Change Mode. Params `{sessionId, modeId}` → `{}`. (acp-capture §10) |
-| `session/set_model` | Change Model. Params `{sessionId, modelId}` → `{}`. ⚠️ false-accepts any string; pass only `availableModels` ids. (§10) |
-| `session/set_config_option` | Change a config option (Reasoning effort). Params `{sessionId, configId, value}` → `{}` (note `configId`, not `id`). (§10) |
+| `session/set_config_option` | **The setter for all three axes** at 2.24.1. Params `{sessionId, configId, value}` (note `configId`, not `id`); `configId` is `mode` / `model` / `thinking`. Validates: an unknown value returns `-32602 "Unsupported config option …"`. Result carries the session's updated `configOptions`. (§10, §14.0) |
+| `session/set_mode` | Legacy Mode setter. Params `{sessionId, modeId}` → `{}`. ⚠️ **silently no-ops on an unknown id** (`{}`, indistinguishable from success) — prefer `set_config_option`. (§10) |
+| `session/set_model` | **REMOVED at 2.24.1** (`-32601 Method not found`). Was `{sessionId, modelId}` → `{}`, false-accepting any string. Use `set_config_option` with `configId:"model"`. (§10, §14.0) |
 
 ### Agent → Client (we receive / must answer)
 

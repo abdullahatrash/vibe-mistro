@@ -243,14 +243,15 @@ export type ThreadControlIntent = Partial<Record<ThreadConfigAxis, string>>
 
 /**
  * Change one agent control on a Thread's bound ACP session (#66) — Mode, Model, or
- * Reasoning effort. Main maps the axis to the verified setter (`session/set_mode` /
- * `session/set_model` / `session/set_config_option`, acp-capture §10) and returns
- * ok/err. `value` is the new id for the axis — a `modeId` from `availableModes`, a
- * `modelId` from `availableModels` (NEVER an arbitrary string: `session/set_model`
- * false-accepts any string, acp-capture §10), or a reasoning-effort `value` from the
- * `thinking` options. A change emits NO notification (the `{}` result is the only
- * signal), so the renderer updates the displayed value OPTIMISTICALLY and reverts on
- * an `{ok:false}` (ADR-0007).
+ * Reasoning effort. Main maps the axis to the verified setter: at vibe-acp 2.24.1
+ * all three go through `session/set_config_option` (`configId` = `mode` / `model` /
+ * `thinking`), which VALIDATES the value and rejects an unknown one with `-32602`
+ * (#427, acp-capture §14.0); the legacy dedicated methods survive only for a session
+ * that advertises no matching config option. `value` is the new id for the axis — a
+ * `modeId` from `availableModes`, a `modelId` from `availableModels`, or a
+ * reasoning-effort `value` from the `thinking` options. A change emits NO
+ * notification (the setter's result is the only signal), so the renderer updates the
+ * displayed value OPTIMISTICALLY and reverts on an `{ok:false}` (ADR-0007).
  */
 export interface SetThreadConfigArgs {
   /** Id of the Workspace agent (one `vibe-acp` process) hosting the Thread. */

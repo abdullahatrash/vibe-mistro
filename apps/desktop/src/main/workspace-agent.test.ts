@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   AUTH_HINT,
   SessionLoadError,
@@ -7,6 +7,7 @@ import {
   WorkspaceAgentError,
 } from './workspace-agent'
 import type { ChildProcessLike, SpawnFn } from './acp/client'
+import type { ThreadInfo } from '../shared/ipc'
 
 /**
  * Exercise the riskiest WorkspaceAgent logic with an injected fake child:
@@ -1382,31 +1383,86 @@ describe('WorkspaceAgent.start() — concurrent + idempotent (TB2 #47)', () => {
   })
 })
 
-describe('WorkspaceAgent agent controls (#66, acp-capture §10)', () => {
-  it('setMode sends session/set_mode {sessionId, modeId} and resolves on the {} result', async () => {
+describe('WorkspaceAgent agent controls (#66, acp-capture §10/§14.0)', () => {
+  /** The 2.24.1 `configOptions` (acp-capture §14.0) — no top-level `models` block. */
+  const CONFIG_OPTIONS_2_24 = [
+    {
+      id: 'mode',
+      currentValue: 'ask',
+      options: [
+        { value: 'ask', name: 'Ask' },
+        { value: 'plan', name: 'Plan' },
+      ],
+    },
+    {
+      id: 'model',
+      currentValue: 'mistral-medium-3.5',
+      options: [
+        { value: 'mistral-medium-3.5', name: 'mistral-medium-3.5' },
+        { value: 'devstral-small', name: 'devstral-small' },
+      ],
+    },
+    { id: 'thinking', currentValue: 'medium', options: [{ value: 'off' }, { value: 'medium' }] },
+  ]
+
+  /** Open a second Thread on a connected agent whose `session/new` result is `result`. */
+  async function openThreadWith(
+    agent: WorkspaceAgent,
+    fake: CapturingFake,
+    result: Record<string, unknown>,
+  ): Promise<ThreadInfo> {
+    const opened = agent.openThread()
+    const req = sent(fake).filter((m) => m.method === 'session/new').at(-1)
+    fake.feed(JSON.stringify({ jsonrpc: '2.0', id: req?.id, result }) + '\n')
+    return opened
+  }
+
+  it('setMode goes through the VALIDATING set_config_option when `mode` is advertised (#427)', async () => {
     const fake = makeCapturingFake()
     const agent = await connect(fake)
+    await openThreadWith(agent, fake, { sessionId: 'live', configOptions: CONFIG_OPTIONS_2_24 })
 
-    const change = agent.setMode(SESSION_ID, 'plan')
-    const req = sent(fake).find((m) => m.method === 'session/set_mode')
-    expect(req?.params).toEqual({ sessionId: SESSION_ID, modeId: 'plan' })
+    const change = agent.setMode('live', 'plan')
+    const req = sent(fake).find((m) => m.method === 'session/set_config_option')
+    // `session/set_mode` answers a BOGUS id with `{}` — a silent no-op. The config
+    // setter rejects it with -32602, so a load-bearing change uses that one.
+    expect(req?.params).toEqual({ sessionId: 'live', configId: 'mode', value: 'plan' })
+    expect(sent(fake).some((m) => m.method === 'session/set_mode')).toBe(false)
 
-    fake.feed(JSON.stringify({ jsonrpc: '2.0', id: req?.id, result: {} }) + '\n')
+    fake.feed(JSON.stringify({ jsonrpc: '2.0', id: req?.id, result: { configOptions: [] } }) + '\n')
     await expect(change).resolves.toBeUndefined()
   })
 
-  it('setModel sends session/set_model {sessionId, modelId} (dedicated method, not set_config_option)', async () => {
+  it('setModel goes through set_config_option with configId:"model" (set_model is -32601 at 2.24.1)', async () => {
     const fake = makeCapturingFake()
     const agent = await connect(fake)
+    await openThreadWith(agent, fake, { sessionId: 'live', configOptions: CONFIG_OPTIONS_2_24 })
 
-    const change = agent.setModel(SESSION_ID, 'devstral-small')
-    const req = sent(fake).find((m) => m.method === 'session/set_model')
-    expect(req?.params).toEqual({ sessionId: SESSION_ID, modelId: 'devstral-small' })
-    // Model has its OWN method — it does NOT flow through set_config_option.
-    expect(sent(fake).some((m) => m.method === 'session/set_config_option')).toBe(false)
+    const change = agent.setModel('live', 'devstral-small')
+    const req = sent(fake).find((m) => m.method === 'session/set_config_option')
+    expect(req?.params).toEqual({ sessionId: 'live', configId: 'model', value: 'devstral-small' })
+    expect(sent(fake).some((m) => m.method === 'session/set_model')).toBe(false)
 
-    fake.feed(JSON.stringify({ jsonrpc: '2.0', id: req?.id, result: {} }) + '\n')
+    fake.feed(JSON.stringify({ jsonrpc: '2.0', id: req?.id, result: { configOptions: [] } }) + '\n')
     await expect(change).resolves.toBeUndefined()
+  })
+
+  it('falls back to the legacy dedicated methods for a session advertising no config options', async () => {
+    const fake = makeCapturingFake()
+    // `connect` opens SESSION_ID with a bare `{sessionId}` result — no configOptions.
+    const agent = await connect(fake)
+
+    const mode = agent.setMode(SESSION_ID, 'plan')
+    const modeReq = sent(fake).find((m) => m.method === 'session/set_mode')
+    expect(modeReq?.params).toEqual({ sessionId: SESSION_ID, modeId: 'plan' })
+    fake.feed(JSON.stringify({ jsonrpc: '2.0', id: modeReq?.id, result: {} }) + '\n')
+    await expect(mode).resolves.toBeUndefined()
+
+    const model = agent.setModel(SESSION_ID, 'devstral-small')
+    const modelReq = sent(fake).find((m) => m.method === 'session/set_model')
+    expect(modelReq?.params).toEqual({ sessionId: SESSION_ID, modelId: 'devstral-small' })
+    fake.feed(JSON.stringify({ jsonrpc: '2.0', id: modelReq?.id, result: {} }) + '\n')
+    await expect(model).resolves.toBeUndefined()
   })
 
   it('setReasoningEffort sends session/set_config_option with configId:"thinking" (NOT id)', async () => {
@@ -1434,37 +1490,55 @@ describe('WorkspaceAgent agent controls (#66, acp-capture §10)', () => {
     await expect(change).rejects.toThrow(/Invalid params/)
   })
 
+  it('openThread surfaces Model from the model configOption when 2.24.1 sends no models block (#427)', async () => {
+    const fake = makeCapturingFake()
+    const agent = await connect(fake)
+
+    const info = await openThreadWith(agent, fake, {
+      sessionId: 'live',
+      modes: { currentModeId: 'ask', availableModes: [{ id: 'ask', name: 'Ask' }] },
+      configOptions: CONFIG_OPTIONS_2_24,
+    })
+    expect(info.models).toEqual({
+      currentModelId: 'mistral-medium-3.5',
+      availableModels: [
+        { modelId: 'mistral-medium-3.5', name: 'mistral-medium-3.5' },
+        { modelId: 'devstral-small', name: 'devstral-small' },
+      ],
+    })
+    expect(info.reasoningEffort?.current).toBe('medium')
+  })
+
+  it('loadThread surfaces Model from the model configOption too (the resume path)', async () => {
+    const fake = makeCapturingFake()
+    const agent = await connect(fake)
+
+    const loading = agent.loadThread('resumed')
+    const req = sent(fake).filter((m) => m.method === 'session/load').at(-1)
+    fake.feed(
+      JSON.stringify({ jsonrpc: '2.0', id: req?.id, result: { configOptions: CONFIG_OPTIONS_2_24 } }) + '\n',
+    )
+    const info = await loading
+    expect(info.models?.currentModelId).toBe('mistral-medium-3.5')
+    expect(info.modes?.currentModeId).toBe('ask') // derived from the mode configOption
+  })
+
   it('openThread surfaces the reasoning-effort axis from the thinking configOption', async () => {
     const fake = makeCapturingFake()
-    const agent = new WorkspaceAgent({ workspaceDir: '/abs/workspace', spawn: () => fake.child })
-    const started = agent.start()
-    fake.feed(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { protocolVersion: 1 } }) + '\n')
-    await new Promise((r) => setTimeout(r, 0))
-    fake.feed(
-      JSON.stringify({ jsonrpc: '2.0', id: 2, result: { authenticated: true, authState: 'os_keyring' } }) + '\n',
-    )
-    await started
+    const agent = await connect(fake)
 
-    const opened = agent.openThread()
-    fake.feed(
-      JSON.stringify({
-        jsonrpc: '2.0',
-        id: 3,
-        result: {
-          sessionId: SESSION_ID,
-          configOptions: [
-            { id: 'mode' },
-            { id: 'model' },
-            {
-              id: 'thinking',
-              currentValue: 'high',
-              options: [{ value: 'off' }, { value: 'low' }, { value: 'high' }, { value: 'max' }],
-            },
-          ],
+    const info = await openThreadWith(agent, fake, {
+      sessionId: 'thinking-only',
+      configOptions: [
+        { id: 'mode' },
+        { id: 'model' },
+        {
+          id: 'thinking',
+          currentValue: 'high',
+          options: [{ value: 'off' }, { value: 'low' }, { value: 'high' }, { value: 'max' }],
         },
-      }) + '\n',
-    )
-    const info = await opened
+      ],
+    })
     expect(info.reasoningEffort).toEqual({
       current: 'high',
       options: [{ value: 'off' }, { value: 'low' }, { value: 'high' }, { value: 'max' }],
@@ -1476,11 +1550,27 @@ describe('WorkspaceAgent agent controls (#66, acp-capture §10)', () => {
     const agent = await connect(fake)
 
     // Open a second Thread over the same agent whose result omits configOptions.
-    const opened = agent.openThread()
-    const req = sent(fake).filter((m) => m.method === 'session/new').at(-1)
-    fake.feed(JSON.stringify({ jsonrpc: '2.0', id: req?.id, result: { sessionId: 'second' } }) + '\n')
-    const info = await opened
+    const info = await openThreadWith(agent, fake, { sessionId: 'second' })
     expect(info.reasoningEffort).toBeNull()
+  })
+
+  it('WARNS once per axis the agent advertises nothing for — the #427 drift tripwire', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const fake = makeCapturingFake()
+      const agent = await connect(fake) // bare `{sessionId}` — every axis missing
+      const first = warn.mock.calls.map((c) => String(c[0]))
+      expect(first.filter((m) => m.includes('no model agent control'))).toHaveLength(1)
+      expect(first.some((m) => m.includes('no mode agent control'))).toBe(true)
+      expect(first.some((m) => m.includes('no reasoningEffort agent control'))).toBe(true)
+
+      // A second axis-less session does NOT re-warn — once per agent, not per session.
+      warn.mockClear()
+      await openThreadWith(agent, fake, { sessionId: 'second' })
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
 
@@ -1514,19 +1604,26 @@ describe('WorkspaceAgent primary session (ADR-0012)', () => {
     expect(agent.consumePrimarySession()).toBeNull()
 
     const opening = agent.openPrimarySession()
-    // The eager session/new (id 3) — answer with a real Mode control.
+    // The eager session/new (id 3) — answer with a real Mode control. An OPTION-LESS
+    // list would read as an unadvertised axis (null), not as a control (#427).
     fake.feed(
       JSON.stringify({
         jsonrpc: '2.0',
         id: 3,
-        result: { sessionId: PRIMARY_ID, modes: { currentModeId: 'default', availableModes: [] } },
+        result: {
+          sessionId: PRIMARY_ID,
+          modes: { currentModeId: 'ask', availableModes: [{ id: 'ask', name: 'Ask' }] },
+        },
       }) + '\n',
     )
     await opening
 
     // Controls readable from the primary session (seed a Draft's picker pre-prompt).
     expect(agent.primarySessionControls).toEqual({
-      modes: { currentModeId: 'default', availableModes: [] },
+      modes: {
+        currentModeId: 'ask',
+        availableModes: [{ id: 'ask', name: 'Ask', description: undefined }],
+      },
       models: null,
       reasoningEffort: null,
     })

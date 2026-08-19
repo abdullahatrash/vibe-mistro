@@ -1,4 +1,12 @@
 import { EventEmitter } from 'node:events'
+import {
+  MODEL_CONFIG_ID,
+  MODE_CONFIG_ID,
+  REASONING_EFFORT_CONFIG_ID,
+  extractThreadControls,
+  hasConfigOption,
+  missingControlAxes,
+} from './acp/agent-controls'
 import { AcpClient, type SpawnFn } from './acp/client'
 import { handleFsReadTextFile, type ReadTextFn } from './acp/fs-read'
 import { handleFsWriteTextFile, type WriteTextFn } from './acp/fs-write'
@@ -16,10 +24,10 @@ import type {
   PromptImage,
   PromptResult,
   ThreadAgentControls,
+  ThreadConfigAxis,
   ThreadInfo,
   ThreadModes,
   ThreadModels,
-  ThreadReasoningEffort,
 } from '../shared/ipc'
 
 /**
@@ -107,13 +115,11 @@ interface SessionNewResult {
   sessionId: string
   title?: string | null
   modes?: ThreadModes
+  /** GONE at vibe-acp 2.24.1 (#427) — Model now lives in `configOptions` only. */
   models?: ThreadModels
-  /** The agent-control selects, including the `thinking` reasoning-effort axis (#66). */
+  /** The agent-control selects: `mode`, `model` (#427) and `thinking` (#66). */
   configOptions?: unknown
 }
-
-/** The reasoning-effort configId — the only `configOption` we surface (#66, §10). */
-const REASONING_EFFORT_CONFIG_ID = 'thinking'
 
 export interface WorkspaceAgentOptions {
   /** Absolute path to the Workspace directory. */
@@ -140,6 +146,17 @@ export class WorkspaceAgent extends EventEmitter {
   private readonly openUrl?: (url: string) => void
   /** Threads hosted by this agent, keyed by their ACP `sessionId`. */
   private readonly threads = new Map<string, ThreadInfo>()
+  /**
+   * The `configOptions[].id`s each hosted session advertised (#427). A setter
+   * prefers the VALIDATING `session/set_config_option` for every axis the session
+   * advertises here, and only falls back to a legacy dedicated method
+   * (`session/set_mode` / `session/set_model`) for one it doesn't.
+   */
+  private readonly sessionConfigIds = new Map<string, Set<string>>()
+  /** Axes we have already warned are unadvertised — warn once per agent, not per session. */
+  private readonly driftWarnedAxes = new Set<ThreadConfigAxis>()
+  /** `agentInfo.version` from `initialize` (acp-capture §1) — for drift diagnostics. */
+  private agentVersionValue: string | null = null
   /**
    * The Workspace's single primary ACP session (ADR-0012): one `session/new`
    * opened eagerly at connect so a Draft's picker can read real, account-accurate
@@ -279,6 +296,7 @@ export class WorkspaceAgent extends EventEmitter {
         }),
         earlyFailure,
       ])
+      this.agentVersionValue = init.agentInfo?.version ?? null
       this.authMethodsValue = extractAuthMethods(init)
       this.sessionCloseAvailableValue = extractSessionCloseCapability(init)
       this.loadSessionAvailableValue = extractLoadSessionCapability(init)
@@ -527,14 +545,13 @@ export class WorkspaceAgent extends EventEmitter {
       throw this.mapErrorAndCacheAuth(err)
     }
 
+    const controls = this.readControls(result, 'session/new')
     const thread: ThreadInfo = {
       sessionId: result.sessionId,
       // `session/new` returns no title in the capture — the Thread title arrives
       // later via the `session_info_update` notification (TB2). This is defensive.
       title: result.title ?? null,
-      modes: result.modes ?? null,
-      models: result.models ?? null,
-      reasoningEffort: extractReasoningEffort(result.configOptions),
+      ...controls,
     }
     this.threads.set(thread.sessionId, thread)
     return thread
@@ -639,9 +656,7 @@ export class WorkspaceAgent extends EventEmitter {
         // The `session/load` result omits `sessionId` (acp-capture §9) — keep ours.
         sessionId,
         title: result.title ?? null,
-        modes: result.modes ?? null,
-        models: result.models ?? null,
-        reasoningEffort: extractReasoningEffort(result.configOptions),
+        ...this.readControls({ ...result, sessionId }, 'session/load'),
       }
       this.threads.set(sessionId, thread)
       return thread
@@ -696,37 +711,93 @@ export class WorkspaceAgent extends EventEmitter {
   }
 
   /**
-   * Change a Thread's Mode (`session/set_mode`, acp-capture §10). A successful
-   * change returns `{}` and emits NO notification — the caller reflects it
-   * optimistically (ADR-0007). Rejects (mapped + auth-cached) on failure so the
-   * IPC handler can surface the error and the renderer can revert.
+   * Change a Thread's Mode. Goes through the VALIDATING generic setter
+   * (`session/set_config_option` with `configId: "mode"`) whenever the session
+   * advertises the `mode` config option — verified at 2.24.1: a bad id is rejected
+   * with `-32602 "Unsupported config option mode=…"`, whereas `session/set_mode`
+   * answers a bogus id with `{}` (a silent no-op indistinguishable from success,
+   * #427). Falls back to `session/set_mode` only for an agent that offers modes but
+   * no `mode` config option. A successful change emits NO notification, so the
+   * caller reflects it optimistically (ADR-0007) and reverts on a rejection.
    */
   async setMode(sessionId: string, modeId: string): Promise<void> {
-    await this.requestInitialized('session/set_mode', { sessionId, modeId })
+    if (!this.advertisesConfigOption(sessionId, MODE_CONFIG_ID)) {
+      await this.requestInitialized('session/set_mode', { sessionId, modeId })
+      return
+    }
+    await this.setConfigOption(sessionId, MODE_CONFIG_ID, modeId)
   }
 
   /**
-   * Change a Thread's Model (`session/set_model`, acp-capture §10). The agent
-   * FALSE-ACCEPTS any string as `modelId` (returns `{}` without validating against
-   * `availableModels`), so the renderer must only ever pass an id from
-   * `models.availableModels` — a `{}` is not proof the value was valid.
+   * Change a Thread's Model. `session/set_model` was REMOVED at 2.24.1 (`-32601
+   * "Method not found"`, #427) — the model is a config option now, and the config
+   * setter validates it (`-32602` on an unknown id) where the old dedicated method
+   * false-accepted any string. The legacy method is kept only for a session that
+   * advertises no `model` config option (a pre-2.24 binary).
    */
   async setModel(sessionId: string, modelId: string): Promise<void> {
-    await this.requestInitialized('session/set_model', { sessionId, modelId })
+    if (!this.advertisesConfigOption(sessionId, MODEL_CONFIG_ID)) {
+      await this.requestInitialized('session/set_model', { sessionId, modelId })
+      return
+    }
+    await this.setConfigOption(sessionId, MODEL_CONFIG_ID, modelId)
   }
 
   /**
-   * Change a Thread's reasoning effort via the GENERIC config setter
-   * (`session/set_config_option`, acp-capture §10). The param key is `configId`
-   * (NOT `id` — `{id, value}` returns -32602), pinned to `thinking`; `value` is one
-   * of the `thinking` option values (`off`/`low`/`medium`/`high`/`max`).
+   * Change a Thread's reasoning effort — the `thinking` config option; `value` is
+   * one of its option values (`off`/`low`/`medium`/`high`/`max`).
    */
   async setReasoningEffort(sessionId: string, value: string): Promise<void> {
-    await this.requestInitialized('session/set_config_option', {
-      sessionId,
-      configId: REASONING_EFFORT_CONFIG_ID,
-      value,
-    })
+    await this.setConfigOption(sessionId, REASONING_EFFORT_CONFIG_ID, value)
+  }
+
+  /**
+   * The one generic agent-control setter (`session/set_config_option`, acp-capture
+   * §10/§14.0). The param key is `configId` (NOT `id` — `{id, value}` returns
+   * -32602). At 2.24.1 the result carries the session's full updated
+   * `configOptions`; we ignore it and keep the renderer's optimistic reflection
+   * (ADR-0007), since the rejection is the signal we act on.
+   */
+  private async setConfigOption(sessionId: string, configId: string, value: string): Promise<void> {
+    await this.requestInitialized('session/set_config_option', { sessionId, configId, value })
+  }
+
+  /**
+   * Whether a hosted session advertised `configId` in its `session/new` /
+   * `session/load` result. Defaults to TRUE for a session we don't know (one opened
+   * before this agent object saw it, or a test double), so the modern config-option
+   * path is the default and the legacy dedicated methods are the exception.
+   */
+  private advertisesConfigOption(sessionId: string, configId: string): boolean {
+    const ids = this.sessionConfigIds.get(sessionId)
+    return ids ? ids.has(configId) : true
+  }
+
+  /**
+   * Map a session result onto the controls bundle, remember which config options it
+   * advertised (the setters route on that), and LOG any axis the agent advertises
+   * nothing for. That log is the tripwire for #427-class drift: every failure mode
+   * there was silent — a renamed field just made a picker disappear — so an axis we
+   * expect but no longer get must at least leave a trace in the main-process log.
+   */
+  private readControls(result: SessionNewResult, method: string): ThreadAgentControls {
+    const controls = extractThreadControls(result)
+    const advertised = new Set(
+      [MODE_CONFIG_ID, MODEL_CONFIG_ID, REASONING_EFFORT_CONFIG_ID].filter((id) =>
+        hasConfigOption(result.configOptions, id),
+      ),
+    )
+    this.sessionConfigIds.set(result.sessionId, advertised)
+    for (const axis of missingControlAxes(controls)) {
+      if (this.driftWarnedAxes.has(axis)) continue
+      this.driftWarnedAxes.add(axis)
+      console.warn(
+        `[vibe-mistro:acp] ${method} advertises no ${axis} agent control ` +
+          `(vibe-acp ${this.agentVersionValue ?? 'unknown version'}) — its picker will be hidden. ` +
+          'If the agent should offer it, the wire shape has drifted (see docs/acp-capture.md §14.0).',
+      )
+    }
+    return controls
   }
 
   /**
@@ -758,6 +829,7 @@ export class WorkspaceAgent extends EventEmitter {
   async closeSession(sessionId: string): Promise<void> {
     if (!this.threads.has(sessionId)) return
     this.threads.delete(sessionId)
+    this.sessionConfigIds.delete(sessionId)
     if (!this.initialized || !this.sessionCloseAvailableValue) return
     try {
       await this.client.request('session/close', { sessionId })
@@ -824,6 +896,7 @@ export class WorkspaceAgent extends EventEmitter {
   stop(): void {
     this.client.stop()
     this.threads.clear()
+    this.sessionConfigIds.clear()
     // Drop the primary session with the process (ADR-0012 #6 / ADR-0006): an
     // idle un-prompted session dies on eviction, and a re-warm re-opens a fresh one.
     this.primarySessionValue = null
@@ -1000,32 +1073,6 @@ function extractSessionCloseCapability(init: InitializeResult): boolean {
  */
 function extractLoadSessionCapability(init: InitializeResult): boolean {
   return (init.agentCapabilities as { loadSession?: unknown } | null)?.loadSession === true
-}
-
-/**
- * Surface the reasoning-effort axis from `session/new`/`session/load`'s
- * `configOptions` (#66, acp-capture §10): find the `thinking` select and map its
- * `currentValue` + `options[{value, name?}]` to a `ThreadReasoningEffort`. Defaults
- * to null on any absent/malformed shape (no array, no `thinking`, non-string
- * `currentValue`) — so the picker simply omits the control rather than rendering a
- * broken one. Mode/Model come back as their own dedicated fields, not here.
- */
-function extractReasoningEffort(configOptions: unknown): ThreadReasoningEffort | null {
-  if (!Array.isArray(configOptions)) return null
-  const thinking = configOptions.find(
-    (o): o is { id: string; currentValue?: unknown; options?: unknown } =>
-      !!o && typeof o === 'object' && (o as { id?: unknown }).id === REASONING_EFFORT_CONFIG_ID,
-  )
-  if (!thinking || typeof thinking.currentValue !== 'string') return null
-  const options = Array.isArray(thinking.options)
-    ? thinking.options
-        .filter(
-          (opt): opt is { value: string; name?: unknown } =>
-            !!opt && typeof opt === 'object' && typeof (opt as { value?: unknown }).value === 'string',
-        )
-        .map((opt) => ({ value: opt.value, name: typeof opt.name === 'string' ? opt.name : undefined }))
-    : []
-  return { current: thinking.currentValue, options }
 }
 
 /** Pull the well-formed `authMethods` out of an `initialize` result. */
