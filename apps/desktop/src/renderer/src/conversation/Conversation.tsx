@@ -52,14 +52,12 @@ import {
   subscribeWorkspaceCommands,
 } from './workspace-commands'
 import { buildComposerHistoryEntries } from './composer-history'
+import { turnErrorNotice } from './turn-error-notice'
 import { MessageSelectionToolbar } from './message-selection-toolbar'
 import type { MessageSelection } from './message-selection'
 
 /** Process-local counter for unique echoed-prompt ids. */
 let promptSeq = 0
-
-/** Vibe's app code for "this model can't ingest images" (acp-capture §11, #100). */
-const IMAGES_UNSUPPORTED_CODE = -31008
 
 const CONTROL_AXIS_LABELS: Record<ThreadConfigAxis, string> = {
   mode: 'Mode',
@@ -370,13 +368,10 @@ export function Conversation({
         onAuthExpired(result.authMethods)
       } else {
         // Surface a failed turn as a conversation item rather than dropping it.
-        // -31008 (images-unsupported, acp-capture §11) gets an actionable hint —
-        // the staged images are kept above, so switching model + resend just works.
-        const message =
-          result.code === IMAGES_UNSUPPORTED_CODE
-            ? "This model can't see images. Switch to a vision-capable model (e.g. mistral-medium-3.5) and resend."
-            : result.error
-        dispatch({ type: 'turn-error', message })
+        // Codes we understand become an actionable sentence (turn-error-notice):
+        // -31008 keeps the staged images so switch-model-and-resend just works;
+        // -31004 / -31006 name the way out of an exhausted context (#433).
+        dispatch({ type: 'turn-error', message: turnErrorNotice(result.code, result.error) })
       }
     } finally {
       // The turn's stopReason resolves sendPrompt; flip back to the user's turn and
