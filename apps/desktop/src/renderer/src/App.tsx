@@ -67,6 +67,14 @@ import {
   setSidebarCollapsed as setSidebarCollapsedStore,
 } from './shell/sidebar-collapsed-store'
 import {
+  SIDEBAR_COLLAPSE_QUERY,
+  nextSidebarToggle,
+  resolveSidebarLayout,
+  sidebarToggleExpands,
+} from './shell/sidebar-responsive'
+import { useSidebarPeek } from './shell/sidebar-peek'
+import { useMediaQuery } from './lib/use-media-query'
+import {
   closeWorkspaceSurface,
   getWorkspacePanel,
   openWorkspaceSideThreadSurface,
@@ -116,12 +124,43 @@ export function App(): JSX.Element {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
     getSidebarCollapsed(window.localStorage),
   )
+  // Responsive collapse: below 1160px the sidebar folds itself. This is an OVERRIDE
+  // layered over the stored preference, never a write to it — see `sidebar-responsive.ts`.
+  // Widening the window therefore restores whatever the user actually chose.
+  const sidebarNarrow = useMediaQuery(SIDEBAR_COLLAPSE_QUERY)
+  // Pinned-open-while-narrow: transient by design (a narrow window is not a preference),
+  // so it resets whenever the window crosses the breakpoint.
+  const [sidebarNarrowOpen, setSidebarNarrowOpen] = useState(false)
+  useEffect(() => {
+    setSidebarNarrowOpen(false)
+  }, [sidebarNarrow])
+  const sidebarLayoutBase = resolveSidebarLayout({
+    stored: sidebarCollapsed,
+    narrow: sidebarNarrow,
+    peeking: false,
+    narrowOpen: sidebarNarrowOpen,
+  })
+  // Hover-to-peek is only armed when there IS something to reveal.
+  const sidebarPeek = useSidebarPeek(sidebarLayoutBase.collapsed)
+  const sidebarLayout = resolveSidebarLayout({
+    stored: sidebarCollapsed,
+    narrow: sidebarNarrow,
+    peeking: sidebarPeek.peeking,
+    narrowOpen: sidebarNarrowOpen,
+  })
   function toggleSidebar(): void {
-    setSidebarCollapsed((prev) => {
-      const next = !prev
-      setSidebarCollapsedStore(window.localStorage, next)
-      return next
+    // A click is an explicit decision: drop any hover-peek so the two don't fight.
+    sidebarPeek.cancelPeek()
+    const next = nextSidebarToggle({
+      stored: sidebarCollapsed,
+      narrow: sidebarNarrow,
+      narrowOpen: sidebarNarrowOpen,
     })
+    if (next.stored !== sidebarCollapsed) {
+      setSidebarCollapsed(next.stored)
+      setSidebarCollapsedStore(window.localStorage, next.stored)
+    }
+    setSidebarNarrowOpen(next.narrowOpen)
   }
   // The Search palette (#174): renderer-only open flag; ⌘K toggles it from
   // anywhere (window-level, so it works with the composer focused).
@@ -1009,11 +1048,15 @@ export function App(): JSX.Element {
         {/* Sidebar collapse toggle (#127): controls the left sidebar, so it sits in the
             header's LEFT region. Always visible (the header never hides), usable in both
             states; opts out of the drag region like every other header control. */}
-        <div className="ml-2 flex items-center [-webkit-app-region:no-drag]">
+        <div
+          className="ml-2 flex items-center [-webkit-app-region:no-drag]"
+          onMouseEnter={sidebarPeek.hoverProps.onMouseEnter}
+          onMouseLeave={sidebarPeek.hoverProps.onMouseLeave}
+        >
           <IconButton
             size="icon-sm"
-            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={sidebarToggleExpands(sidebarLayout) ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={sidebarToggleExpands(sidebarLayout) ? 'Expand sidebar' : 'Collapse sidebar'}
             onClick={toggleSidebar}
           >
             <PanelLeft className="size-4" aria-hidden />
@@ -1085,7 +1128,9 @@ export function App(): JSX.Element {
       )}
 
       <Shell
-        collapsed={sidebarCollapsed}
+        collapsed={sidebarLayout.collapsed}
+        overlay={sidebarLayout.overlay}
+        peekHoverProps={sidebarPeek.hoverProps}
         workspaces={recents}
         nav={nav}
         workspaceFlags={wsFlags}

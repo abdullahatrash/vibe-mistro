@@ -38,6 +38,8 @@ export type { WorkspaceFlags } from './workspace-nav'
  */
 export function Shell({
   collapsed,
+  overlay,
+  peekHoverProps,
   workspaces,
   nav,
   workspaceFlags,
@@ -54,6 +56,12 @@ export function Shell({
 }: {
   /** Whether the left sidebar is collapsed (#127) — animate its width to 0 (still mounted). */
   collapsed: boolean
+  /** Whether the sidebar FLOATS above the outlet instead of pushing it (hover-peek, or
+   * the toggle pressed while the window is narrow). See `shell/sidebar-responsive.ts`. */
+  overlay: boolean
+  /** Hover handlers shared with the header's collapse toggle, so travelling between the
+   * toggle and the revealed sidebar reads as one hover and never closes mid-traverse. */
+  peekHoverProps: { onMouseEnter: () => void; onMouseLeave: () => void }
   /** Persisted Workspaces (cold metadata) for the switcher rows + display names. */
   workspaces: ListMetadataResult
   /** The current navigation selection (controlled by App). */
@@ -125,6 +133,11 @@ export function Shell({
     if (collapsed) setDragging(false)
   }, [collapsed])
 
+  // Off-screen entirely: collapsed AND not floating. An overlaid sidebar is collapsed for
+  // LAYOUT (the outlet keeps its width) but fully present for the user, so it must stay in
+  // the a11y tree and keep its border.
+  const hidden = collapsed && !overlay
+
   return (
     <div className={cn('flex min-h-0 flex-1', dragging && 'select-none')}>
       {/* The sidebar stays MOUNTED when collapsed (#127) — its state (open projects,
@@ -138,12 +151,28 @@ export function Shell({
           transition is disabled WHILE DRAGGING so the aside tracks the pointer with no
           lag, but kept for the collapse animation. */}
       <aside
-        aria-hidden={collapsed || undefined}
-        inert={collapsed || undefined}
-        style={{ width: collapsed ? 0 : width }}
+        onMouseEnter={peekHoverProps.onMouseEnter}
+        onMouseLeave={peekHoverProps.onMouseLeave}
+        aria-hidden={hidden || undefined}
+        inert={hidden || undefined}
+        // Floating is done with a NEGATIVE MARGIN, not `position: absolute`. A flex item
+        // consumes `width + margin`, so -width cancels the width and the outlet keeps its
+        // full size while the sidebar paints over it. Crucially both properties animate
+        // with the SAME duration and easing, so during the peek's open/close transition
+        // they cancel at EVERY frame — the outlet never moves, not even mid-animation.
+        //
+        // `position: absolute` cannot do this: leaving the flow is instantaneous, so the
+        // aside would rejoin the flow at full width on close and shove the outlet across
+        // for the length of the transition.
+        //
+        // The pinned collapse (the toggle on a wide window) is untouched — margin stays 0
+        // there, so the width animation still pushes the outlet exactly as it always has.
+        style={{ width: hidden ? 0 : width, marginRight: overlay ? -width : 0 }}
         className={cn(
-          'flex flex-none overflow-hidden border-border bg-sidebar transition-[width] duration-200',
-          collapsed ? 'border-r-0' : 'border-r',
+          'flex flex-none overflow-hidden border-border bg-sidebar transition-[width,margin-right] duration-200',
+          hidden ? 'border-r-0' : 'border-r',
+          // z-index applies to flex items without positioning; the shadow sells "above".
+          overlay && 'relative z-30 shadow-2xl',
           dragging && 'transition-none',
         )}
       >
