@@ -58,6 +58,7 @@ import {
   BotsPrototype,
   protoBots,
   readProtoEmpty,
+  readProtoMany,
   readProtoVariant,
   type ProtoVariant,
 } from './bots-prototype/BotsPrototype'
@@ -910,7 +911,9 @@ export function App(): JSX.Element {
   // PROTOTYPE (#422) — throwaway state; remove with bots-prototype/.
   const [protoVariant, setProtoVariant] = useState<ProtoVariant>(readProtoVariant)
   const [protoEmpty, setProtoEmpty] = useState(readProtoEmpty)
+  const [protoMany, setProtoMany] = useState(readProtoMany)
   const [protoCSelected, setProtoCSelected] = useState<string | null>(null)
+  const [protoCreating, setProtoCreating] = useState(false)
   const inSettings = nav.view === 'settings'
   // The Skills browser (#259): a sibling routed outlet view, same keep-mounted
   // contract as Settings — connected Workspaces hide (not unmount) beneath it.
@@ -983,7 +986,11 @@ export function App(): JSX.Element {
           onVariant={setProtoVariant}
           empty={protoEmpty}
           onEmpty={setProtoEmpty}
+          many={protoMany}
+          onMany={setProtoMany}
           cSelected={protoCSelected}
+          creating={protoCreating}
+          onCreating={setProtoCreating}
         />
       ) : inSkills ? (
         <div className="p-6">
@@ -1179,11 +1186,15 @@ export function App(): JSX.Element {
         protoSidebarSlot={
           // PROTOTYPE (#422): variant C's whole claim is that Bots belong HERE,
           // in the real sidebar, with no Bots page at all.
-          inBots && protoVariant === 'C' ? (
+          inBots && (protoVariant === 'C' || protoVariant === 'D') ? (
             <VariantCSidebar
-              bots={protoBots(protoEmpty)}
+              bots={protoBots(protoEmpty, protoMany)}
               selected={protoCSelected}
-              onSelect={setProtoCSelected}
+              onSelect={(id) => {
+                setProtoCSelected(id)
+                setProtoCreating(false)
+              }}
+              onCreate={() => setProtoCreating(true)}
             />
           ) : null
         }

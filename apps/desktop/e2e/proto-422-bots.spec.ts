@@ -17,11 +17,16 @@ import { assertBuilt, launch, seedProfile } from './launch'
 const OUT = resolve(import.meta.dirname, '../src/renderer/src/bots-prototype/captures')
 
 const SHOTS = [
-  { file: 'A-roster.png', variant: 'A', empty: '0' },
-  { file: 'B-gallery.png', variant: 'B', empty: '0' },
-  { file: 'C-sidebar-native.png', variant: 'C', empty: '0' },
-  { file: 'A-empty.png', variant: 'A', empty: '1' },
-  { file: 'B-empty.png', variant: 'B', empty: '1' },
+  { file: 'A-roster.png', variant: 'A', empty: '0', many: '0', create: false },
+  { file: 'B-gallery.png', variant: 'B', empty: '0', many: '0', create: false },
+  { file: 'C-sidebar-native.png', variant: 'C', empty: '0', many: '0', create: false },
+  { file: 'A-empty.png', variant: 'A', empty: '1', many: '0', create: false },
+  { file: 'B-empty.png', variant: 'B', empty: '1', many: '0', create: false },
+  // D — the chosen hybrid, and the three cases C could not answer (#442).
+  { file: 'D-conversation.png', variant: 'D', empty: '0', many: '0', create: false },
+  { file: 'D-empty.png', variant: 'D', empty: '1', many: '0', create: false },
+  { file: 'D-create.png', variant: 'D', empty: '0', many: '0', create: true },
+  { file: 'D-scale-20.png', variant: 'D', empty: '0', many: '1', create: false },
 ]
 
 test.beforeAll(async () => {
@@ -35,15 +40,22 @@ for (const shot of SHOTS) {
     const { app, page } = await launch(userData)
     try {
       await page.evaluate(
-        ([variant, empty]) => {
+        ([variant, empty, many]) => {
           localStorage.setItem('proto:422:variant', variant)
           localStorage.setItem('proto:422:empty', empty)
+          localStorage.setItem('proto:422:many', many)
         },
-        [shot.variant, shot.empty],
+        [shot.variant, shot.empty, shot.many],
       )
       await page.reload()
       await page.waitForLoadState('domcontentloaded')
-      await page.getByText('Bots', { exact: true }).click()
+      await page.getByText('Bots', { exact: true }).first().click()
+      await page.waitForTimeout(300)
+      if (shot.create) {
+        // D's create flow: the sidebar's + is the affordance that works in EVERY
+        // state (the empty-outlet CTA only exists when there are no Bots).
+        await page.getByRole('button', { name: 'New Bot' }).first().click()
+      }
       // Let the outlet settle before capturing.
       await page.waitForTimeout(400)
       await page.screenshot({ path: resolve(OUT, shot.file) })

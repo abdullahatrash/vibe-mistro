@@ -14,21 +14,23 @@
  */
 import { useCallback, useEffect, type JSX } from 'react'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
-import { PROTO_BOTS, type ProtoBot } from './fixtures'
-import { VariantA, VariantB, VariantCOutlet } from './variants'
+import { PROTO_BOTS, manyBots, type ProtoBot } from './fixtures'
+import { VariantA, VariantB, VariantCOutlet, VariantDOutlet } from './variants'
 import { IconButton } from '../ui/icon-button'
 
-export const PROTO_VARIANTS = ['A', 'B', 'C'] as const
+export const PROTO_VARIANTS = ['A', 'B', 'C', 'D'] as const
 export type ProtoVariant = (typeof PROTO_VARIANTS)[number]
 
 const NAMES: Record<ProtoVariant, string> = {
   A: 'Roster — list + detail',
   B: 'Team gallery — cards, then full width',
   C: 'Sidebar-native — no Bots page at all',
+  D: "C's sidebar + B's page (chosen)",
 }
 
 const VARIANT_KEY = 'proto:422:variant'
 const EMPTY_KEY = 'proto:422:empty'
+const MANY_KEY = 'proto:422:many'
 
 export function readProtoVariant(): ProtoVariant {
   const stored = localStorage.getItem(VARIANT_KEY)
@@ -39,8 +41,13 @@ export function readProtoEmpty(): boolean {
   return localStorage.getItem(EMPTY_KEY) === '1'
 }
 
-export function protoBots(empty: boolean): ProtoBot[] {
-  return empty ? [] : PROTO_BOTS
+export function readProtoMany(): boolean {
+  return localStorage.getItem(MANY_KEY) === '1'
+}
+
+export function protoBots(empty: boolean, many = false): ProtoBot[] {
+  if (empty) return []
+  return many ? manyBots() : PROTO_BOTS
 }
 
 export function BotsPrototype({
@@ -49,15 +56,24 @@ export function BotsPrototype({
   onVariant,
   empty,
   onEmpty,
+  many,
+  onMany,
   cSelected,
+  creating,
+  onCreating,
 }: {
   onClose: () => void
   variant: ProtoVariant
   onVariant: (v: ProtoVariant) => void
   empty: boolean
   onEmpty: (v: boolean) => void
-  /** Variant C's selection — owned by App, since its list is in the sidebar. */
+  many: boolean
+  onMany: (v: boolean) => void
+  /** C/D's selection — owned by App, since their list is in the sidebar. */
   cSelected: string | null
+  /** D's create flow — also App-owned: the sidebar's + is one of its triggers. */
+  creating: boolean
+  onCreating: (v: boolean) => void
 }): JSX.Element {
   const cycle = useCallback(
     (delta: number) => {
@@ -85,7 +101,7 @@ export function BotsPrototype({
     return () => window.removeEventListener('keydown', onKey)
   }, [cycle])
 
-  const bots = protoBots(empty)
+  const bots = protoBots(empty, many)
   const cBot = bots.find((b) => b.id === cSelected) ?? bots[0] ?? null
 
   return (
@@ -94,6 +110,14 @@ export function BotsPrototype({
         {variant === 'A' && <VariantA bots={bots} />}
         {variant === 'B' && <VariantB bots={bots} />}
         {variant === 'C' && <VariantCOutlet bot={cBot} />}
+        {variant === 'D' && (
+          <VariantDOutlet
+            bot={creating ? null : cBot}
+            creating={creating}
+            onCreate={() => onCreating(true)}
+            onCancelCreate={() => onCreating(false)}
+          />
+        )}
       </div>
 
       {/* Deliberately high-contrast: it must never read as part of the design
@@ -119,6 +143,16 @@ export function BotsPrototype({
             className="rounded-full px-2.5 py-1 text-[12px] hover:bg-white/10"
           >
             {empty ? 'empty' : 'populated'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              localStorage.setItem(MANY_KEY, many ? '0' : '1')
+              onMany(!many)
+            }}
+            className="rounded-full px-2.5 py-1 text-[12px] hover:bg-white/10"
+          >
+            {many ? '20 bots' : '4 bots'}
           </button>
           <span className="mx-1 h-4 w-px bg-white/20" />
           <IconButton aria-label="Close prototype" onClick={onClose}>

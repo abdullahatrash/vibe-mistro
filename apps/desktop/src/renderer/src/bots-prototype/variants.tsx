@@ -310,10 +310,13 @@ export function VariantCSidebar({
   bots,
   selected,
   onSelect,
+  onCreate,
 }: {
   bots: ProtoBot[]
   selected: string | null
   onSelect: (id: string) => void
+  /** The ONLY way to add a Bot once one is open — the capture caught this hole. */
+  onCreate?: () => void
 }): JSX.Element {
   return (
     <div className="flex flex-none flex-col gap-0.5">
@@ -321,7 +324,14 @@ export function VariantCSidebar({
         <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           Bots
         </span>
-        <Plus className="size-3.5 text-muted-foreground" aria-hidden />
+        <button
+          type="button"
+          aria-label="New Bot"
+          onClick={onCreate}
+          className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <Plus className="size-3.5" aria-hidden />
+        </button>
       </div>
       {bots.length === 0 ? (
         <p className="px-2 pb-2 text-[12px] text-muted-foreground">
@@ -351,6 +361,63 @@ export function VariantCSidebar({
 /** Variant C's outlet: pure conversation, no second list column. */
 export function VariantCOutlet({ bot }: { bot: ProtoBot | null }): JSX.Element {
   if (!bot) return <EmptyPane onCreate={() => undefined} />
+  return (
+    <div className="flex h-full flex-col">
+      <header className="flex items-center gap-3 border-b border-border px-6 py-3">
+        <BotMark bot={bot} size={28} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[14px] font-semibold text-foreground">{bot.name}</div>
+          <div className="truncate text-[12px] text-muted-foreground">
+            {bot.description} · {bot.project}
+          </div>
+        </div>
+        <StartOverButton compact />
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <BotConversation bot={bot} />
+      </div>
+      <ComposerStub bot={bot} />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// D — C's sidebar + B's page (the chosen hybrid, #422)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The outlet half of D. Sidebar is C's (`VariantCSidebar`, injected into the REAL
+ * sidebar); what changes is that the outlet is no longer ONLY a conversation.
+ *
+ * C's weakest moment was having nowhere to put a form or an empty state once it
+ * gave up its page. D's answer: the outlet is the page. Nothing selected → B's
+ * roomy empty state. Creating → B's roomy form. A Bot selected → C's pure
+ * conversation. So the outlet is never wasted, and the form gets the width the
+ * instructions field needs.
+ */
+export function VariantDOutlet({
+  bot,
+  creating,
+  onCreate,
+  onCancelCreate,
+}: {
+  bot: ProtoBot | null
+  creating: boolean
+  onCreate: () => void
+  onCancelCreate: () => void
+}): JSX.Element {
+  if (creating) {
+    return (
+      <div className="mx-auto w-full max-w-xl px-6 py-8">
+        <h2 className="text-[20px] font-semibold text-foreground">New Bot</h2>
+        <p className="mb-5 mt-1 text-[13px] text-muted-foreground">
+          It will live in the project you pick and keep one conversation there.
+        </p>
+        <BotForm onCancel={onCancelCreate} />
+      </div>
+    )
+  }
+  if (!bot) return <EmptyPane onCreate={onCreate} />
   return (
     <div className="flex h-full flex-col">
       <header className="flex items-center gap-3 border-b border-border px-6 py-3">
