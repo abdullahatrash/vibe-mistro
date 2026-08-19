@@ -105,7 +105,76 @@ describe('extractThreadControls', () => {
       currentModelId: 'devstral-small',
       availableModels: [{ modelId: 'devstral-small', name: 'devstral-small' }],
     }
-    expect(extractThreadControls({ models, configOptions: CONFIG_OPTIONS_2_24 }).models).toBe(models)
+    expect(extractThreadControls({ models, configOptions: CONFIG_OPTIONS_2_24 }).models).toEqual(models)
+  })
+
+  // The legacy blocks come from the LEAST verified binaries, so they get the same
+  // scrutiny as configOptions: waving `modes: []` through would crash the picker on
+  // `availableModes.map` AND leave `missingControlAxes` reporting nothing wrong.
+  it.each([
+    ['an array', []],
+    ['an empty object', {}],
+    ['a list-less object', { currentModeId: 'ask' }],
+    ['a non-array list', { currentModeId: 'ask', availableModes: 'ask,plan' }],
+    ['an empty list', { currentModeId: 'ask', availableModes: [] }],
+    ['a non-string current', { currentModeId: 7, availableModes: [{ id: 'ask' }] }],
+    ['null', null],
+  ])('rejects a malformed legacy modes block (%s) and falls through to configOptions', (_label, modes) => {
+    expect(extractThreadControls({ modes, configOptions: CONFIG_OPTIONS_2_24 }).modes).toEqual(MODES_2_24)
+    // Nothing to fall through TO: the axis reads null, so the tripwire can see it.
+    const bare = extractThreadControls({ modes })
+    expect(bare.modes).toBeNull()
+    expect(missingControlAxes(bare)).toContain('mode')
+  })
+
+  it.each([
+    ['an array', []],
+    ['an empty object', {}],
+    ['an empty list', { currentModelId: 'local', availableModels: [] }],
+    ['a non-array list', { currentModelId: 'local', availableModels: {} }],
+  ])('rejects a malformed legacy models block (%s)', (_label, models) => {
+    expect(extractThreadControls({ models, configOptions: CONFIG_OPTIONS_2_24 }).models?.currentModelId).toBe(
+      'mistral-medium-3.5',
+    )
+    const bare = extractThreadControls({ models })
+    expect(bare.models).toBeNull()
+    expect(missingControlAxes(bare)).toContain('model')
+  })
+
+  it('keeps the well-formed entries of a legacy block and names the nameless', () => {
+    const controls = extractThreadControls({
+      modes: {
+        currentModeId: 'ask',
+        availableModes: [{ id: 'ask' }, null, { name: 'no id' }, { id: 'plan', name: 'Plan' }],
+      },
+      models: {
+        currentModelId: 'local',
+        availableModels: [{ modelId: 'local' }, { name: 'no modelId' }],
+      },
+    })
+    expect(controls.modes).toEqual({
+      currentModeId: 'ask',
+      availableModes: [
+        { id: 'ask', name: 'ask', description: undefined },
+        { id: 'plan', name: 'Plan', description: undefined },
+      ],
+    })
+    expect(controls.models).toEqual({
+      currentModelId: 'local',
+      availableModels: [{ modelId: 'local', name: 'local' }],
+    })
+  })
+
+  it('treats an option-less config select as an unadvertised axis, not an empty picker', () => {
+    const controls = extractThreadControls({
+      configOptions: [
+        { id: 'mode', currentValue: 'ask', options: [] },
+        { id: 'model', currentValue: 'local' },
+        { id: 'thinking', currentValue: 'medium', options: 'not-a-list' },
+      ],
+    })
+    expect(controls).toEqual({ modes: null, models: null, reasoningEffort: null })
+    expect(missingControlAxes(controls)).toEqual(['mode', 'model', 'reasoningEffort'])
   })
 
   it('derives Modes from the mode configOption when no modes block is sent', () => {

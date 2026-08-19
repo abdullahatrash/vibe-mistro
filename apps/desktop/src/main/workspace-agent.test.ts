@@ -1604,19 +1604,26 @@ describe('WorkspaceAgent primary session (ADR-0012)', () => {
     expect(agent.consumePrimarySession()).toBeNull()
 
     const opening = agent.openPrimarySession()
-    // The eager session/new (id 3) — answer with a real Mode control.
+    // The eager session/new (id 3) — answer with a real Mode control. An OPTION-LESS
+    // list would read as an unadvertised axis (null), not as a control (#427).
     fake.feed(
       JSON.stringify({
         jsonrpc: '2.0',
         id: 3,
-        result: { sessionId: PRIMARY_ID, modes: { currentModeId: 'default', availableModes: [] } },
+        result: {
+          sessionId: PRIMARY_ID,
+          modes: { currentModeId: 'ask', availableModes: [{ id: 'ask', name: 'Ask' }] },
+        },
       }) + '\n',
     )
     await opening
 
     // Controls readable from the primary session (seed a Draft's picker pre-prompt).
     expect(agent.primarySessionControls).toEqual({
-      modes: { currentModeId: 'default', availableModes: [] },
+      modes: {
+        currentModeId: 'ask',
+        availableModes: [{ id: 'ask', name: 'Ask', description: undefined }],
+      },
       models: null,
       reasoningEffort: null,
     })

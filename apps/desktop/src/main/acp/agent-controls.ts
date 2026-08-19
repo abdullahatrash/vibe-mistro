@@ -74,7 +74,9 @@ export function hasConfigOption(configOptions: unknown, configId: string): boole
  * Map a session result onto the full controls bundle. Each axis prefers the
  * agent's own top-level block (2.18.0 shape, still sent for `modes` at 2.24.1)
  * and falls back to the matching config option — which is the ONLY place Model
- * lives at 2.24.1. An axis the agent advertises nowhere stays null.
+ * lives at 2.24.1. An axis the agent advertises nowhere stays null, and so does
+ * one whose option list is empty or unreadable: a picker with nothing to pick is
+ * not an advertised control, and null is what `missingControlAxes` can SEE.
  */
 export function extractThreadControls(source: SessionControlsSource): ThreadAgentControls {
   return {
@@ -84,11 +86,31 @@ export function extractThreadControls(source: SessionControlsSource): ThreadAgen
   }
 }
 
-/** Modes from the top-level block, else from the `mode` config option. */
+/**
+ * Modes from the top-level block, else from the `mode` config option. The legacy
+ * block is VALIDATED like any other wire input, never cast: an old or unknown
+ * binary is the least-trusted source here, and a `modes: []` / `modes: {}` waved
+ * through would crash the picker on `availableModes.map` — while leaving the drift
+ * tripwire silent, which is the exact failure this module exists to prevent. A
+ * malformed block falls through to `configOptions`, and then to null.
+ */
 function extractModes(source: SessionControlsSource): ThreadModes | null {
-  if (source.modes && typeof source.modes === 'object') return source.modes as ThreadModes
+  const legacy = asRecord(source.modes)
+  if (legacy && typeof legacy.currentModeId === 'string' && Array.isArray(legacy.availableModes)) {
+    const availableModes = legacy.availableModes
+      .filter(
+        (mode): mode is { id: string; name?: unknown; description?: unknown } =>
+          !!asRecord(mode) && typeof (mode as { id?: unknown }).id === 'string',
+      )
+      .map((mode) => ({
+        id: mode.id,
+        name: typeof mode.name === 'string' ? mode.name : mode.id,
+        description: typeof mode.description === 'string' ? mode.description : undefined,
+      }))
+    if (availableModes.length > 0) return { currentModeId: legacy.currentModeId, availableModes }
+  }
   const select = extractConfigSelect(source.configOptions, MODE_CONFIG_ID)
-  if (!select) return null
+  if (!select || select.options.length === 0) return null
   return {
     currentModeId: select.current,
     availableModes: select.options.map((opt) => ({
@@ -102,12 +124,25 @@ function extractModes(source: SessionControlsSource): ThreadModes | null {
 /**
  * Models from the legacy top-level block, else from the `model` config option —
  * the 2.24.1 source of truth (#427). The option's `name` is the display label
- * and its `value` is the id we send back through `set_config_option`.
+ * and its `value` is the id we send back through `set_config_option`. The legacy
+ * block is validated on the same terms as `modes` above.
  */
 function extractModels(source: SessionControlsSource): ThreadModels | null {
-  if (source.models && typeof source.models === 'object') return source.models as ThreadModels
+  const legacy = asRecord(source.models)
+  if (legacy && typeof legacy.currentModelId === 'string' && Array.isArray(legacy.availableModels)) {
+    const availableModels = legacy.availableModels
+      .filter(
+        (model): model is { modelId: string; name?: unknown } =>
+          !!asRecord(model) && typeof (model as { modelId?: unknown }).modelId === 'string',
+      )
+      .map((model) => ({
+        modelId: model.modelId,
+        name: typeof model.name === 'string' ? model.name : model.modelId,
+      }))
+    if (availableModels.length > 0) return { currentModelId: legacy.currentModelId, availableModels }
+  }
   const select = extractConfigSelect(source.configOptions, MODEL_CONFIG_ID)
-  if (!select) return null
+  if (!select || select.options.length === 0) return null
   return {
     currentModelId: select.current,
     availableModels: select.options.map((opt) => ({ modelId: opt.value, name: opt.name ?? opt.value })),
@@ -117,7 +152,7 @@ function extractModels(source: SessionControlsSource): ThreadModels | null {
 /** The reasoning-effort axis (#66) — the `thinking` select. */
 function extractReasoningEffort(configOptions: unknown): ThreadReasoningEffort | null {
   const select = extractConfigSelect(configOptions, REASONING_EFFORT_CONFIG_ID)
-  if (!select) return null
+  if (!select || select.options.length === 0) return null
   return {
     current: select.current,
     options: select.options.map((opt) => ({ value: opt.value, name: opt.name })),
@@ -137,6 +172,13 @@ export function missingControlAxes(controls: ThreadAgentControls): ThreadConfigA
   if (!controls.models) missing.push('model')
   if (!controls.reasoningEffort) missing.push('reasoningEffort')
   return missing
+}
+
+/** A plain object, or null for anything else (arrays and null included). */
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null
 }
 
 /** The raw `configOptions` entry for an id, or null when absent/malformed. */
