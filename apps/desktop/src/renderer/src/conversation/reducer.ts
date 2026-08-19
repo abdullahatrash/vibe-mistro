@@ -331,6 +331,21 @@ function reduceAcpEvent(state: ConversationState, payload: unknown): Conversatio
       return typeof update.title === 'string' ? { ...state, title: update.title } : state
     case 'usage_update':
       return applyUsage(state, update)
+    case 'user_message_chunk':
+      // Vibe echoes the user's OWN prompt back (#438). We already rendered it
+      // optimistically from `send-prompt` the moment it was sent, so rendering
+      // the echo too would duplicate every message — and before this case
+      // existed it fell to `appendFallback`, putting a raw-JSON row under every
+      // user message. Ignored DELIBERATELY, which is why it is spelled out
+      // rather than left to the default.
+      //
+      // CAVEAT for a future `session/list` import (acp-capture §13): opening a
+      // CLI-created session replays its history as `session/update`s in which
+      // `user_message_chunk` is the ONLY source of the user's messages, with no
+      // optimistic item to pair with. That importer must materialize these
+      // itself (main captures the replay into our transcript log) — it cannot
+      // rely on this reducer branch, which assumes the live path.
+      return state
     case 'available_commands_update':
       return { ...state, availableCommands: extractCommands(update) }
     default:

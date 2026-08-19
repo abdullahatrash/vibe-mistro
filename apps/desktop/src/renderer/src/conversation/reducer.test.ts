@@ -673,3 +673,39 @@ describe('conversationReducer — orphan permission requests (§15 finding F)', 
     expect(permissionItem(answered).orphan).toBe(true)
   })
 })
+
+describe('conversationReducer — user_message_chunk echo (#438)', () => {
+  it('ignores the echo instead of adding a fallback row under every message', () => {
+    const state = feed(
+      initialConversationState,
+      update({
+        sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text: 'Summarise this project' },
+        messageId: 'u1',
+      }),
+    )
+    expect(state.items).toHaveLength(0)
+  })
+
+  it('leaves an optimistic user message untouched — no duplicate', () => {
+    const sent = conversationReducer(initialConversationState, {
+      type: 'send-prompt',
+      id: 'local-1',
+      text: 'Summarise this project',
+    })
+    const state = feed(
+      sent,
+      update({
+        sessionUpdate: 'user_message_chunk',
+        content: { type: 'text', text: 'Summarise this project' },
+        messageId: 'u1',
+      }),
+    )
+    expect(state.items.filter((i) => i.kind === 'user')).toHaveLength(1)
+  })
+
+  it('still falls back for genuinely unknown kinds — nothing else is silenced', () => {
+    const state = feed(initialConversationState, update({ sessionUpdate: 'some_future_kind' }))
+    expect(state.items.map((i) => i.kind)).toEqual(['fallback'])
+  })
+})
