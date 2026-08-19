@@ -40,16 +40,23 @@ describe('snapshotSideDraftControls', () => {
     })
   })
 
-  it('stages advertised default Mode when Chat is unavailable', () => {
-    expect(snapshotSideDraftControls(advertisedControls(['default', 'plan']))).toEqual({
-      mode: 'default',
+  it('stages read-only Plan Mode on a 2.24.1 agent, which advertises no Chat (#427)', () => {
+    expect(snapshotSideDraftControls(advertisedControls(['ask', 'plan', 'accept-edits']))).toEqual({
+      mode: 'plan',
       model: 'devstral-small',
       reasoningEffort: 'high',
     })
   })
 
-  it('omits Mode rather than inventing default when neither Chat nor default is advertised', () => {
-    expect(snapshotSideDraftControls(advertisedControls(['plan']))).toEqual({
+  it('falls back to the approval-gated Mode under either of its names', () => {
+    expect(snapshotSideDraftControls(advertisedControls(['ask', 'accept-edits'])).mode).toBe('ask')
+    expect(snapshotSideDraftControls(advertisedControls(['default', 'accept-edits'])).mode).toBe(
+      'default',
+    )
+  })
+
+  it('omits Mode rather than inventing one when no preferred id is advertised', () => {
+    expect(snapshotSideDraftControls(advertisedControls(['accept-edits', 'auto-approve']))).toEqual({
       model: 'devstral-small',
       reasoningEffort: 'high',
     })

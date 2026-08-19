@@ -542,6 +542,31 @@ model option's `description` is the underlying model name (e.g. `mistral-vibe-cl
 Note the two builtin profiles that are **NOT** offered as modes: `explore` (it is
 `agent_type = "subagent"`) and `lean` (`install_required = true`) — see 14.2.
 
+#### The setters, re-probed while fixing #427 (2026-08-19, vibe 2.24.1)
+
+`session/set_config_option` is now the setter for **all three** axes, and it is the only one that
+validates:
+
+| Call | Result |
+|---|---|
+| `session/set_config_option {sessionId, configId:"model", value:"devstral-small"}` | OK — result is the session's **full updated `configOptions` array** (2.18 returned `{}`) |
+| `session/set_config_option {…, configId:"mode", value:"plan"}` | OK, same shape |
+| `session/set_config_option {…, configId:"thinking", value:"low"}` | OK, same shape |
+| any of the three with an unadvertised value | `-32602 "Unsupported config option <id>='<value>'"` |
+| `session/set_model {sessionId, modelId}` | `-32601 "Method not found"`, `data:{"method":"session/set_model"}` |
+| `session/set_mode {sessionId, modeId:"zz-not-a-mode"}` | **`{}`** — a bogus id is a SILENT no-op, indistinguishable from success |
+
+⇒ Prefer `set_config_option` wherever the result is load-bearing (e.g. re-asserting Mode after
+`session/load`, which §10 Q2 / §14.5 say is still required). `session/set_mode` remains only as a
+fallback for an agent that advertises no `mode` config option.
+
+⚠️ **A Model change writes THROUGH to the user's global default.** After
+`set_config_option {configId:"model", value:"devstral-small"}`, `~/.vibe/config.toml`'s `active_model`
+was rewritten and the NEXT `session/new` (fresh process) reported `devstral-small` as its current
+model. So the Model axis is a user-level setting with a per-session override, not a purely per-session
+one — worth remembering wherever we treat agent controls as per-Thread state (ADR-0007). `thinking`
+behaved the same way; Mode did not (a new session comes back at `ask`).
+
 ### 14.1 A custom `*.toml` profile DOES become an ACP mode
 
 Dropping `~/.vibe/agents/zz-probe-bot.toml`:
