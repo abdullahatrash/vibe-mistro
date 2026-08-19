@@ -510,6 +510,28 @@ body {
   font-weight: 600;
 }
 
+/* Context health (#433). The gauge is silent for most of a conversation's life;
+   past 75% of Vibe's compaction threshold it warms, and past 90% it takes the
+   destructive tone — because what happens next (a lossy compaction that discards
+   assistant turns, tool calls and reasoning) is genuinely destructive to context. */
+.usage__item--warn,
+.usage__notice--warn {
+  color: color-mix(in srgb, var(--destructive) 55%, var(--muted-foreground));
+}
+
+.usage__item--critical,
+.usage__notice--critical {
+  color: var(--destructive);
+}
+
+.usage__item--critical strong {
+  color: var(--destructive);
+}
+
+.usage__notice {
+  font-style: italic;
+}
+
 /* The conversation column's shared reading measure: transcript content and the
    Composer cap to the same centered width, so collapsing the sidebar/side panel
    widens the outlet without the transcript sprawling past the composer. */
