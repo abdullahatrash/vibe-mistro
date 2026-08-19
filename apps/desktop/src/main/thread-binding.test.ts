@@ -4,6 +4,8 @@ import { ensureBoundSession, resolveContinueTarget, type SessionBinder } from '.
 import { openStateDb } from './persistence/sqlite-db'
 import { SqliteMetadataStore } from './persistence/sqlite-metadata-store'
 import { STATE_MIGRATIONS } from './persistence/state-migrations'
+import { SqliteTranscriptStore } from './persistence/sqlite-transcript-store'
+import { acpEventEntry } from './persistence/transcript'
 import { SessionLoadError, WorkspaceAgentError } from './workspace-agent'
 import type { ThreadInfo } from '../shared/ipc'
 
@@ -343,3 +345,111 @@ describe('resolveContinueTarget — continue without opening a Thread (TB4 #33)'
 function randomName(): string {
   return Math.random().toString(36).slice(2, 10)
 }
+
+/**
+ * The transcript-tee race (#417). `transcript_entries.thread_id` references
+ * `threads(id)`, and `runPromptTurn` points the transcript bridge at the Thread
+ * BEFORE awaiting the bind — so every event teed while a draft's `session/new` was
+ * in flight hit the foreign key and was silently dropped. The mint now reserves the
+ * row up front, and releases it again if the mint fails so the "a failed first
+ * prompt leaves no residue" guarantee survives. Pinned at the store seam over a REAL
+ * database, with the tee fired from INSIDE `openThread` to sit in the window.
+ */
+describe('ensureBoundSession — the threads row is reserved across session/new (#417)', () => {
+  interface RaceFixture {
+    meta: SqliteMetadataStore
+    transcripts: SqliteTranscriptStore
+    workspaceId: string
+  }
+
+  async function raceFixture(): Promise<RaceFixture> {
+    const stateDb = openStateDb({ path: ':memory:', migrations: STATE_MIGRATIONS })
+    const meta = new SqliteMetadataStore({ stateDb })
+    await meta.load()
+    const ws = await meta.upsertWorkspace({ dir: `/proj/${randomName()}` })
+    return { meta, transcripts: new SqliteTranscriptStore({ stateDb }), workspaceId: ws.id }
+  }
+
+  /** A binder whose `session/new` round-trip runs `duringFlight` before resolving. */
+  function racingOpener(duringFlight: () => Promise<void>, outcome?: Error): SessionBinder {
+    return {
+      loadSessionAvailable: true,
+      hasSession: () => false,
+      loadThread() {
+        throw new Error('loadThread should not be called here')
+      },
+      async openThread(): Promise<ThreadInfo> {
+        await duringFlight()
+        if (outcome) throw outcome
+        return { sessionId: 'sess-1', title: null, modes: null, models: null, reasoningEffort: null }
+      },
+    }
+  }
+
+  it('persists an event teed while a draft session/new is still in flight', async () => {
+    const { meta, transcripts, workspaceId } = await raceFixture()
+    const threadId = randomUUID()
+    const teed = acpEventEntry({ method: 'session/update', params: { sessionId: 'sess-1' } })
+    // The bridge is already pointed at this draft, so the in-flight event tees to
+    // it — the append that used to fail with FOREIGN KEY constraint failed.
+    const agent = racingOpener(async () => {
+      expect(meta.snapshot().threads.map((t) => t.id)).toContain(threadId) // reserved
+      await transcripts.append(threadId, teed)
+    })
+
+    const bound = await ensureBoundSession({ agent, store: meta, threadId, workspaceId, sessionId: null })
+
+    expect(bound).toMatchObject({ sessionId: 'sess-1', minted: true })
+    expect(await transcripts.read(threadId)).toEqual([teed]) // kept, not silently lost
+    // The reservation is the SAME row the bind fills in — one record, one cursor.
+    const threads = meta.snapshot().threads
+    expect(threads).toHaveLength(1)
+    expect(threads[0]).toMatchObject({ id: threadId, sessionId: 'sess-1' })
+  })
+
+  it('releases the reserved row (and anything teed into it) when the mint fails', async () => {
+    const { meta, transcripts, workspaceId } = await raceFixture()
+    const threadId = randomUUID()
+    const boom = new WorkspaceAgentError('session/new failed', null, null)
+    const agent = racingOpener(
+      () => transcripts.append(threadId, acpEventEntry({ method: 'session/update' })),
+      boom,
+    )
+
+    await expect(
+      ensureBoundSession({ agent, store: meta, threadId, workspaceId, sessionId: null }),
+    ).rejects.toBe(boom)
+
+    // A failed first prompt leaves NO residue: no record, and the cascade took the
+    // orphaned entry with it.
+    expect(meta.snapshot().threads).toHaveLength(0)
+    expect(await transcripts.read(threadId)).toEqual([])
+  })
+
+  it('leaves an ALREADY-persisted Thread alone when a re-bind mint fails', async () => {
+    const { meta, transcripts, workspaceId } = await raceFixture()
+    const threadId = (await meta.upsertThread({ workspaceId, sessionId: 'dead-sess' })).id
+    const kept = acpEventEntry({ method: 'session/update', params: { sessionId: 'dead-sess' } })
+    await transcripts.append(threadId, kept)
+    const boom = new WorkspaceAgentError('session/new failed', null, null)
+    const agent: SessionBinder = {
+      loadSessionAvailable: true,
+      hasSession: () => false,
+      async loadThread(): Promise<ThreadInfo> {
+        throw new SessionLoadError('Session not found: dead-sess')
+      },
+      async openThread(): Promise<ThreadInfo> {
+        throw boom
+      },
+    }
+
+    // Resume fails, so the re-bind mints — and that fails too. The reservation
+    // rollback must NOT touch a row this bind didn't create.
+    await expect(
+      ensureBoundSession({ agent, store: meta, threadId, workspaceId, sessionId: 'dead-sess' }),
+    ).rejects.toBe(boom)
+
+    expect(meta.snapshot().threads.find((t) => t.id === threadId)?.sessionId).toBe('dead-sess')
+    expect(await transcripts.read(threadId)).toEqual([kept])
+  })
+})
