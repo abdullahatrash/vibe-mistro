@@ -662,7 +662,10 @@ async function runPromptTurn(
   // Thread whose stored session isn't hosted resumes via `session/load` (re-binding
   // fresh on a resume failure); an already-bound Thread reuses its session — no
   // second `session/new`. A binding failure surfaces WITHOUT teeing: nothing was
-  // logged yet, so a failed first prompt leaves no transcript residue.
+  // logged yet, so a failed first prompt leaves no transcript residue — and the
+  // draft's mint RESERVES its `threads` row before the `session/new` round-trip
+  // (#417), releasing it again if the mint fails, so the bridge below is never
+  // pointed at a Thread whose row doesn't exist yet.
   let sessionId: string
   let rebound: boolean
   try {

@@ -17,6 +17,11 @@ import type { TranscriptEntry } from './transcript'
  * not rendered) is dropped from replay. The Thread title is unaffected — it's also
  * persisted in the metadata record.
  *
+ * A tee routed through the FALLBACK map for a Thread whose row isn't written yet used
+ * to reach the sink and be rejected by the transcript FK (#417). The mint now RESERVES
+ * the `threads` row before the `session/new` round-trip (`thread-binding.ts`), so a
+ * bound Thread id always has a parent row and those entries persist.
+ *
  * TOMBSTONES: Thread ids whose JSONL has been (or is being) removed and must NEVER be
  * re-created ("Remove project" — a Workspace can be removed MID-TURN).
  * `TranscriptStore.delete` only drops the tail of the append chain; it can't cancel a

@@ -36,13 +36,20 @@ export interface SessionBinder extends SessionOpener {
   readonly loadSessionAvailable: boolean
 }
 
-/** The minimal store surface for binding: re-target a Thread by id (upsert). */
+/**
+ * The minimal store surface for binding: re-target a Thread by id (upsert), plus
+ * the two reads/writes the RESERVATION needs (#417) — `snapshot` to tell a row this
+ * bind created from one that was already there, and `deleteThread` to roll a
+ * reservation back when the mint it was reserved for fails.
+ */
 export interface ThreadBindStore {
   upsertThread(input: {
     id: string
     workspaceId: string
-    sessionId: string
+    sessionId?: string
   }): Promise<ThreadRecord>
+  snapshot(): { threads: ThreadRecord[] }
+  deleteThread(id: string): Promise<void>
 }
 
 /** The seed needed to connect to a CONTINUED (already-persisted) Thread (TB4 #33). */
@@ -167,14 +174,72 @@ export async function ensureBoundSession(args: {
   return { ...(await mintAndBind(args)), rebound: true }
 }
 
-/** Mint a fresh `session/new` and bind it onto the Thread id (draft or re-bind). */
+/**
+ * Mint a fresh `session/new` and bind it onto the Thread id (draft or re-bind).
+ *
+ * The `threads` row is RESERVED before the round-trip (#417): `transcript_entries`
+ * carries `thread_id ... REFERENCES threads(id)`, and the caller points the
+ * transcript bridge at this Thread BEFORE prompting, so every agent event teed
+ * while `session/new` is in flight used to hit the foreign key and be dropped —
+ * silent loss in the very log the search index and fold snapshots derive from. The
+ * reservation writes the id + Workspace with a NULL `session_id`; `bindThread`
+ * fills the cursor in when the round-trip returns.
+ *
+ * A mint that FAILS releases a row it reserved, so a failed first prompt still
+ * leaves no residue (the cascade takes any entry teed inside the window with it).
+ * A row that was already there — every re-bind (case ii), and a retry after an
+ * earlier failure — is left alone. Both halves are best-effort (ADR-0005): a store
+ * failure logs and never gates the turn.
+ */
 async function mintAndBind(args: {
   agent: SessionBinder
   store: ThreadBindStore
   threadId: string
   workspaceId: string
 }): Promise<BoundSession> {
-  return bindThread(args, await args.agent.openThread())
+  const reserved = await reserveThread(args)
+  try {
+    return await bindThread(args, await args.agent.openThread())
+  } catch (err) {
+    if (reserved) await releaseThread(args)
+    throw err
+  }
+}
+
+/**
+ * Insert the Thread's row up front so the transcript FK is satisfied for the whole
+ * `session/new` window. Returns whether THIS call created it (the only case a
+ * failed mint may roll back); false when the row already existed or the write
+ * failed — the mint proceeds either way.
+ */
+async function reserveThread(args: {
+  store: ThreadBindStore
+  threadId: string
+  workspaceId: string
+}): Promise<boolean> {
+  try {
+    if (args.store.snapshot().threads.some((t) => t.id === args.threadId)) return false
+    await args.store.upsertThread({ id: args.threadId, workspaceId: args.workspaceId })
+    return true
+  } catch (err) {
+    console.error(
+      `[vibe-mistro:metadata] reserveThread failed (${args.threadId}): ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    )
+    return false
+  }
+}
+
+/** Drop a reserved row (and, by cascade, anything teed into it) after a failed mint. */
+async function releaseThread(args: { store: ThreadBindStore; threadId: string }): Promise<void> {
+  try {
+    await args.store.deleteThread(args.threadId)
+  } catch (err) {
+    console.error(
+      `[vibe-mistro:metadata] releaseThread failed (${args.threadId}): ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
 }
 
 /**
