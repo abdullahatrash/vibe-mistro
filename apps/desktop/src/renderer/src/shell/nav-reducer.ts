@@ -20,7 +20,7 @@ export interface NavState {
    * closing returns to the same conversation. Any `select-workspace` / `select-thread`
    * (picking a project or thread from the sidebar) resets it to `'conversation'`.
    */
-  view: 'conversation' | 'settings' | 'skills'
+  view: 'conversation' | 'settings' | 'skills' | 'bots'
 }
 
 export type NavAction =
@@ -30,6 +30,9 @@ export type NavAction =
   | { type: 'close-settings' }
   | { type: 'open-skills' }
   | { type: 'close-skills' }
+  // PROTOTYPE (#422) — throwaway, remove with the bots-prototype directory.
+  | { type: 'open-bots' }
+  | { type: 'close-bots' }
   | { type: 'clear' }
 
 export const initialNavState: NavState = {
@@ -68,11 +71,15 @@ export function navReducer(state: NavState, action: NavAction): NavState {
       // Swap the outlet for the Settings page, PRESERVING the current selection.
       // Referential no-op when already in Settings (uniform with select-workspace).
       return state.view === 'settings' ? state : { ...state, view: 'settings' }
+    case 'open-bots':
+      // PROTOTYPE (#422): same contract as Settings/Skills.
+      return state.view === 'bots' ? state : { ...state, view: 'bots' }
     case 'open-skills':
       // Swap the outlet for the Skills browser (#259) — same contract as Settings.
       return state.view === 'skills' ? state : { ...state, view: 'skills' }
     case 'close-settings':
     case 'close-skills':
+    case 'close-bots':
       // Return to the conversation view, PRESERVING the current selection.
       return state.view === 'conversation' ? state : { ...state, view: 'conversation' }
     case 'clear':

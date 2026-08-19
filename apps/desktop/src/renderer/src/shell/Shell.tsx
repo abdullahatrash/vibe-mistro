@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX, type PointerEvent, type ReactNode } from 'react'
-import { ChevronDown, Search, Settings, Sparkles, SquarePen } from 'lucide-react'
+import { Bot, ChevronDown, Search, Settings, Sparkles, SquarePen } from 'lucide-react'
 import type { ListMetadataResult } from '../../../shared/ipc'
 import type { NavState } from './nav-reducer'
 import type { UnifiedThreadRow } from './unified-threads'
@@ -53,6 +53,8 @@ export function Shell({
   onOpenSettings,
   onOpenSearch,
   onOpenSkills,
+  onOpenBots,
+  protoSidebarSlot,
 }: {
   /** Whether the left sidebar is collapsed (#127) — animate its width to 0 (still mounted). */
   collapsed: boolean
@@ -88,6 +90,10 @@ export function Shell({
   onOpenSearch: () => void
   /** Open the Skills browser (#259) — from the primary nav's Skills row. */
   onOpenSkills: () => void
+  /** PROTOTYPE (#422) — throwaway. */
+  onOpenBots: () => void
+  /** PROTOTYPE (#422) — throwaway: variant C injects its Bots list here. */
+  protoSidebarSlot?: JSX.Element | null
 }): JSX.Element {
   // The sidebar's EXPANDED width (#drag-to-resize): renderer-only UI state, seeded from
   // localStorage (clamped) and persisted on drag-release. `dragging` disables the
@@ -188,8 +194,11 @@ export function Shell({
               onNewThread={onNewThread}
               onOpenSearch={onOpenSearch}
               onOpenSkills={onOpenSkills}
+              onOpenBots={onOpenBots}
             />
           </div>
+          {/* PROTOTYPE (#422) — throwaway slot; remove with bots-prototype/. */}
+          {protoSidebarSlot}
           <div className="min-h-0 flex-1 overflow-y-auto">
             <WorkspaceNav
               workspaces={workspaces}
@@ -255,11 +264,14 @@ function PrimaryNav({
   onNewThread,
   onOpenSearch,
   onOpenSkills,
+  onOpenBots,
 }: {
   busy: boolean
   onNewThread: () => void
   onOpenSearch: () => void
   onOpenSkills: () => void
+  /** PROTOTYPE (#422) — throwaway. */
+  onOpenBots: () => void
 }): JSX.Element {
   return (
     <nav className="flex flex-col gap-0.5">
@@ -280,6 +292,11 @@ function PrimaryNav({
       <NavItem onClick={onOpenSkills}>
         <Sparkles className="size-[18px]" aria-hidden />
         <span className="flex-1">Skills</span>
+      </NavItem>
+      {/* PROTOTYPE (#422) — throwaway row; remove with bots-prototype/. */}
+      <NavItem onClick={onOpenBots}>
+        <Bot className="size-[18px]" aria-hidden />
+        <span className="flex-1">Bots</span>
       </NavItem>
     </nav>
   )

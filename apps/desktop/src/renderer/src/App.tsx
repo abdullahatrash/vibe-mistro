@@ -54,6 +54,14 @@ import { ArrowLeft, ArrowRight, PanelLeft, PanelRight, Terminal } from 'lucide-r
 import { IconButton } from './ui/icon-button'
 import { OpenInEditorButton } from './editors/OpenInEditorButton'
 import { SearchPalette } from './search/SearchPalette'
+import {
+  BotsPrototype,
+  protoBots,
+  readProtoEmpty,
+  readProtoVariant,
+  type ProtoVariant,
+} from './bots-prototype/BotsPrototype'
+import { VariantCSidebar } from './bots-prototype/variants'
 import { SkillsView } from './skills/SkillsView'
 import { Shell, type WorkspaceFlags } from './shell/Shell'
 import { Logo } from './shell/logo'
@@ -899,11 +907,17 @@ export function App(): JSX.Element {
   // <main> is full-bleed now (the side panel reaches the window edges, t3code-style),
   // so each NON-connected view re-adds the old p-6 breathing room via a wrapper here;
   // the connected view spends it inside its chat column (ConnectedWorkspace) instead.
+  // PROTOTYPE (#422) — throwaway state; remove with bots-prototype/.
+  const [protoVariant, setProtoVariant] = useState<ProtoVariant>(readProtoVariant)
+  const [protoEmpty, setProtoEmpty] = useState(readProtoEmpty)
+  const [protoCSelected, setProtoCSelected] = useState<string | null>(null)
   const inSettings = nav.view === 'settings'
   // The Skills browser (#259): a sibling routed outlet view, same keep-mounted
   // contract as Settings — connected Workspaces hide (not unmount) beneath it.
   const inSkills = nav.view === 'skills'
-  const overlayView = inSettings || inSkills
+  // PROTOTYPE (#422) — throwaway; remove with bots-prototype/.
+  const inBots = nav.view === 'bots'
+  const overlayView = inSettings || inSkills || inBots
   // Persistent missing-CLI banner (visibility is the pure `installBannerMessage`):
   // spans the shell under the window chrome so a selected Workspace / open Thread
   // still surfaces the missing toolchain; suppressed where the fuller guidance is
@@ -961,6 +975,16 @@ export function App(): JSX.Element {
           }}
         />
         </div>
+      ) : inBots ? (
+        // PROTOTYPE (#422): full-bleed on purpose — the variants own their padding.
+        <BotsPrototype
+          onClose={() => navDispatch({ type: 'close-bots' })}
+          variant={protoVariant}
+          onVariant={setProtoVariant}
+          empty={protoEmpty}
+          onEmpty={setProtoEmpty}
+          cSelected={protoCSelected}
+        />
       ) : inSkills ? (
         <div className="p-6">
           <SkillsView
@@ -1151,6 +1175,18 @@ export function App(): JSX.Element {
         onOpenSettings={() => navDispatch({ type: 'open-settings' })}
         onOpenSearch={() => setSearchOpen(true)}
         onOpenSkills={() => navDispatch({ type: 'open-skills' })}
+        onOpenBots={() => navDispatch({ type: 'open-bots' })}
+        protoSidebarSlot={
+          // PROTOTYPE (#422): variant C's whole claim is that Bots belong HERE,
+          // in the real sidebar, with no Bots page at all.
+          inBots && protoVariant === 'C' ? (
+            <VariantCSidebar
+              bots={protoBots(protoEmpty)}
+              selected={protoCSelected}
+              onSelect={setProtoCSelected}
+            />
+          ) : null
+        }
       />
 
       <SearchPalette
