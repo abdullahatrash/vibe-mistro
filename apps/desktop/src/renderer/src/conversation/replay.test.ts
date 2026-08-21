@@ -4,6 +4,7 @@ import {
   conversationReducer,
   initialConversationState,
   REBOUND_NOTICE,
+  routineLateNotice,
   type AssistantItem,
   type ConversationState,
   type NoticeItem,
@@ -130,6 +131,25 @@ describe('replayTranscript (TB3 #32)', () => {
     const notice = replayed.items.find((i): i is NoticeItem => i.kind === 'notice')
     expect(notice?.message).toBe(REBOUND_NOTICE)
     expect(replayed.isProcessing).toBe(false)
+  })
+
+  it("replays a Routine's late run: the notice, then the prompt with its chip (#470)", () => {
+    // The app was shut at 09:00, so the run happened at noon. Reopening the Bot
+    // must show both halves again: our notice, and a user bubble that says plainly
+    // it was sent by a routine rather than typed.
+    const dueAt = Date.UTC(2026, 7, 21, 7, 0)
+    const transcript: TranscriptEntry[] = [
+      { t: 'routine-late', dueAt, lastRunAt: null },
+      { t: 'user-prompt', id: 'user:0', text: 'Triage this repo.', routine: { name: 'Morning triage' } },
+      { t: 'turn-complete' },
+    ]
+
+    const replayed = replayTranscript(transcript)
+
+    expect(replayed.items.map((i) => i.kind)).toEqual(['notice', 'user'])
+    const notice = replayed.items.find((i): i is NoticeItem => i.kind === 'notice')
+    expect(notice?.message).toBe(routineLateNotice(dueAt, null))
+    expect(replayed.items[1]).toMatchObject({ kind: 'user', routine: { name: 'Morning triage' } })
   })
 
   it('replays an empty transcript to the initial (empty) conversation, never throwing', () => {

@@ -23,6 +23,7 @@ import {
   runRoutineTurn,
   type RoutineTurnDeps,
   type RoutineTurnResult,
+  type RunRoutineOptions,
 } from './run-routine-turn'
 
 /**
@@ -55,10 +56,11 @@ export interface RoutinesRegistration {
    * Run this Routine's prompt into its Bot's conversation NOW, with nobody
    * watching, and record how it went. Resolves with the outcome; never rejects.
    *
-   * The scheduler (#470) is the intended caller — deciding WHEN a Routine is due
-   * is deliberately not this slice's business, so nothing calls this yet.
+   * The scheduler (#470) is the caller: it decides WHEN, this decides nothing
+   * about time. `options.late` carries a slot the run is starting after, which the
+   * turn states twice — as a notice we write, and inside the agent's own prompt.
    */
-  runRoutineNow(routineId: string): Promise<RoutineTurnResult>
+  runRoutineNow(routineId: string, options?: RunRoutineOptions): Promise<RoutineTurnResult>
 }
 
 export function registerRoutinesIpc(deps: RoutinesIpcDeps): RoutinesRegistration {
@@ -91,5 +93,5 @@ export function registerRoutinesIpc(deps: RoutinesIpcDeps): RoutinesRegistration
     (_event, args: RoutinesDeleteArgs): RoutinesDeleteResult => deleteRoutine(lifecycle, args),
   )
 
-  return { runRoutineNow: (routineId) => runRoutineTurn(turn, routineId) }
+  return { runRoutineNow: (routineId, options) => runRoutineTurn(turn, routineId, options) }
 }

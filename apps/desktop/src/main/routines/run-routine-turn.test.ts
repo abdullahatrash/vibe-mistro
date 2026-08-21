@@ -89,7 +89,9 @@ interface Harness {
   protectionHistory: string[]
   status: ThreadStatusTracker
   /** Every failure written into the Bot's conversation (#469). */
-  failures: { threadId: string; message: string; prompt?: string }[]
+  failures: { threadId: string; message: string; prompt?: string; routine?: { name: string } }[]
+  /** Every "this run is late" notice written into the conversation (#470). */
+  lates: { threadId: string; dueAt: number; lastRunAt: number | null }[]
   agent: ReturnType<typeof stubAgent>
 }
 
@@ -108,7 +110,13 @@ function harness(
   const protectedNow = new Set<string>()
   const protectionHistory: string[] = []
   const status = new ThreadStatusTracker()
-  const failures: { threadId: string; message: string; prompt?: string }[] = []
+  const failures: {
+    threadId: string
+    message: string
+    prompt?: string
+    routine?: { name: string }
+  }[] = []
+  const lates: { threadId: string; dueAt: number; lastRunAt: number | null }[] = []
   const agent = stubAgent()
   const routine = over.routine === undefined ? ROUTINE : over.routine
   return {
@@ -118,6 +126,7 @@ function harness(
     protectionHistory,
     status,
     failures,
+    lates,
     agent,
     deps: {
       routines: {
@@ -147,6 +156,7 @@ function harness(
       },
       ensureGate: async () => over.gate ?? { ok: true, profileId: GATE_PROFILE_ID },
       reportFailure: (args) => void failures.push(args),
+      reportLate: (args) => void lates.push(args),
       runTurn: async (turnAgent, args, gate) => {
         prompts.push(args)
         return over.turn
@@ -172,6 +182,8 @@ describe('runRoutineTurn — the happy path', () => {
         workspaceId: 'w1',
         sessionId: 'sess-1', // the Bot's continuing conversation, never a fresh Thread
         text: 'Triage this repo and say what changed.',
+        // The chip's name, stamped at send: this prompt was not typed by anyone.
+        routine: { name: 'Morning triage' },
       },
     ])
   })
@@ -388,6 +400,9 @@ describe('runRoutineTurn — the permission gate', () => {
         threadId: 'bot-thread',
         message: expect.stringContaining('permission gate'),
         prompt: 'Triage this repo and say what changed.',
+        // Even a refused run's bubble names the Routine that sent it (#470) — it
+        // was still not typed by anyone.
+        routine: { name: 'Morning triage' },
       },
     ])
   })
@@ -487,5 +502,54 @@ describe('runRoutineTurn — the permission gate', () => {
     expect(result.error).toContain('Morning triage')
     expect(result.error).toContain('`gh pr merge 12`')
     expect(result.blockedCommand).toBe('gh pr merge 12')
+  })
+})
+
+describe('runRoutineTurn — a run that is LATE (#470)', () => {
+  /** The 09:00 Europe/Berlin slot on 21 August 2026, and the run before it. */
+  const DUE_AT = Date.UTC(2026, 7, 21, 7, 0)
+  const LAST_RUN_AT = Date.UTC(2026, 7, 20, 7, 0)
+
+  it('states it TWICE: a notice we write, and the coverage period in the prompt', async () => {
+    const h = harness()
+
+    await runRoutineTurn(h.deps, 'r1', { late: { dueAt: DUE_AT, lastRunAt: LAST_RUN_AT } })
+
+    // Ours: only the two timestamps cross, because the copy is a renderer constant.
+    expect(h.lates).toEqual([
+      { threadId: 'bot-thread', dueAt: DUE_AT, lastRunAt: LAST_RUN_AT },
+    ])
+    // The agent's: inside the prompt, because only it can act on the period.
+    const text = h.prompts[0]?.text ?? ''
+    expect(text.startsWith('Triage this repo and say what changed.')).toBe(true)
+    expect(text).toContain('2026-08-21 09:00 (Europe/Berlin)')
+    expect(text).toContain('since its last run at 2026-08-20 09:00 (Europe/Berlin)')
+  })
+
+  it('tells the agent outright when the Routine has NEVER run', async () => {
+    const h = harness()
+    await runRoutineTurn(h.deps, 'r1', { late: { dueAt: DUE_AT, lastRunAt: null } })
+    expect(h.lates[0]?.lastRunAt).toBeNull()
+    expect(h.prompts[0]?.text).toContain('never run before')
+  })
+
+  it('sends the prompt VERBATIM and writes no notice when the run is on time', async () => {
+    const h = harness()
+    await runRoutineTurn(h.deps, 'r1')
+    expect(h.prompts[0]?.text).toBe('Triage this repo and say what changed.')
+    expect(h.lates).toEqual([])
+  })
+
+  it('writes nothing at all when the Bot is busy — a defer stays off the conversation', async () => {
+    const h = harness()
+    h.status.beginTurn('a1', 'bot-thread') // somebody is already talking to this Bot
+
+    const result = await runRoutineTurn(h.deps, 'r1', {
+      late: { dueAt: DUE_AT, lastRunAt: LAST_RUN_AT },
+    })
+
+    expect(result.outcome).toBe('deferred')
+    expect(h.lates).toEqual([])
+    expect(h.failures).toEqual([])
   })
 })

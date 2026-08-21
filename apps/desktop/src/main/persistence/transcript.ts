@@ -1,4 +1,4 @@
-import type { TranscriptEntry, TranscriptImageRef } from '../../shared/ipc'
+import type { TranscriptEntry, TranscriptImageRef, TranscriptRoutineRef } from '../../shared/ipc'
 
 /**
  * The transcript ENTRY VOCABULARY + legacy-JSONL parsing (ADR-0005/0019). The
@@ -58,8 +58,25 @@ export function userPromptEntry(
   id: string,
   text: string,
   images?: TranscriptImageRef[],
+  routine?: TranscriptRoutineRef,
 ): TranscriptEntry {
-  return images && images.length > 0 ? { t: 'user-prompt', id, text, images } : { t: 'user-prompt', id, text }
+  const entry: Extract<TranscriptEntry, { t: 'user-prompt' }> = { t: 'user-prompt', id, text }
+  // Both fields are omitted entirely when absent, so an ordinary prompt's entry
+  // stays byte-identical to the legacy shape.
+  if (images && images.length > 0) entry.images = images
+  if (routine) entry.routine = routine
+  return entry
+}
+
+/**
+ * A **Routine** run that started later than its slot (#470, ADR-0028 part 3),
+ * teed just before the prompt it explains — mirrors the `routine-late` reducer
+ * action. Like `agent-rebound`, the user-facing copy is a renderer-side constant,
+ * so the entry carries only the two timestamps: the slot it was due at, and when
+ * it last ran (null = never, which is the distinction the whole slice is for).
+ */
+export function routineLateEntry(dueAt: number, lastRunAt: number | null): TranscriptEntry {
+  return { t: 'routine-late', dueAt, lastRunAt }
 }
 
 /** A streamed payload, teed at the `acp:event` forward — mirrors `acp-event`. */
@@ -181,6 +198,7 @@ export function isTranscriptEntry(value: unknown): value is TranscriptEntry {
     t === 'turn-complete' ||
     t === 'turn-error' ||
     t === 'resolve-permission' ||
-    t === 'agent-rebound'
+    t === 'agent-rebound' ||
+    t === 'routine-late'
   )
 }

@@ -3,6 +3,7 @@ import {
   conversationReducer,
   initialConversationState,
   REBOUND_NOTICE,
+  routineLateNotice,
   type AssistantItem,
   type ConversationState,
   type ErrorItem,
@@ -416,6 +417,55 @@ describe('agent-rebound (TB4 context reset notice)', () => {
     expect(next.items.map((i) => i.kind)).toEqual(['user', 'notice'])
     expect(next.isProcessing).toBe(false)
     expect(next.items.some((i) => i.kind === 'error')).toBe(false)
+  })
+})
+
+/**
+ * A Routine's turn (#470, ADR-0028 part 5): the prompt is real input the agent
+ * received which nobody typed, so it stays an ordinary user bubble and wears a
+ * chip naming the Routine — and a run that started late says so, twice.
+ */
+describe('a routine turn', () => {
+  it('keeps the prompt an ordinary user item, marked with the Routine that sent it', () => {
+    const next = conversationReducer(initialConversationState, {
+      type: 'send-prompt',
+      id: 'u1',
+      text: 'Triage this repo and say what changed.',
+      routine: { name: 'Morning triage' },
+    })
+    const user = next.items[0]
+    expect(user).toMatchObject({ kind: 'user', routine: { name: 'Morning triage' } })
+    // Still a normal turn in every other respect.
+    expect(next.isProcessing).toBe(true)
+  })
+
+  it('leaves a prompt somebody typed unmarked', () => {
+    const next = conversationReducer(initialConversationState, {
+      type: 'send-prompt',
+      id: 'u1',
+      text: 'hello',
+    })
+    expect(next.items[0]).toMatchObject({ kind: 'user', routine: undefined })
+  })
+
+  it('appends the late notice with BOTH timestamps, without ending the turn', () => {
+    const dueAt = Date.UTC(2026, 7, 21, 7, 0)
+    const lastRunAt = Date.UTC(2026, 7, 20, 7, 0)
+    const next = conversationReducer(initialConversationState, {
+      type: 'routine-late',
+      dueAt,
+      lastRunAt,
+    })
+    const notice = next.items.find((i): i is NoticeItem => i.kind === 'notice')
+    expect(notice?.message).toBe(routineLateNotice(dueAt, lastRunAt))
+    expect(notice?.message).toContain('covers the period since then')
+    expect(next.items.some((i) => i.kind === 'error')).toBe(false)
+  })
+
+  it('says a Routine that NEVER ran never ran — not that it found nothing', () => {
+    const message = routineLateNotice(Date.UTC(2026, 7, 21, 7, 0), null)
+    expect(message).toContain('never run before')
+    expect(message).not.toContain('covers the period since then')
   })
 })
 

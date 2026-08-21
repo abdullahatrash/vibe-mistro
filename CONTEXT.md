@@ -69,6 +69,16 @@ _Avoid_: allowlist (unqualified — Vibe's own profile config has one too, and t
 doing different jobs: that one makes Vibe ASK us, this one is our ANSWER), permissions, whitelist,
 safe commands (nothing here is judged safe — it is listed or it is not).
 
+**Deferred run** (a Routine outcome):
+A **Routine** whose slot came due while its Bot was mid-turn. A Bot is one continuing conversation, so
+the run waits and is re-checked on the next tick, bounded by that Routine's OWN next slot; past it the
+run is given up and recorded as `deferred` against the slot it abandoned. A deferred run writes NOTHING
+into the conversation — a defer is not a failure, and reporting it there would make a Bot chattier the
+more you use it — but it is never invisible either, because it lands on the Routine's record (ADR-0028).
+_Avoid_: retry (nothing is retried — the next slot is the next attempt), queued, skipped (a skip is
+what a PAUSED Routine gets, and that is recorded nowhere), missed (that is the detector's word for a
+run nothing even tried to start).
+
 **ACP session**:
 The protocol-level handle returned by `session/new` and addressed by `session/*` methods. Lives only
 at the main-process / protocol layer; never surfaced in the UI. One `vibe-acp` process hosts many.
