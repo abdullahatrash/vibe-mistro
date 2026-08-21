@@ -46,7 +46,17 @@ export interface DeleteThreadArgs {
   closeSession?: () => Promise<void>
 }
 
-export async function deleteThread(args: DeleteThreadArgs): Promise<void> {
+/**
+ * Returns the Thread ids whose METADATA RECORD actually came down — `[threadId]`
+ * on success, `[]` when the store removal threw. The caller uses them to clean
+ * anything keyed to that Thread whose rows cascade with it (a Bot and its
+ * generated profile files, #445/ADR-0027), so it must report what happened
+ * rather than what was asked for: the record removal is deliberately swallowed
+ * above, and on that path the `threads` row survives, the `bots` row does not
+ * cascade, and destroying the profile files would leave a Bot whose persona is
+ * silently gone from disk. Same contract as `removeWorkspace`.
+ */
+export async function deleteThread(args: DeleteThreadArgs): Promise<string[]> {
   // 1. Best-effort close FIRST, while the session handle is still resolvable.
   //    Swallow any failure (or absence) — Vibe-side cleanup never gates ours.
   if (args.closeSession) {
@@ -59,10 +69,14 @@ export async function deleteThread(args: DeleteThreadArgs): Promise<void> {
   // 2. Remove our records regardless — each guarded so a persist/unlink failure
   //    can't reject the orchestration (and thus the IPC). Attempted independently
   //    so the transcript still comes down even if the metadata removal threw.
+  let removedThreadIds: string[] = []
   try {
     await args.store.deleteThread(args.threadId)
+    removedThreadIds = [args.threadId]
   } catch {
-    // A metadata persist failure (full / read-only userData) is non-fatal.
+    // A metadata persist failure (full / read-only userData) is non-fatal — but
+    // it IS reported (as "nothing removed"), because a caller cleaning cascaded
+    // data must not act on a removal that did not happen.
   }
   try {
     await args.transcript.delete(args.threadId)
@@ -77,4 +91,5 @@ export async function deleteThread(args: DeleteThreadArgs): Promise<void> {
       // An attachments removal failure is non-fatal — same guard as the transcript.
     }
   }
+  return removedThreadIds
 }

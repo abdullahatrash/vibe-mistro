@@ -46,7 +46,12 @@ export interface RemoveWorkspaceArgs {
   stopAgent?: () => void | Promise<void>
 }
 
-export async function removeWorkspace(args: RemoveWorkspaceArgs): Promise<void> {
+/**
+ * Returns the Thread ids that were actually removed — the caller uses them to
+ * find and clean anything keyed to those Threads whose rows are now gone (a
+ * Project's Bots and their generated profile files, #445/ADR-0027).
+ */
+export async function removeWorkspace(args: RemoveWorkspaceArgs): Promise<string[]> {
   // 1. Best-effort stop FIRST, while the warm agent handle is still resolvable.
   //    Swallow any failure (or absence) — Vibe-side cleanup never gates ours.
   if (args.stopAgent) {
@@ -82,4 +87,5 @@ export async function removeWorkspace(args: RemoveWorkspaceArgs): Promise<void> 
       }
     }
   }
+  return removedThreadIds
 }

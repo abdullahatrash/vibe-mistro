@@ -21,6 +21,10 @@ minted id from creation, but is written to disk (metadata + transcript) only on 
 the single event that makes a Thread durable. Abandoning a Draft leaves zero residue; the persisted
 Thread list contains only prompted Threads. Applies equally to both entry points — the New Thread
 button and opening a Workspace.
+**One exception: a Mistro Bot's Thread is durable from creation** (#445, ADR-0027). A Bot is a
+record with a durable `threadId`, so creating one writes the Thread with zero prompts — it is never
+a Draft. The invariant still holds for every Thread a user starts by hand; a Bot's Thread is
+created by the Bot, not by the New Thread button.
 _Avoid_: unsaved / temporary / phantom / ephemeral thread.
 
 **Mistro Bot**:

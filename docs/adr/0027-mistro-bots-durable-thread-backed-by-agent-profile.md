@@ -76,12 +76,34 @@ no signal. This is forced by the code, not chosen.
 expression, so hiding Bots in the store would hide them from Search too. It is a per-row flag, read
 differently by each side.
 
+**A Bot's Thread is durable from creation, unlike every other Thread.** The Draft Thread invariant
+(`CONTEXT.md`) says a Thread is written to disk only on its first prompt. A Bot's record carries a
+`threadId`, so creating a Bot writes the Thread with zero prompts. The carve-out is recorded in the
+glossary; the invariant still holds for every Thread a user starts by hand.
+
 **Deleting a Bot keeps its conversation** as an archived Thread and destroys only the identity. The
 "Remove project" path must gain the same cleanup — today it drops Threads silently and would orphan
 profile files, which would keep appearing as modes for Bots that no longer exist.
 
 **Vibe validates nothing we write.** Unknown keys in a profile TOML are silently ignored — a typo'd
 override loads, works, and quietly lacks the setting. Since we generate these files, we validate them.
+
+**A Bot profile is written `safety = "neutral"`, never wider.** That is Vibe's own `from_toml`
+default and the value the `ask` builtin carries, so creating a Bot can never quietly widen what an
+agent is allowed to do: tool executions still need approval. Approval posture is **Mode**'s job, and
+a Bot is not a way to smuggle one in. (`AgentSafety` is `safe | neutral | destructive | yolo` and
+`AgentType` is `agent | subagent` — read from the installed `mistral-vibe` at implementation time,
+`vibe/agents.py`, because the #420 probe profile carried neither key and the capture therefore does
+not cover them.)
+
+**The override allow-list is exactly `system_prompt_id`.** `AgentProfile.from_toml` pops
+`display_name`, `description`, `safety` and `agent_type`, then sweeps every remaining key into
+`overrides` — i.e. the whole ~80-field `VibeConfigSchema` is reachable from a Bot's profile. We
+deliberately reach exactly one field of it. Model and reasoning effort are the reason: at 2.24.1
+`set_config_option` for `model` and `thinking` writes THROUGH to the user's global
+`~/.vibe/config.toml` (#434), so a Bot that set them would silently re-point the user's default
+model. A Bot configures its persona, not the user's Vibe. Any future addition to this list is an
+ADR-level decision, not an implementation detail — validation enforces the list, so it fails closed.
 
 **Bots are visible to the `vibe` CLI**, deliberately: they are ordinary agent profiles in Vibe's own
 directory. A rename updates what the CLI shows.
