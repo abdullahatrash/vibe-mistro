@@ -56,6 +56,13 @@ export interface RoutineRunResult {
   lastOutcome: RoutineOutcome
   /** The fixable message behind a `failed` / `blocked` run; omitted for `ok`. */
   lastError?: string | null
+  /**
+   * The exact invocation the allowed-commands gate refused (#469), or null. Unlike
+   * `lastError` this is NOT carried forward: a run that was not blocked clears it,
+   * so the offer to add a command can never be made about a command that is no
+   * longer the reason anything failed.
+   */
+  lastBlockedCommand?: string | null
 }
 
 export interface RoutineStoreApi {

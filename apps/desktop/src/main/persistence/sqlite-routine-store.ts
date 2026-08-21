@@ -37,6 +37,7 @@ interface RoutineRow {
   last_run_at: number | null
   last_outcome: string | null
   last_error: string | null
+  last_blocked_command: string | null
   created_at: number
   updated_at: number
 }
@@ -118,6 +119,7 @@ export class SqliteRoutineStore implements RoutineStoreApi {
       lastRunAt: null,
       lastOutcome: null,
       lastError: null,
+      lastBlockedCommand: null,
       createdAt: ts,
       updatedAt: ts,
     }
@@ -125,8 +127,9 @@ export class SqliteRoutineStore implements RoutineStoreApi {
       this.db
         .prepare(
           `INSERT INTO routines (id, thread_id, name, prompt, schedule, allowed_commands, active,
-                                 last_run_at, last_outcome, last_error, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?)`,
+                                 last_run_at, last_outcome, last_error, last_blocked_command,
+                                 created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
         )
         .run(
           record.id,
@@ -197,15 +200,27 @@ export class SqliteRoutineStore implements RoutineStoreApi {
       lastRunAt: result.lastRunAt,
       lastOutcome: result.lastOutcome,
       lastError,
+      // Deliberately NOT carried forward the way `lastError` is: the blocked
+      // command belongs to the run that was blocked, and a later run that failed
+      // for some other reason must not still be offering to allow it (#469).
+      lastBlockedCommand: result.lastBlockedCommand ?? null,
       updatedAt: this.now(),
     }
     try {
       this.db
         .prepare(
-          `UPDATE routines SET last_run_at = ?, last_outcome = ?, last_error = ?, updated_at = ?
+          `UPDATE routines SET last_run_at = ?, last_outcome = ?, last_error = ?,
+                               last_blocked_command = ?, updated_at = ?
            WHERE id = ?`,
         )
-        .run(next.lastRunAt, next.lastOutcome, next.lastError, next.updatedAt, id)
+        .run(
+          next.lastRunAt,
+          next.lastOutcome,
+          next.lastError,
+          next.lastBlockedCommand,
+          next.updatedAt,
+          id,
+        )
       return next
     } catch (err) {
       console.error('[SqliteRoutineStore] recordRun failed:', err)
@@ -271,6 +286,7 @@ function routineFromRow(row: RoutineRow): RoutineRecord | null {
     lastRunAt: row.last_run_at,
     lastOutcome: isOutcome(row.last_outcome) ? row.last_outcome : null,
     lastError: row.last_error,
+    lastBlockedCommand: row.last_blocked_command,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }

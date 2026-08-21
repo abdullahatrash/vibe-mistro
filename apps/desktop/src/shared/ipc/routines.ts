@@ -84,6 +84,17 @@ export interface RoutineRecord {
   lastOutcome: RoutineOutcome | null
   /** The failure detail behind a `failed` / `blocked` outcome — the fixable message. */
   lastError: string | null
+  /**
+   * The exact invocation the **allowed commands** gate refused, when the last run
+   * was `blocked` (#469). Null otherwise, and cleared by any run that was not
+   * blocked.
+   *
+   * Structured rather than parsed back out of `lastError`, because the authoring
+   * surface (slice 5) offers to ADD this command to the list — and a value that
+   * has been through a sentence is a value that can come back subtly different
+   * from the one the agent asked to run.
+   */
+  lastBlockedCommand: string | null
   createdAt: number
   updatedAt: number
 }

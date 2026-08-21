@@ -1,4 +1,4 @@
-import { isMistroBotProfileId } from '../../../shared/bot-profile-id'
+import { isMistroProfileId } from '../../../shared/bot-profile-id'
 import type { ThreadModes } from '../../../shared/ipc'
 
 /**
@@ -18,12 +18,18 @@ import type { ThreadModes } from '../../../shared/ipc'
  * minted ourselves — `mistro-bot-<uuid>` is a mechanical test, not a heuristic,
  * so a hand-written profile of the user's is never touched.
  *
+ * Since #469 a Bot has a SECOND generated profile — `mistro-routine-<uuid>`, the
+ * permission gate a scheduled turn wears — and it is published as a mode like any
+ * other, so the filter asks the wider question (`isMistroProfileId`). A picker
+ * offering "Triage Bot (routine)" beside `ask` and `plan` would be offering a
+ * posture that only makes sense with nobody watching.
+ *
  * A Bot's OWN conversation never reaches this: it is handed no modes at all
  * (`ConnectedWorkspace`), because a Bot's behaviour is its profile.
  */
 export function modesWithoutBotProfiles(modes: ThreadModes | null): ThreadModes | null {
   if (!modes) return null
-  const availableModes = modes.availableModes.filter((mode) => !isMistroBotProfileId(mode.id))
+  const availableModes = modes.availableModes.filter((mode) => !isMistroProfileId(mode.id))
   // Nothing was filtered — the overwhelmingly common case, a user with no Bots.
   // Hand back the SAME object rather than a copy: a cheap fast path, not a
   // memoization guarantee (a user WITH Bots does get a fresh object per call).

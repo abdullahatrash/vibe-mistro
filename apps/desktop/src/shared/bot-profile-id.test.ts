@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import { MISTRO_BOT_PROFILE_PREFIX, isMistroBotProfileId, mintBotProfileId } from './bot-profile-id'
+import {
+  MISTRO_BOT_PROFILE_PREFIX,
+  isMistroBotProfileId,
+  isMistroProfileId,
+  isMistroRoutineProfileId,
+  mintBotProfileId,
+  routineProfileIdFor,
+} from './bot-profile-id'
 
 describe('mintBotProfileId', () => {
   it('prefixes a uuid and produces an id we recognise as ours', () => {
@@ -49,5 +56,35 @@ describe('isMistroBotProfileId — the foreign-profile gate', () => {
     expect(isMistroBotProfileId(`../mistro-bot-${uuid}`)).toBe(false)
     expect(isMistroBotProfileId(`mistro-bot-${uuid}/../../evil`)).toBe(false)
     expect(isMistroBotProfileId(`mistro-bot-${uuid}.toml`)).toBe(false)
+  })
+})
+
+describe('the routine gate profile id (#469)', () => {
+  const BOT = 'mistro-bot-6f9619ff-8b86-d011-b42d-00c04fc964ff'
+  const GATE = 'mistro-routine-6f9619ff-8b86-d011-b42d-00c04fc964ff'
+
+  it('is derived from the Bot, sharing its uuid — never stored, never minted twice', () => {
+    expect(routineProfileIdFor(BOT)).toBe(GATE)
+  })
+
+  it('is null for anything that is not a Bot profile of ours', () => {
+    // Including a routine id: the pair is derived one way only, so there is no
+    // path by which a gate could father a second gate.
+    for (const id of ['ask', GATE, 'mistro-bot-nope', 'MISTRO-BOT-6f9619ff-8b86-d011-b42d-00c04fc964ff']) {
+      expect({ id, derived: routineProfileIdFor(id) }).toEqual({ id, derived: null })
+    }
+  })
+
+  it('keeps the two ownership tests apart, so neither writer can touch the other’s file', () => {
+    expect(isMistroBotProfileId(GATE)).toBe(false)
+    expect(isMistroRoutineProfileId(BOT)).toBe(false)
+    expect(isMistroRoutineProfileId(GATE)).toBe(true)
+  })
+
+  it('answers the PRESENTATION question for both — a Mode picker must hide each', () => {
+    expect(isMistroProfileId(BOT)).toBe(true)
+    expect(isMistroProfileId(GATE)).toBe(true)
+    expect(isMistroProfileId('ask')).toBe(false)
+    expect(isMistroProfileId('my-own-profile')).toBe(false)
   })
 })

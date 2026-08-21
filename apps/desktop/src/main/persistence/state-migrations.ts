@@ -235,4 +235,32 @@ export const STATE_MIGRATIONS: readonly Migration[] = [
       `)
     },
   },
+  {
+    id: 7,
+    name: 'routine-blocked-command',
+    // Nothing in `sqlite_master` — this ADDS A COLUMN to a table migration 6
+    // made, and a column is not an object the ledger can check for (#475). Two
+    // consequences, both handled below rather than left implicit: the `up` is
+    // written to be safely re-runnable, and it asks the table what it already has
+    // instead of assuming, so a database that reaches it twice is repaired rather
+    // than locked.
+    creates: [],
+    up: (db) => {
+      // The exact invocation the **allowed commands** gate refused (#469,
+      // ADR-0028 part 4), kept as its own column rather than folded into
+      // `last_error`.
+      //
+      // It is a column and not a parse of the message because slice 5 offers to
+      // ADD this command to the routine's list: what goes back must be the bytes
+      // the agent asked to run, and a value that has been through a sentence — a
+      // backtick, an ellipsis, a truncation — is a value that can come back
+      // subtly different from the one that was blocked. Nullable and unread by
+      // anything older, so no existing row needs rewriting.
+      const columns = db.prepare(`PRAGMA table_info(routines)`).all() as unknown as {
+        name: string
+      }[]
+      if (columns.some((column) => column.name === 'last_blocked_command')) return
+      db.exec(`ALTER TABLE routines ADD COLUMN last_blocked_command TEXT;`)
+    },
+  },
 ]
