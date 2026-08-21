@@ -3,6 +3,7 @@ import type {
   BotsCreateArgs,
   BotsDeleteArgs,
   BotsDeleteResult,
+  BotsRebuildProfileArgs,
   BotsUpdateArgs,
   BotWriteResult,
 } from '../../shared/ipc'
@@ -194,6 +195,28 @@ export async function deleteBot(
     console.error('[vibe-mistro:bots] could not archive the deleted Bot Thread:', err)
   }
   return { ok: removed }
+}
+
+/**
+ * Rebuild a Bot's profile files from its record (#448) — the repair the
+ * missing-persona banner offers.
+ *
+ * It is `updateBot` with nothing to change, and that is the point: the record is
+ * the source of truth and the files are a projection of it (ADR-0027), so
+ * "rebuild" is that projection run again rather than a second, parallel writer
+ * that could drift from the one the form uses. It also re-stamps `updatedAt`,
+ * which is what tells the open-path check (`assessBotProfile`) that the agent's
+ * registry reading now predates the files and has nothing left to accuse.
+ *
+ * It does NOT restore the persona on a session that is already running: a live
+ * session resolved its profile at `session/new` and is unaffected by the files
+ * either way (acp-capture §14.6). The next bind selects it.
+ */
+export async function rebuildBotProfile(
+  deps: BotLifecycleDeps,
+  args: BotsRebuildProfileArgs,
+): Promise<BotWriteResult> {
+  return updateBot(deps, { threadId: args.threadId })
 }
 
 /** Every Bot, for `bots:list`. */

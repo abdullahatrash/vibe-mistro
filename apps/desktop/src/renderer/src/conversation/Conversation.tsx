@@ -18,6 +18,8 @@ import type {
   ThreadReasoningEffort,
 } from '../../../shared/ipc'
 import { BotHeader, type BotHeaderActions, type BotIdentity } from '../bots/BotHeader'
+import { BotProfileBanner } from '../bots/BotProfileBanner'
+import { useBotProfileHealth } from '../bots/use-bot-profile-health'
 import { FileOpenProvider } from './file-open-context'
 import { isRejectOption } from './permission-option'
 import type { FileLink } from './file-link'
@@ -189,6 +191,15 @@ export function Conversation({
   const stateRef = useRef(state)
   stateRef.current = state
 
+  // Is this Bot's persona still on the agent? (#448) Asked on OPEN — the bind-time
+  // check needs a prompt, and a Bot whose profile file went missing must say so
+  // before the user types into what still looks like their teammate. Inert
+  // for an ordinary Thread. `recheck` is mirrored into a ref so the `thread:bound`
+  // subscription below can re-ask without re-subscribing.
+  const botHealth = useBotProfileHealth(bot?.threadId ?? null, thread.agentId)
+  const recheckBotProfileRef = useRef(botHealth.recheck)
+  recheckBotProfileRef.current = botHealth.recheck
+
   // The follow-up queue for THIS Thread (#105, ADR-0009): submitting while a turn
   // streams enqueues here (the queue lives in a module store ABOVE this remount, so
   // it survives a Thread switch), and every turn-end auto-flushes one message.
@@ -325,6 +336,10 @@ export function Conversation({
       // the answers it is about to give will appear.
       if (e.botProfileError) {
         dispatch({ type: 'system-notice', message: e.botProfileError })
+        // ...and re-ask the open-path check, so the SAME failure also raises the
+        // banner with its rebuild button (#448). A notice explains; the banner
+        // repairs — a Bot that lost its persona mid-conversation deserves both.
+        recheckBotProfileRef.current()
       }
     })
   }, [thread.threadId])
@@ -583,7 +598,18 @@ export function Conversation({
     <FileOpenProvider value={openFile}>
       <div className="conv" ref={convRef}>
         {bot ? (
-          <BotHeader bot={bot} actions={botActions} />
+          <>
+            <BotHeader bot={bot} actions={botActions} />
+            {/* Loud failure (ADR-0027): a Bot whose persona Vibe no longer offers
+                says so at the top of its own conversation, with the repair. The
+                wrapper is gated too, so a healthy Bot adds no empty row to the
+                column's gap. */}
+            {(botHealth.missing || botHealth.rebuilt) && (
+              <div className="conv-measure">
+                <BotProfileBanner botName={bot.name} health={botHealth} />
+              </div>
+            )}
+          </>
         ) : (
           <div className="conv__head">
             <span className="dot dot--ok" aria-hidden />

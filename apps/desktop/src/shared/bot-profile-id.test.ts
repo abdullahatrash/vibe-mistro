@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { randomUUID } from 'node:crypto'
-import { MISTRO_BOT_PROFILE_PREFIX, isMistroBotProfileId, mintBotProfileId } from './profile-id'
+import { MISTRO_BOT_PROFILE_PREFIX, isMistroBotProfileId, mintBotProfileId } from './bot-profile-id'
 
 describe('mintBotProfileId', () => {
   it('prefixes a uuid and produces an id we recognise as ours', () => {

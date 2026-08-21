@@ -4,6 +4,7 @@ import {
   extractThreadControls,
   hasConfigOption,
   missingControlAxes,
+  readModeDiscovery,
 } from './agent-controls'
 
 /** The verbatim 2.24.1 `session/new` shape (acp-capture §14.0) — no `models` block. */
@@ -194,5 +195,21 @@ describe('missingControlAxes', () => {
       missingControlAxes(extractThreadControls({ modes: MODES_2_24, configOptions: [{ id: 'thinking' }] })),
     ).toEqual(['model', 'reasoningEffort'])
     expect(missingControlAxes(extractThreadControls({}))).toEqual(['mode', 'model', 'reasoningEffort'])
+  })
+})
+
+describe('readModeDiscovery', () => {
+  it('reads the advertised mode ids as a stamped registry reading', () => {
+    const controls = extractThreadControls({ configOptions: CONFIG_OPTIONS_2_24 })
+    expect(readModeDiscovery(controls, 4_242)).toEqual({
+      modeIds: MODES_2_24.availableModes.map((mode) => mode.id),
+      observedAt: 4_242,
+    })
+  })
+
+  it('is null when the session advertises no modes at all', () => {
+    // An agent with no mode axis says nothing about which agent profiles exist,
+    // and must never be mistaken for one that offers modes and lacks ours (#448).
+    expect(readModeDiscovery(extractThreadControls({}), 1)).toBeNull()
   })
 })

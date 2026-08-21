@@ -160,6 +160,37 @@ function extractReasoningEffort(configOptions: unknown): ThreadReasoningEffort |
 }
 
 /**
+ * One reading of the agent's agent-profile registry: the mode ids a session
+ * result advertised, and WHEN we read them (#448).
+ *
+ * The timestamp is load-bearing, not diagnostics. Vibe re-scans `~/.vibe/agents/`
+ * per session (acp-capture §14.6), so a mode list is a snapshot of the registry at
+ * that instant — and a Mistro Bot created or repaired AFTER it is legitimately
+ * absent from it. Without the reading's age, "not in the list" would accuse every
+ * Bot made on an already-warm agent of having a broken profile.
+ */
+export interface ModeDiscovery {
+  /** Every `availableModes[].id` the session reported — builtins and profiles alike. */
+  modeIds: string[]
+  /** Epoch-ms when the session reported them (i.e. when Vibe last scanned). */
+  observedAt: number
+}
+
+/**
+ * Read a controls bundle as a registry reading, or null when the session
+ * advertised no modes at all — an agent that offers no mode axis says nothing
+ * about which profiles exist, and must not be mistaken for one that offers modes
+ * and lacks ours.
+ */
+export function readModeDiscovery(
+  controls: ThreadAgentControls,
+  observedAt: number,
+): ModeDiscovery | null {
+  if (!controls.modes) return null
+  return { modeIds: controls.modes.availableModes.map((mode) => mode.id), observedAt }
+}
+
+/**
  * The axes this session advertises NOTHING for — our drift tripwire (#427). Every
  * agent we support offers all three, so a non-empty result means the agent stopped
  * advertising what we expect (a renamed field, a removed block) and the matching

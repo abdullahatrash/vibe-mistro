@@ -110,7 +110,12 @@ import { registerSkillsIpc } from './skills/register-ipc'
 import { createBotLifecycleDeps, registerBotsIpc } from './bots/register-ipc'
 import { cleanRemovedBots } from './bots/clean-removed-bots'
 import { botNamesByThread, markBotThreads } from './bots/mark-bot-threads'
-import { applyBotProfile, planBotProfileSelection } from './bots/select-bot-profile'
+import {
+  applyBotProfile,
+  mayClaimPreopenedSession,
+  planBotProfileSelection,
+} from './bots/select-bot-profile'
+import type { ModeDiscovery } from './acp/agent-controls'
 import { SqliteBotStore } from './persistence/sqlite-bot-store'
 import type { BotStoreApi } from './persistence/bot-store-api'
 import { registerEditorsIpc } from './editors/register-ipc'
@@ -514,6 +519,26 @@ function bestEffortCloseFor(deps: MainDeps, threadId: string): (() => Promise<vo
 }
 
 /**
+ * The agent's latest agent-profile registry reading (#448) — what the open-path
+ * Bot persona check diffs against, resolved from the pool by `agentId`.
+ *
+ * It first ensures the Workspace's eager primary session (ADR-0012) — idempotent
+ * and already time-bounded — so a Bot opened the moment its Project connects gets
+ * a real reading instead of `unknown`. Best-effort: an agent that cannot open a
+ * session simply has nothing to report, which is a shrug, never an accusation.
+ */
+async function discoverModes(agentId: string): Promise<ModeDiscovery | null> {
+  const agent = pool.get(agentId)
+  if (!agent) return null
+  try {
+    await agent.openPrimarySession()
+  } catch {
+    // Already best-effort inside; a failure just leaves the reading as it was.
+  }
+  return agent.modeDiscovery
+}
+
+/**
  * Build a `ThreadConnection` for the renderer — the shared tail of the draft and
  * continue flows (previously duplicated across both). Seeds the picker from the
  * Workspace's eager primary session (ADR-0012) so a fresh draft / reopened Thread
@@ -694,11 +719,24 @@ async function runPromptTurn(
     // event tees to the ACTIVE Thread when several share an agent — refreshed every
     // prompt (last-write-wins, and only the active Thread prompts at a time).
     deps.bridge.bind(args.agentId, args.threadId)
+    // Is this Thread a Mistro Bot, and which persona does it own? Resolved BEFORE
+    // the bind, because it decides which session the bind may use (#448).
+    const botProfileId = deps.bots.get(args.threadId)?.profileId ?? null
     // A draft's first prompt (sessionId null) claims the Workspace's eager primary
     // session (ADR-0012), so it binds to that instead of minting a SECOND
     // `session/new`; consumed once, so a second concurrent draft mints its own.
     // Never claimed for a reopened/already-bound Thread (those aren't case (i)).
-    const preopened = args.sessionId === null ? (agent.consumePrimarySession() ?? undefined) : undefined
+    //
+    // A Bot declines that session unless it ADVERTISES the Bot's persona (#448): a
+    // Bot created after the Workspace connected is absent from the primary
+    // session's registry scan, so binding to it would give the Bot a session that
+    // can never wear its persona — silently, for the rest of the run (every later
+    // turn reuses that session and re-selection is skipped). Minting a fresh
+    // `session/new` re-scans and costs one extra session in that case alone.
+    const preopened =
+      args.sessionId === null && mayClaimPreopenedSession(botProfileId, agent.primarySessionControls)
+        ? (agent.consumePrimarySession() ?? undefined)
+        : undefined
     const bound = await ensureBoundSession({
       agent,
       store: deps.store,
@@ -738,10 +776,10 @@ async function runPromptTurn(
     //
     // `setMode` routes through the VALIDATING `session/set_config_option` (a bogus
     // id is rejected with -32602), never `session/set_mode`, which answers a bad id
-    // with `{}` — a silent no-op indistinguishable from success (#427). A failure
-    // is reported, never swallowed: a Bot that quietly answers with no persona is
-    // the one failure ADR-0027 forbids.
-    const botProfileId = deps.bots.get(args.threadId)?.profileId ?? null
+    // with `{}` — a silent no-op indistinguishable from success (#427) — on every
+    // 2.24.x binary, all of which advertise the `mode` config option. A failure is
+    // reported, never swallowed: a Bot that quietly answers with no persona is the
+    // one failure ADR-0027 forbids.
     const profileOutcome = await applyBotProfile(
       agent,
       sessionId,
@@ -947,6 +985,8 @@ function registerIpc(deps: MainDeps): void {
   registerBotsIpc({
     bots: deps.bots,
     threads: deps.store,
+    // The open-path persona check's only evidence (#448).
+    discoverModes,
     // "Start over" (#447) retires a live session, so it needs the same two live
     // seams the delete path uses: the authoritative streaming guard and the warm
     // agent that hosts the session being left behind.

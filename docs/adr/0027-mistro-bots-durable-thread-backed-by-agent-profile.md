@@ -91,6 +91,16 @@ glossary; the invariant still holds for every Thread a user starts by hand.
 "Remove project" path must gain the same cleanup — today it drops Threads silently and would orphan
 profile files, which would keep appearing as modes for Bots that no longer exist.
 
+**Failure is loud** (stated in PRD #444, recorded here because the code cites this ADR for it, #448).
+A Bot whose profile is missing or malformed opens with a banner naming it and offering a rebuild from
+the record — never silently, and never as a plain Thread. The outcome this forbids is specific: a Bot
+that keeps its name, its sidebar row and its history while answering as a nameless agent. Two things
+follow from it in the implementation. A Bot never binds to a session that cannot host its persona (the
+eager primary session predates a Bot created after connect), because binding to one would make exactly
+that outcome permanent for the run. And a broken profile is detected by DIFFING the expected
+`profile_id` against the session's advertised modes rather than by waiting for an error, since Vibe
+drops a bad profile at registry scan with only a log line (#424) — the absence is the whole signal.
+
 **The Bots empty state lives in the sidebar section, not the outlet** (#447). The PRD sketched
 "nothing selected → a roomy empty state" in the outlet, which was written before the outlet's other
 two states were weighed against it: the app already has an idle hero there, and a Bots-specific

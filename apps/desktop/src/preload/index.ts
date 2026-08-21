@@ -60,7 +60,10 @@ import {
   type BotsListResult,
   type BotsStartOverArgs,
   type BotsStartOverResult,
+  type BotsProfileStatusArgs,
+  type BotsRebuildProfileArgs,
   type BotsUpdateArgs,
+  type BotProfileStatus,
   type BotWriteResult,
   type SkillsListArgs,
   type SkillsListResult,
@@ -173,6 +176,10 @@ const api = {
     ipcRenderer.invoke(IPC.botsDelete, args),
   botsStartOver: (args: BotsStartOverArgs): Promise<BotsStartOverResult> =>
     ipcRenderer.invoke(IPC.botsStartOver, args),
+  botsProfileStatus: (args: BotsProfileStatusArgs): Promise<BotProfileStatus> =>
+    ipcRenderer.invoke(IPC.botsProfileStatus, args),
+  botsRebuildProfile: (args: BotsRebuildProfileArgs): Promise<BotWriteResult> =>
+    ipcRenderer.invoke(IPC.botsRebuildProfile, args),
   gitSubscribeStatus: (args: GitStatusSubscriptionArgs): Promise<void> =>
     ipcRenderer.invoke(IPC.gitSubscribeStatus, args),
   gitUnsubscribeStatus: (args: GitStatusSubscriptionArgs): Promise<void> =>

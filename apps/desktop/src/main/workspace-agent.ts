@@ -6,6 +6,8 @@ import {
   extractThreadControls,
   hasConfigOption,
   missingControlAxes,
+  readModeDiscovery,
+  type ModeDiscovery,
 } from './acp/agent-controls'
 import { AcpClient, type SpawnFn } from './acp/client'
 import { handleFsReadTextFile, type ReadTextFn } from './acp/fs-read'
@@ -155,6 +157,15 @@ export class WorkspaceAgent extends EventEmitter {
   private readonly sessionConfigIds = new Map<string, Set<string>>()
   /** Axes we have already warned are unadvertised — warn once per agent, not per session. */
   private readonly driftWarnedAxes = new Set<ThreadConfigAxis>()
+  /**
+   * The most recent reading of Vibe's agent-profile registry (#448): the mode ids
+   * the last `session/new` / `session/load` advertised, and when. This is the ONLY
+   * wire evidence that a Mistro Bot's profile still exists — a broken profile is
+   * dropped at scan with no error to catch (acp-capture §14.6) — so it is kept per
+   * agent rather than per session, and stays readable after the session is
+   * consumed or closed.
+   */
+  private modeDiscoveryValue: ModeDiscovery | null = null
   /** `agentInfo.version` from `initialize` (acp-capture §1) — for drift diagnostics. */
   private agentVersionValue: string | null = null
   /**
@@ -535,6 +546,12 @@ export class WorkspaceAgent extends EventEmitter {
   async openThread(): Promise<ThreadInfo> {
     if (!this.initialized) throw new WorkspaceAgentError('Agent is not initialized; call start() first.')
 
+    // Stamped BEFORE the round-trip (#448): Vibe scans `~/.vibe/agents/` while
+    // serving this request, so the reading describes the registry as of NOW, not as
+    // of the reply. Stamping on arrival would overstate its freshness and could let
+    // a profile written during the round-trip be judged missing by a list that
+    // legitimately predates it.
+    const askedAt = Date.now()
     let result: SessionNewResult
     try {
       result = await this.client.request<SessionNewResult>('session/new', {
@@ -545,7 +562,7 @@ export class WorkspaceAgent extends EventEmitter {
       throw this.mapErrorAndCacheAuth(err)
     }
 
-    const controls = this.readControls(result, 'session/new')
+    const controls = this.readControls(result, 'session/new', askedAt)
     const thread: ThreadInfo = {
       sessionId: result.sessionId,
       // `session/new` returns no title in the capture — the Thread title arrives
@@ -615,6 +632,16 @@ export class WorkspaceAgent extends EventEmitter {
   }
 
   /**
+   * The agent's latest agent-profile registry reading (#448) — the mode ids the
+   * last session result advertised, and when. Null until this agent has opened or
+   * loaded one session; a spawn that never got that far simply has nothing to say
+   * about a Bot's persona, which is exactly what `unknown` is for.
+   */
+  get modeDiscovery(): ModeDiscovery | null {
+    return this.modeDiscoveryValue
+  }
+
+  /**
    * Claim the unconsumed primary session for a Draft's FIRST prompt (ADR-0012 #2),
    * marking it consumed so a second concurrent Draft mints its own session instead.
    * Returns the primary `ThreadInfo` exactly once, then null (none open, or already
@@ -646,6 +673,7 @@ export class WorkspaceAgent extends EventEmitter {
       throw new WorkspaceAgentError('Agent is not initialized; call start() first.')
     }
     this.loadingSessions.add(sessionId)
+    const askedAt = Date.now() // see `openThread` — stamped before the scan happens
     try {
       const result = await this.client.request<SessionNewResult>('session/load', {
         sessionId,
@@ -656,7 +684,7 @@ export class WorkspaceAgent extends EventEmitter {
         // The `session/load` result omits `sessionId` (acp-capture §9) — keep ours.
         sessionId,
         title: result.title ?? null,
-        ...this.readControls({ ...result, sessionId }, 'session/load'),
+        ...this.readControls({ ...result, sessionId }, 'session/load', askedAt),
       }
       this.threads.set(sessionId, thread)
       return thread
@@ -780,8 +808,18 @@ export class WorkspaceAgent extends EventEmitter {
    * there was silent — a renamed field just made a picker disappear — so an axis we
    * expect but no longer get must at least leave a trace in the main-process log.
    */
-  private readControls(result: SessionNewResult, method: string): ThreadAgentControls {
+  private readControls(
+    result: SessionNewResult,
+    method: string,
+    observedAt: number,
+  ): ThreadAgentControls {
     const controls = extractThreadControls(result)
+    // Every `session/new` AND every `session/load` result carries a FRESH registry
+    // scan — verified against 2.24.1 for #448: a profile written after the process
+    // started appears in a later `session/load` from the SAME process (extending
+    // acp-capture §14.6, which only established rescan-per-`session/new`). So this
+    // is the one place a reading is taken, and both methods may take one.
+    this.modeDiscoveryValue = readModeDiscovery(controls, observedAt) ?? this.modeDiscoveryValue
     const advertised = new Set(
       [MODE_CONFIG_ID, MODEL_CONFIG_ID, REASONING_EFFORT_CONFIG_ID].filter((id) =>
         hasConfigOption(result.configOptions, id),

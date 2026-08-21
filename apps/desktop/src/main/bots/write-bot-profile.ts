@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { projectBotProfile, type BotProfileSource } from './bot-profile'
-import { isMistroBotProfileId } from './profile-id'
+import { isMistroBotProfileId } from '../../shared/bot-profile-id'
 import type { VibeProfileDirs } from './profile-dirs'
 import {
   collectProblems,
