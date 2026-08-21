@@ -1,3 +1,10 @@
+import {
+  BOT_COLOUR_MAX_LENGTH,
+  BOT_DESCRIPTION_MAX_LENGTH,
+  BOT_INSTRUCTIONS_MAX_LENGTH,
+  BOT_NAME_MAX_LENGTH,
+  hasBotControlCharacter,
+} from '../../shared/bot-limits'
 import type { BotProfileFiles, BotProfileSource } from './bot-profile'
 import { isMistroBotProfileId } from '../../shared/bot-profile-id'
 
@@ -53,14 +60,9 @@ const PROFILE_OVERRIDE_KEYS = new Set(['system_prompt_id'])
 /** `AgentSafety` (vibe/agents.py). Anything else raises on load and drops the profile. */
 const PROFILE_SAFETY_VALUES = new Set(['safe', 'neutral', 'destructive', 'yolo'])
 
-/** Long enough for any real teammate name; short enough to stay one sidebar line. */
-export const BOT_NAME_MAX_LENGTH = 60
-/** The mode `description` is one line in a picker, not prose. */
-export const BOT_DESCRIPTION_MAX_LENGTH = 200
-/** The persona proper. Generous — it is the whole personality — but not unbounded. */
-export const BOT_INSTRUCTIONS_MAX_LENGTH = 100_000
-/** A hex colour or a short token name; nothing legitimate needs more. */
-export const BOT_COLOUR_MAX_LENGTH = 32
+// The bounds and the control-character rule live in `shared/bot-limits` (#447) so
+// the renderer's Bot form applies exactly what this validator enforces. Read them
+// from there — deliberately NOT re-exported here, so there is one import path.
 
 /** `#abc` … `#aabbccdd`. */
 const BOT_COLOUR_HEX = /^#[0-9a-fA-F]{3,8}$/
@@ -130,7 +132,7 @@ export function validateBotProfileSource(source: BotProfileSource): BotProfileVa
       field: 'name',
       message: `A name can be at most ${BOT_NAME_MAX_LENGTH} characters.`,
     })
-  } else if (hasControlCharacter(name)) {
+  } else if (hasBotControlCharacter(name)) {
     problems.push({ field: 'name', message: 'A name cannot contain line breaks or control characters.' })
   }
 
@@ -140,7 +142,7 @@ export function validateBotProfileSource(source: BotProfileSource): BotProfileVa
       field: 'description',
       message: `A description can be at most ${BOT_DESCRIPTION_MAX_LENGTH} characters.`,
     })
-  } else if (hasControlCharacter(description)) {
+  } else if (hasBotControlCharacter(description)) {
     // It becomes the mode's one-line `description` over ACP; a newline there
     // would break the line the picker renders.
     problems.push({
@@ -283,11 +285,3 @@ function unquote(value: string): string {
   return inner.replace(/\\(["\\])/g, '$1')
 }
 
-/** C0 controls (line breaks included) and DEL. */
-function hasControlCharacter(value: string): boolean {
-  for (const char of value) {
-    const code = char.codePointAt(0) ?? 0
-    if (code < 0x20 || code === 0x7f) return true
-  }
-  return false
-}

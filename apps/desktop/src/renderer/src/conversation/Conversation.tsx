@@ -17,7 +17,7 @@ import type {
   ThreadModes,
   ThreadReasoningEffort,
 } from '../../../shared/ipc'
-import { BotHeader, type BotIdentity } from '../bots/BotHeader'
+import { BotHeader, type BotHeaderActions, type BotIdentity } from '../bots/BotHeader'
 import { BotProfileBanner } from '../bots/BotProfileBanner'
 import { useBotProfileHealth } from '../bots/use-bot-profile-health'
 import { FileOpenProvider } from './file-open-context'
@@ -109,6 +109,7 @@ export interface LiveThread {
 export function Conversation({
   thread,
   bot = null,
+  botActions = null,
   modes,
   models,
   reasoningEffort,
@@ -129,6 +130,12 @@ export function Conversation({
    * Bot's turn is an ordinary Thread turn (ADR-0027).
    */
   bot?: BotIdentity | null
+  /**
+   * Edit / Start over for a Bot's header (#447), supplied by App beside the
+   * identity. Null for an ordinary Thread and for any surface that renders a Bot
+   * without offering to change it.
+   */
+  botActions?: BotHeaderActions | null
   /** The connection's current Mode + options (#66) — display-from-session-state. */
   modes: ThreadModes | null
   /** The connection's current Model + options (#66). */
@@ -592,7 +599,7 @@ export function Conversation({
       <div className="conv" ref={convRef}>
         {bot ? (
           <>
-            <BotHeader bot={bot} />
+            <BotHeader bot={bot} actions={botActions} />
             {/* Loud failure (ADR-0027): a Bot whose persona Vibe no longer offers
                 says so at the top of its own conversation, with the repair. The
                 wrapper is gated too, so a healthy Bot adds no empty row to the

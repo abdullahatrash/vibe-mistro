@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { BotRecord, ListMetadataResult } from '../../../shared/ipc'
 import type { ThreadStatusMap } from '../conversation/thread-status'
-import { botBeingRead, deriveBotRows, isBotUnread } from './bot-rows'
+import { botBeingRead, deriveBotRows, isBotUnread, markBotMeta } from './bot-rows'
 import { getBotsSeen, markBotSeen } from './bot-seen-store'
 
 function bot(name: string, threadId: string, updatedAt = 100): BotRecord {
@@ -227,5 +227,31 @@ describe('isBotUnread', () => {
 
   it('is never unread while it is the Bot on screen', () => {
     expect(isBotUnread({ lastActiveAt: 99, seenAt: 0, needsAttention: true, selected: true })).toBe(false)
+  })
+})
+
+describe('markBotMeta (#447 — the renderer-synthesized meta)', () => {
+  const meta = {
+    id: 't-rex',
+    workspaceId: 'ws-1',
+    sessionId: null,
+    title: null,
+    createdAt: 0,
+    lastActiveAt: 0,
+  }
+
+  it('marks a synthesized live meta so the Thread list can still drop it', () => {
+    // Without this a just-created Bot appears TWICE in the sidebar: once in the
+    // Bots section, once as an untitled row in its project's Thread list.
+    expect(markBotMeta(meta, [bot('Rex', 't-rex')])).toMatchObject({ bot: { name: 'Rex' } })
+  })
+
+  it('leaves an ordinary Thread untouched, by identity', () => {
+    expect(markBotMeta(meta, [bot('Rex', 't-other')])).toBe(meta)
+  })
+
+  it('leaves an already-marked meta untouched, by identity', () => {
+    const marked = { ...meta, bot: { name: 'Rex' } }
+    expect(markBotMeta(marked, [bot('Renamed', 't-rex')])).toBe(marked)
   })
 })

@@ -47,8 +47,14 @@ Five parts, each load-bearing:
    generated, and can rebuild them. Profile ids are `mistro-bot-<uuid>`: generated, immutable, and
    therefore incapable of shadowing a builtin mode.
 4. **Sidebar-native.** Bots occupy a bounded, scrollable section above Projects; selecting one swaps
-   the outlet to its conversation exactly as a Thread does. There is **no Bots page and no fourth
-   outlet view**. A Bot is hidden from its Project's Thread list but findable in Search.
+   the outlet to its conversation exactly as a Thread does. There is **no Bots page and no Bots
+   BROWSING view** — nothing reachable from a nav row, and nothing that lists Bots outside the
+   sidebar. *(Amended in #447, which built the create/edit form: **create and edit are a transient
+   outlet view** — `nav.view === 'bot-form'`, with no list, no nav row and no way to reach it except
+   the section's ＋ or a Bot's Edit, cleared by any selection. The original wording said "no fourth
+   outlet view", which would have forbidden the roomy form the same design requires; the thing it
+   meant to forbid — the top-level `view: 'bots'` with its second list column, killed in #422 — is
+   still forbidden.)* A Bot is hidden from its Project's Thread list but findable in Search.
 5. **A Bot's behaviour is its profile.** Model, Mode and reasoning effort are all changed by editing
    the Bot, never by a per-Thread control — so none of the three pickers appear on a Bot.
 
@@ -94,6 +100,22 @@ eager primary session predates a Bot created after connect), because binding to 
 that outcome permanent for the run. And a broken profile is detected by DIFFING the expected
 `profile_id` against the session's advertised modes rather than by waiting for an error, since Vibe
 drops a bad profile at registry scan with only a log line (#424) — the absence is the whole signal.
+
+**The Bots empty state lives in the sidebar section, not the outlet** (#447). The PRD sketched
+"nothing selected → a roomy empty state" in the outlet, which was written before the outlet's other
+two states were weighed against it: the app already has an idle hero there, and a Bots-specific
+outlet state would be a Bots surface by another name — the thing decision 4 exists to avoid — while
+also being unavailable for **Edit**, where a Bot is selected. So the empty state is the section's
+own (one line explaining what a Bot is, plus a Create CTA), and the section's ＋ is the create
+affordance in every other state.
+
+**A Bot's Project is chosen once and cannot be changed** (#447). Decision 2 says a Bot cannot exist
+*without* a Project; this is the stronger consequence the create/edit form made concrete. The live
+ACP session is bound to one `cwd`, and a Bot's whole value is that it knows *this* project — one
+that changed Project mid-conversation would answer about files it has never seen, with weeks of
+history implying otherwise. `BotsUpdateArgs` therefore carries no `workspaceId`, and the edit form
+shows the Project read-only, saying why rather than merely locking it. Moving a Bot means making a
+new one.
 
 **Vibe validates nothing we write.** Unknown keys in a profile TOML are silently ignored — a typo'd
 override loads, works, and quietly lacks the setting. Since we generate these files, we validate them.

@@ -26,6 +26,13 @@ export const botsChannels = {
   /** Delete a Bot: destroy the identity + its profile files, ARCHIVE its Thread. */
   botsDelete: 'bots:delete',
   /**
+   * "Start over" (#447): retire the Bot's ACP session so its NEXT prompt mints a
+   * fresh one. A pressure valve, not a delete — the record, both profile files and
+   * the whole transcript are untouched, so the Bot keeps its name, its persona and
+   * a readable history of everything it has already said.
+   */
+  botsStartOver: 'bots:start-over',
+  /**
    * Is this Bot's persona still there? (#448) Asked when the Bot is OPENED —
    * before any prompt — because "the profile file went missing" must never be
    * discovered by the Bot silently answering as a plain agent. See
@@ -130,6 +137,25 @@ export type BotWriteResult =
 export interface BotsDeleteResult {
   ok: boolean
 }
+
+/** Args for `bots:start-over`. Addressed by the Bot's durable Thread, like every Bot op. */
+export interface BotsStartOverArgs {
+  threadId: string
+}
+
+/**
+ * Why a "Start over" was refused. `notFound` = that Thread is not a Bot;
+ * `streaming` = a turn is in flight, and retiring the session under a running turn
+ * would strand it; `io` = the session cursor could not be cleared.
+ */
+export type BotStartOverFailure = 'notFound' | 'streaming' | 'io'
+
+/**
+ * The reply to `bots:start-over`. Typed failure rather than a throw, like every
+ * other Bot write — the header shows what happened instead of the Bot silently
+ * continuing on the session the user asked to leave behind.
+ */
+export type BotsStartOverResult = { ok: true } | { ok: false; reason: BotStartOverFailure }
 
 /** Args for `bots:profile-status`: which Bot, and on which Workspace agent. */
 export interface BotsProfileStatusArgs {

@@ -23,6 +23,7 @@ import {
   partitionBots,
   type UnifiedThreadRow,
 } from '../unified-threads'
+import { botNamesInRows, describeBotDestruction } from '../../bots/bot-destruction'
 import { getOpenProjects, setOpenProjects } from '../project-open-store'
 import { getSortOrder, setSortOrder, sortWorkspaces, type WorkspaceSortOrder } from '../workspace-sort'
 import { normalizeRename } from '../rename'
@@ -287,7 +288,11 @@ function ProjectRow({
   // section, so its Thread must not also appear here. This is the ONLY point that
   // renders a Thread list — for the active project and every peeked one alike — so
   // it is the only place the exclusion has to happen.
-  const { threads: threadRows } = partitionBots(rows)
+  const { threads: threadRows, bots: botRows } = partitionBots(rows)
+  // …and the same split answers what "Remove project" is about to destroy (#447):
+  // the rows are built from main's bot-marked metadata, for a peeked project as
+  // much as for the selected one, so the confirm can name them without a new prop.
+  const doomedBots = describeBotDestruction(botNamesInRows(botRows))
   // Split archived rows out (#133) then float pinned rows to the top of the active
   // list (#132) — both pure post-processing over the derived rows (deriveUnifiedThreads
   // stays flag-agnostic). Archived rows fold into a collapsible section at the bottom.
@@ -379,6 +384,13 @@ function ProjectRow({
             <DialogDescription>
               This removes the project from vibe-mistro. Files on disk will not be deleted.
             </DialogDescription>
+            {/* Destruction is honest (ADR-0027): a routine cleanup must not quietly
+                take teammates the user forgot lived here. Main deletes their
+                generated profile files with them (`cleanRemovedBots`); this is the
+                half that says so BEFORE the click. */}
+            {doomedBots && (
+              <p className="text-[13px] leading-relaxed text-destructive">{doomedBots}</p>
+            )}
           </DialogHeader>
           <DialogFooter>
             <DialogClose render={<Button variant="secondary" />}>Cancel</DialogClose>

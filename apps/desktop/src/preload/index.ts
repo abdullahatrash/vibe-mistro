@@ -58,6 +58,8 @@ import {
   type BotsDeleteArgs,
   type BotsDeleteResult,
   type BotsListResult,
+  type BotsStartOverArgs,
+  type BotsStartOverResult,
   type BotsProfileStatusArgs,
   type BotsRebuildProfileArgs,
   type BotsUpdateArgs,
@@ -172,6 +174,8 @@ const api = {
     ipcRenderer.invoke(IPC.botsUpdate, args),
   botsDelete: (args: BotsDeleteArgs): Promise<BotsDeleteResult> =>
     ipcRenderer.invoke(IPC.botsDelete, args),
+  botsStartOver: (args: BotsStartOverArgs): Promise<BotsStartOverResult> =>
+    ipcRenderer.invoke(IPC.botsStartOver, args),
   botsProfileStatus: (args: BotsProfileStatusArgs): Promise<BotProfileStatus> =>
     ipcRenderer.invoke(IPC.botsProfileStatus, args),
   botsRebuildProfile: (args: BotsRebuildProfileArgs): Promise<BotWriteResult> =>

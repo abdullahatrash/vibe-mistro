@@ -220,6 +220,42 @@ describe('SqliteBotStore cascades', () => {
   })
 })
 
+describe('deleting a Bot keeps its conversation (#447, ADR-0027)', () => {
+  it('drops the Bot row and ARCHIVES its Thread rather than deleting it', async () => {
+    // The real stores, not the lifecycle's fakes: the guarantee that matters is
+    // that weeks of irreplaceable history survive the loss of a teammate, and that
+    // is a property of the ROWS. `deleteBot` performs exactly these two writes.
+    const f = openFixture()
+    const ids = await seedThread(f)
+    insertBot(f, ids)
+
+    expect(f.bots.delete(ids.threadId)).toBe(true)
+    await f.meta.setThreadFlags(ids.threadId, { archived: true })
+
+    expect(f.bots.get(ids.threadId)).toBeNull()
+    const thread = f.meta.snapshot().threads.find((t) => t.id === ids.threadId)
+    expect(thread).toBeDefined()
+    expect(thread?.archived).toBe(true)
+  })
+})
+
+describe('"Start over" retires only the session cursor (#447)', () => {
+  it('clears session_id and leaves the Thread, its title and its Bot row intact', async () => {
+    const f = openFixture()
+    const ws = await f.meta.upsertWorkspace({ dir: '/proj/start-over' })
+    const thread = await f.meta.upsertThread({ workspaceId: ws.id, sessionId: 'sess-old' })
+    await f.meta.setThreadTitle(thread.id, 'Weeks of history')
+    insertBot(f, { workspaceId: ws.id, threadId: thread.id })
+
+    await f.meta.clearThreadSession(thread.id)
+
+    const after = f.meta.snapshot().threads.find((t) => t.id === thread.id)
+    expect(after?.sessionId).toBeNull()
+    expect(after?.title).toBe('Weeks of history')
+    expect(f.bots.get(thread.id)?.name).toBe('Rex')
+  })
+})
+
 describe('SqliteBotStore on a LOCKED database', () => {
   function lockedFixture(): Fixture {
     // A db written by a NEWER build: bump user_version past our latest, reopen.

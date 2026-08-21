@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef, useState, type JSX, type ReactNode } from 'react'
 import type {
   AuthMethod,
+  BotRecord,
   ListMetadataResult,
   StartThreadResult,
   ThreadAgentControls,
@@ -85,10 +86,14 @@ import {
   type SideThreadLifecycle,
 } from './side-panel/side-panel-store'
 import { deriveUnifiedThreads, workspaceFlags, type UnifiedThreadRow } from './shell/unified-threads'
-import { botBeingRead, deriveBotRows, type BotSidebarRow } from './bots/bot-rows'
+import { botBeingRead, deriveBotRows, markBotMeta, type BotSidebarRow } from './bots/bot-rows'
 import { getBotsSeen, markBotSeen } from './bots/bot-seen-store'
 import { useBots } from './bots/use-bots'
-import type { BotIdentity } from './bots/BotHeader'
+import type { BotHeaderActions, BotIdentity } from './bots/BotHeader'
+import { BotFormView } from './bots/BotFormView'
+import type { BotFormTarget } from './bots/bot-form'
+import { useBotLifecycle } from './bots/use-bot-lifecycle'
+import { conversationViewKey, initialConversationEpochs } from './bots/conversation-reset'
 import { EmptyState } from './shell/EmptyState'
 import { ColdOutlet, TransientOutlet } from './shell/Outlet'
 import { SettingsView } from './settings/SettingsView'
@@ -206,10 +211,21 @@ export function App(): JSX.Element {
   // the Threads in `recents`, not from these records — a record moves on an edit,
   // a conversation moves on a turn, and the sidebar answers "who did I speak to
   // most recently" (PRD story 5).
-  const { bots } = useBots()
+  const { bots, refreshBots } = useBots()
   // When each Bot was last OPENED — renderer-only UI state (localStorage), the one
   // input the unread dot needs that nothing else in the app tracks.
   const [botsSeen, setBotsSeen] = useState(() => getBotsSeen(window.localStorage))
+  // How many times each Thread's live view has been reset by a "Start over" — the
+  // key that remounts it, so it stops holding the retired session. See
+  // `bots/conversation-reset.ts`.
+  const [conversationEpochs, setConversationEpochs] = useState(initialConversationEpochs)
+  // The last refused Bot action, shown on that Bot's header until dismissed (#447
+  // review, D2): the confirm dialog closes on click, so this is the only place the
+  // user can learn that nothing happened. Keyed by Thread so it cannot leak onto a
+  // different Bot's header.
+  const [botActionError, setBotActionError] = useState<{ threadId: string; message: string } | null>(
+    null,
+  )
   // Restoration reconciliation must happen exactly once. Re-running it for live
   // state changes can race a just-bound Side Thread's metadata refresh or erase an
   // in-memory Draft (which intentionally has no metadata yet).
@@ -500,6 +516,22 @@ export function App(): JSX.Element {
     else void openProject()
   }
 
+  // The Mistro Bot lifecycle (#447): create / save / delete / Start over, behind
+  // the same kind of seam as `useWorkspaceActions` — each one reconciles several
+  // stores in a specific order, and Start over's order is load-bearing enough to
+  // be worth a test (`bots/use-bot-lifecycle.test.ts`).
+  const botLifecycle = useBotLifecycle({
+    connections,
+    navDispatch,
+    wtDispatch,
+    setConversationEpochs,
+    refreshBots,
+    refreshRecents,
+    selectThreadInWorkspace,
+    continueColdThread,
+    setActionError: setBotActionError,
+  })
+
   useEffect(() => {
     void runDetect()
     void refreshRecents()
@@ -762,7 +794,7 @@ export function App(): JSX.Element {
       const wts = workspaceThreadStateFor(workspaceThreads, selectedWs)
       rows = deriveUnifiedThreads({
         cold,
-        live: liveMetasFor(conn, cold, wts),
+        live: liveMetasFor(conn, cold, wts, bots),
         liveThreadIds: wts?.live ?? new Set([conn.threadId]),
         statuses,
       })
@@ -811,6 +843,25 @@ export function App(): JSX.Element {
     }
   }
 
+  /**
+   * What the Bot header can DO (#447) — edit it, or start over. Assembled beside the
+   * identity and for the same reason: the conversation slice renders what it is
+   * handed and never reaches into the `bots` store itself.
+   */
+  function botActionsFor(bot: BotIdentity | null, workspaceId: string): BotHeaderActions | null {
+    if (!bot) return null
+    return {
+      onEdit: () => botLifecycle.openForm({ mode: 'edit', threadId: bot.threadId }),
+      onStartOver: () => void botLifecycle.startOver(bot, workspaceId),
+      // Main refuses a mid-turn Start over (it would strand the running turn); the
+      // button says so before the click rather than after it.
+      busy: statuses[bot.threadId]?.streaming === true,
+      // Only THIS Bot's refusal, so a message can never appear on the wrong header.
+      error: botActionError?.threadId === bot.threadId ? botActionError.message : null,
+      onDismissError: () => setBotActionError(null),
+    }
+  }
+
   /** The connected view for a Workspace (the controlled outlet). `busy` is the
    *  Workspace's rolled-up streaming flag (#86) — threaded to the Changes panel so the
    *  commit affordance is disabled while a turn is in flight (the v1 guard). Sign-out now
@@ -820,7 +871,7 @@ export function App(): JSX.Element {
     const cold = threadsForWorkspace(recents, conn.workspaceId)
     const activeId = wts?.active ?? conn.threadId
     const activeThread =
-      [...liveMetasFor(conn, cold, wts), ...cold].find((t) => t.id === activeId) ?? synthConnectionMeta(conn)
+      [...liveMetasFor(conn, cold, wts, bots), ...cold].find((t) => t.id === activeId) ?? synthConnectionMeta(conn)
     // Route + seed via the same pure helpers the cold list uses: live-set membership
     // decides live-vs-cold; a session bound this session wins over the persisted cursor.
     const liveIds = wts?.live ?? new Set([conn.threadId])
@@ -931,6 +982,10 @@ export function App(): JSX.Element {
         connection={conn}
         activeThread={activeThread}
         activeBot={botIdentityFor(activeThread.id)}
+        activeBotActions={botActionsFor(botIdentityFor(activeThread.id), conn.workspaceId)}
+        // Normally the Thread id; changed once by a "Start over" so the live view
+        // remounts and drops the session it is holding (#447).
+        conversationKey={conversationViewKey(activeThread.id, conversationEpochs)}
         isLive={isLive}
         isActive={isActive}
         busy={busy}
@@ -979,7 +1034,19 @@ export function App(): JSX.Element {
   // The Skills browser (#259): a sibling routed outlet view, same keep-mounted
   // contract as Settings — connected Workspaces hide (not unmount) beneath it.
   const inSkills = nav.view === 'skills'
-  const overlayView = inSettings || inSkills
+  // The Bot create/edit form (#447): a third routed outlet view under the SAME
+  // keep-mounted contract — a Bot's conversation (or any other Workspace's turn)
+  // keeps streaming underneath while its form is on screen, and Cancel returns to
+  // exactly what was there. Not a Bots browsing view: no list, nothing to browse.
+  //
+  // An EDIT whose Bot no longer exists is not a form at all. A history entry can
+  // outlive its Bot (Edit → Delete → Back), and rendering it would show an empty
+  // "New Bot" offering to create one — a back arrow that proposes replacing the
+  // teammate you just deleted (#447 review, D1). Falling through leaves the
+  // conversation on screen, which is where Delete already landed the user.
+  const botFormTarget = resolveBotFormTarget(nav.botForm ?? null, bots)
+  const inBotForm = nav.view === 'bot-form' && botFormTarget !== null
+  const overlayView = inSettings || inSkills || inBotForm
   // Persistent missing-CLI banner (visibility is the pure `installBannerMessage`):
   // spans the shell under the window chrome so a selected Workspace / open Thread
   // still surfaces the missing toolchain; suppressed where the fuller guidance is
@@ -1036,6 +1103,26 @@ export function App(): JSX.Element {
             navDispatch({ type: 'close-settings' })
           }}
         />
+        </div>
+      ) : inBotForm && botFormTarget ? (
+        <div className="p-6">
+          <BotFormView
+            // Keyed by the WHOLE target so switching from create to edit, between
+            // two Bots, or between two Projects starts a fresh form rather than
+            // leaving a mounted one seeded from the target it opened with.
+            key={
+              botFormTarget.mode === 'edit'
+                ? `edit:${botFormTarget.threadId}`
+                : `create:${botFormTarget.workspaceId ?? ''}`
+            }
+            target={botFormTarget}
+            bots={bots}
+            workspaces={recents}
+            onCreate={botLifecycle.createBot}
+            onSave={botLifecycle.saveBot}
+            onDelete={botLifecycle.deleteBot}
+            onClose={() => navDispatch({ type: 'close-bot-form' })}
+          />
         </div>
       ) : inSkills ? (
         <div className="p-6">
@@ -1218,6 +1305,11 @@ export function App(): JSX.Element {
         onOpenProject={() => void openProject()}
         onNewThread={startNewChat}
         onSelectBot={selectBot}
+        // The section's ＋ (and its empty-state CTA) — the create affordance that
+        // works in EVERY state, including with a Bot conversation open (#447).
+        onCreateBot={() =>
+          botLifecycle.openForm({ mode: 'create', workspaceId: nav.selectedWorkspaceId })
+        }
         actions={{
           selectThread: selectThreadInWorkspace,
           newThreadInWorkspace,
@@ -1251,6 +1343,7 @@ function liveMetasFor(
   conn: ThreadConnection,
   cold: ThreadMeta[],
   wts: WorkspaceThreadState | null,
+  bots: readonly BotRecord[],
 ): ThreadMeta[] {
   const byId = new Map(cold.map((t) => [t.id, t]))
   const ids = wts ? wts.live : new Set([conn.threadId])
@@ -1269,7 +1362,27 @@ function liveMetasFor(
         lastActiveAt: 0,
       })
   }
-  return metas
+  // Every meta main lists carries the Bot mark; the two synthesized above do not,
+  // and an unmarked Bot is one `partitionBots` cannot drop from the Thread list
+  // (#447 — see `markBotMeta`). A cold meta is returned untouched.
+  return metas.map((meta) => markBotMeta(meta, bots))
+}
+
+/**
+ * The Bot form target to actually RENDER, or null (#447 review, D1).
+ *
+ * A create target always resolves — the form picks its Project. An edit target has
+ * to name a Bot that still exists: nav history can carry one whose record has since
+ * been deleted, and a form that silently degrades from "Edit Rex" to "New Bot" is
+ * the back arrow offering to replace the teammate you just removed.
+ */
+function resolveBotFormTarget(
+  target: BotFormTarget | null,
+  bots: readonly BotRecord[],
+): BotFormTarget | null {
+  if (!target) return null
+  if (target.mode === 'create') return target
+  return bots.some((bot) => bot.threadId === target.threadId) ? target : null
 }
 
 /** Synthesize the connection's auto-opened Thread meta (when the list lags). */

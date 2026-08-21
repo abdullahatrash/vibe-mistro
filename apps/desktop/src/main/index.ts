@@ -982,7 +982,17 @@ function registerIpc(deps: MainDeps): void {
   })
   registerFilesIpc({ pool, cache: filesListCache })
   registerSkillsIpc()
-  registerBotsIpc({ bots: deps.bots, threads: deps.store, discoverModes })
+  registerBotsIpc({
+    bots: deps.bots,
+    threads: deps.store,
+    // The open-path persona check's only evidence (#448).
+    discoverModes,
+    // "Start over" (#447) retires a live session, so it needs the same two live
+    // seams the delete path uses: the authoritative streaming guard and the warm
+    // agent that hosts the session being left behind.
+    isStreaming: (threadId) => threadStatus.statusFor(threadId).streaming,
+    closeThreadSession: (threadId) => bestEffortCloseFor(deps, threadId),
+  })
   // The same profile-file seam the Bot CRUD uses, reused by the Thread- and
   // Workspace-removal cleanup below so both paths refuse a foreign profile id
   // through exactly one gate (#445).

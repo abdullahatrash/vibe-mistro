@@ -5,6 +5,7 @@ import { BotMark } from './BotMark'
 import { LogoSnakeSpinner } from '../shell/logo-snake-spinner'
 import { formatRelativeTime } from '../shell/relative-time'
 import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
 import { IconButton } from '../ui/icon-button'
 import { cn } from '../lib/utils'
 
@@ -39,17 +40,19 @@ export function BotsSection({
   /** Open a Bot's conversation — App routes it through the ordinary Thread select. */
   onSelectBot: (row: BotSidebarRow) => void
   /**
-   * Open the create form. The section's ＋ is the create affordance that works in
-   * every state (the empty-state CTA only exists while there are no Bots), but the
-   * form itself is slice 3 (#447) — until it lands the ＋ is omitted rather than
-   * rendered inert, because a button that does nothing is worse than no button.
+   * Open the create form in the outlet (#447). The section's ＋ is the create
+   * affordance that works in EVERY state, and that is the load-bearing part: the
+   * empty-state CTA below exists only while there are no Bots, so without the ＋
+   * there would be no way to add a second one — a hole the prototype's capture spec
+   * caught rather than the eye.
+   *
+   * Still optional, because a surface that cannot create a Bot should render the
+   * section without a button that does nothing.
    */
   onCreateBot?: () => void
 }): JSX.Element | null {
   // Nothing to show and nothing to do: the section is absent rather than an empty
-  // block. Without the ＋ (slice 3) an empty section is a permanent, actionless
-  // header in EVERY existing user's sidebar — so it earns its space only once
-  // there are Bots, or once there is a way to make one.
+  // block — a permanent, actionless header in the sidebar earns no space.
   if (rows.length === 0 && !onCreateBot) return null
 
   // ONE Date.now() per render, injected into the pure formatter at each call site.
@@ -66,9 +69,19 @@ export function BotsSection({
       </div>
 
       {rows.length === 0 ? (
-        <p className="px-3 py-1 text-[13px] leading-relaxed text-muted-foreground">
-          No Bots yet. A Bot keeps one running conversation about one project.
-        </p>
+        // The empty state, with something to do (#447). It says what a Bot IS —
+        // the word alone means nothing on first sight — and offers the one action.
+        <div className="flex flex-col items-start gap-1.5 px-3 py-1">
+          <p className="text-[13px] leading-relaxed text-muted-foreground">
+            No Bots yet. A Bot keeps one running conversation about one project.
+          </p>
+          {onCreateBot && (
+            <Button variant="ghost" size="sm" className="-ml-2" onClick={onCreateBot}>
+              <Plus className="size-3.5" aria-hidden />
+              Create a Bot
+            </Button>
+          )}
+        </div>
       ) : (
         <ul
           // The bound itself. `overflow-y-auto` on the LIST (not the section) keeps

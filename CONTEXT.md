@@ -36,6 +36,16 @@ Project. Its behaviour — Model, Mode, reasoning effort — comes from its prof
 editing the Bot, never by a per-Thread control (ADR-0027).
 _Avoid_: bot mode (**Mode** is the approval posture), agent (that's the `vibe-acp` child process),
 assistant, persona (a Bot is the conversation, not a reusable configuration — see #379 for presets).
+Its Project is chosen once, at creation, and never changes (ADR-0027 consequences).
+
+**Start over** (a Mistro Bot action):
+Retire a Bot's **ACP session** so its next prompt binds a fresh one. It is a pressure valve for a
+conversation that has gone bad, and it destroys nothing: the Bot keeps its name, colour, description
+and instructions, both generated profile files are untouched, and the whole transcript stays
+readable — only the agent's memory of it goes. Refused mid-turn (#447).
+_Avoid_: reset the Bot / clear history / wipe (nothing is cleared and no history is lost — say what
+goes: the agent stops remembering the conversation above), new thread (a Bot is ONE Thread; starting
+over keeps it).
 
 **ACP session**:
 The protocol-level handle returned by `session/new` and addressed by `session/*` methods. Lives only

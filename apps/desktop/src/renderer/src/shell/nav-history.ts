@@ -1,4 +1,10 @@
-import { initialNavState, navReducer, type NavAction, type NavState } from './nav-reducer'
+import {
+  initialNavState,
+  navReducer,
+  sameBotFormTarget,
+  type NavAction,
+  type NavState,
+} from './nav-reducer'
 
 /**
  * Browser-style back/forward over shell navigation: a pure history wrapper around
@@ -95,6 +101,9 @@ function areNavStatesEqual(a: NavState, b: NavState): boolean {
   return (
     a.selectedWorkspaceId === b.selectedWorkspaceId &&
     a.selectedThreadId === b.selectedThreadId &&
-    a.view === b.view
+    a.view === b.view &&
+    // The form's target is part of "what am I looking at" (#447): two `bot-form`
+    // entries editing different Bots are different places.
+    sameBotFormTarget(a.botForm ?? null, b.botForm ?? null)
   )
 }

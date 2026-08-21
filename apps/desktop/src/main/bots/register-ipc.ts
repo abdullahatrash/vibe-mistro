@@ -10,6 +10,8 @@ import {
   type BotsListResult,
   type BotsProfileStatusArgs,
   type BotsRebuildProfileArgs,
+  type BotsStartOverArgs,
+  type BotsStartOverResult,
   type BotsUpdateArgs,
   type BotWriteResult,
 } from '../../shared/ipc'
@@ -26,6 +28,7 @@ import {
   updateBot,
   type BotLifecycleDeps,
 } from './bot-lifecycle'
+import { startOverBot, type StartOverThreads } from './start-over'
 import { vibeProfileDirs } from './profile-dirs'
 import { nodeProfileFs } from './node-profile-fs'
 import { removeBotProfile, writeBotProfile, type BotProfileFs } from './write-bot-profile'
@@ -45,8 +48,12 @@ import { removeBotProfile, writeBotProfile, type BotProfileFs } from './write-bo
  */
 export interface BotsIpcDeps {
   bots: BotStoreApi
-  /** The Thread half: a Bot's conversation is an ordinary Thread record. */
-  threads: BotLifecycleDeps['threads']
+  /**
+   * The Thread half: a Bot's conversation is an ordinary Thread record. "Start
+   * over" (#447) reaches one step further — it clears the session cursor — so the
+   * store passed here has to serve both.
+   */
+  threads: BotLifecycleDeps['threads'] & StartOverThreads
   /** Overridable for tests; production uses the real `node:fs` binding. */
   fs?: BotProfileFs
 }
@@ -68,6 +75,20 @@ export interface BotsRegistrarDeps extends BotsIpcDeps {
    * the one legitimate "nothing to report".
    */
   discoverModes: (agentId: string) => Promise<ModeDiscovery | null>
+  /**
+   * Whether a turn is in flight on a Thread — main's `thread-status` registry,
+   * injected because it lives in `index.ts` beside the pool. Guards "Start over"
+   * (#447): retiring a session under a running turn would strand it.
+   */
+  isStreaming: (threadId: string) => boolean
+  /**
+   * Best-effort close of a Thread's live ACP session on the warm agent hosting it
+   * (`bestEffortCloseFor` in `index.ts`, which owns the pool). Returns undefined
+   * when there is nothing to close. Required for the same reason `discoverModes`
+   * is: optional wiring for a feature's only live seam is wiring that gets
+   * forgotten.
+   */
+  closeThreadSession: (threadId: string) => (() => Promise<void>) | undefined
 }
 
 /**
@@ -108,6 +129,24 @@ export function registerBotsIpc(deps: BotsRegistrarDeps): void {
   ipcMain.handle(
     IPC.botsDelete,
     (_event, args: BotsDeleteArgs): Promise<BotsDeleteResult> => deleteBot(lifecycle, args),
+  )
+
+  // "Start over" (#447): retire the session and keep everything else. The decision
+  // (and every refusal) is `start-over.ts`; this only resolves the live seams.
+  ipcMain.handle(
+    IPC.botsStartOver,
+    (_event, args: BotsStartOverArgs): Promise<BotsStartOverResult> =>
+      startOverBot(
+        {
+          bots: deps.bots,
+          threads: deps.threads,
+          isStreaming: deps.isStreaming,
+          // Resolved per call: which agent hosts the session (and whether one does
+          // at all) is live state, so it can only be read when the user asks.
+          closeSession: deps.closeThreadSession(args.threadId),
+        },
+        args,
+      ),
   )
 
   // The OPEN-path persona check (#448). Slice 2 decides the same question on a
