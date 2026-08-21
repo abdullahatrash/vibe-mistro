@@ -23,6 +23,7 @@ import { skillsChannels } from './skills'
 import { appUpdateChannels } from './app-update'
 import { themeChannels } from './theme'
 import { botsChannels } from './bots'
+import { routinesChannels } from './routines'
 
 /**
  * The one typed channel map. ONE exported object — the channel names are the wire
@@ -44,6 +45,7 @@ export const IPC = {
   ...appUpdateChannels,
   ...themeChannels,
   ...botsChannels,
+  ...routinesChannels,
 } as const
 
 export * from './core'
@@ -60,3 +62,4 @@ export * from './skills'
 export * from './app-update'
 export * from './theme'
 export * from './bots'
+export * from './routines'

@@ -65,6 +65,13 @@ import {
   type BotsUpdateArgs,
   type BotProfileStatus,
   type BotWriteResult,
+  type RoutinesCreateArgs,
+  type RoutinesDeleteArgs,
+  type RoutinesDeleteResult,
+  type RoutinesListArgs,
+  type RoutinesListResult,
+  type RoutinesUpdateArgs,
+  type RoutineWriteResult,
   type SkillsListArgs,
   type SkillsListResult,
   type SkillsReadArgs,
@@ -180,6 +187,14 @@ const api = {
     ipcRenderer.invoke(IPC.botsProfileStatus, args),
   botsRebuildProfile: (args: BotsRebuildProfileArgs): Promise<BotWriteResult> =>
     ipcRenderer.invoke(IPC.botsRebuildProfile, args),
+  routinesList: (args: RoutinesListArgs = {}): Promise<RoutinesListResult> =>
+    ipcRenderer.invoke(IPC.routinesList, args),
+  routinesCreate: (args: RoutinesCreateArgs): Promise<RoutineWriteResult> =>
+    ipcRenderer.invoke(IPC.routinesCreate, args),
+  routinesUpdate: (args: RoutinesUpdateArgs): Promise<RoutineWriteResult> =>
+    ipcRenderer.invoke(IPC.routinesUpdate, args),
+  routinesDelete: (args: RoutinesDeleteArgs): Promise<RoutinesDeleteResult> =>
+    ipcRenderer.invoke(IPC.routinesDelete, args),
   gitSubscribeStatus: (args: GitStatusSubscriptionArgs): Promise<void> =>
     ipcRenderer.invoke(IPC.gitSubscribeStatus, args),
   gitUnsubscribeStatus: (args: GitStatusSubscriptionArgs): Promise<void> =>

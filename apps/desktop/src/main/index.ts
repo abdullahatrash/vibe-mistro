@@ -118,6 +118,9 @@ import {
 import type { ModeDiscovery } from './acp/agent-controls'
 import { SqliteBotStore } from './persistence/sqlite-bot-store'
 import type { BotStoreApi } from './persistence/bot-store-api'
+import { registerRoutinesIpc } from './routines/register-ipc'
+import { SqliteRoutineStore } from './persistence/sqlite-routine-store'
+import type { RoutineStoreApi } from './persistence/routine-store-api'
 import { registerEditorsIpc } from './editors/register-ipc'
 import { createTerminalManager, registerTerminalIpc } from './terminal/register-ipc'
 import { registerBrowserIpc } from './browser/register-ipc'
@@ -444,6 +447,8 @@ interface MainDeps {
   attachments: AttachmentStore | null
   /** The Mistro Bot records (#445, ADR-0027), on the same state database. */
   bots: BotStoreApi
+  /** The Routine records (#467, ADR-0028), keyed to their Bot. */
+  routines: RoutineStoreApi
 }
 
 /**
@@ -993,6 +998,9 @@ function registerIpc(deps: MainDeps): void {
     isStreaming: (threadId) => threadStatus.statusFor(threadId).streaming,
     closeThreadSession: (threadId) => bestEffortCloseFor(deps, threadId),
   })
+  // Routine CRUD (#467). Read-only on the Bot store: a Routine can only ever be
+  // attached to a Bot, and nothing in this slice fires one.
+  registerRoutinesIpc({ routines: deps.routines, bots: deps.bots })
   // The same profile-file seam the Bot CRUD uses, reused by the Thread- and
   // Workspace-removal cleanup below so both paths refuse a foreign profile id
   // through exactly one gate (#445).
@@ -1608,7 +1616,10 @@ app.whenReady().then(async () => {
   // metadata and transcript stores — a Bot IS a Thread, so its row cascades
   // with the Thread and the Workspace and can never be left dangling.
   const bots = new SqliteBotStore({ stateDb })
-  const deps: MainDeps = { store, transcript, bridge, attachments, stateDb, bots }
+  // A Routine belongs to a Bot (#467, ADR-0028) and its row cascades with the Bot
+  // row, so it rides the same database for the same reason.
+  const routines = new SqliteRoutineStore({ stateDb })
+  const deps: MainDeps = { store, transcript, bridge, attachments, stateDb, bots, routines }
 
   // Daily rotating backup of state.sqlite (ADR-0019, #298) — scheduled off the
   // launch path, best-effort, and never on the non-durable memory fallback
