@@ -442,12 +442,9 @@ interface MainDeps {
 }
 
 /**
- * The cold Workspace/Thread snapshot, with Mistro Bot Threads FLAGGED (#446).
- *
- * The one expression behind BOTH `metadata:list` and `search:query`, which is
- * exactly why the Bot handling is a per-row mark and not a filter (ADR-0027):
- * whatever this returns, the sidebar and Search both see. The sidebar drops Bot
- * rows from its Thread list (`partitionBots`, renderer-side) and Search keeps them.
+ * The cold Workspace/Thread snapshot, with Mistro Bot Threads FLAGGED (#446) —
+ * the ONE expression behind both `metadata:list` and `search:query`, which is why
+ * the flag is a mark and not a filter. See `bots/mark-bot-threads.ts`.
  */
 function coldSnapshotWithBots(deps: MainDeps): ListMetadataResult {
   return markBotThreads(
@@ -1453,11 +1450,8 @@ function registerIpc(deps: MainDeps): void {
 
   ipcMain.handle(IPC.listMetadata, (): ListMetadataResult => {
     // The cold launch list (ADR-0005): persisted Workspaces + Threads from
-    // metadata alone — no agent spawned, no transcript loaded.
-    //
-    // Mistro Bot Threads are MARKED, never dropped (#446, ADR-0027): this
-    // expression is shared with `searchQuery` below, so a filter here would delete
-    // Bots from Search too. The sidebar does its own excluding from the flag.
+    // metadata alone — no agent spawned, no transcript loaded. Bot rows arrive
+    // MARKED, never dropped (#446 — see `bots/mark-bot-threads.ts`).
     return coldSnapshotWithBots(deps)
   })
 
@@ -1469,8 +1463,7 @@ function registerIpc(deps: MainDeps): void {
       // A NON-empty query also searches transcript prose via the FTS projection
       // (ADR-0019, #296) — the "measured slow" moment ADR-0005 deferred the
       // index for arrived with the epic.
-      // The SAME expression `listMetadata` serves — Bot rows marked and kept, so a
-      // Bot's conversation is findable here even though the sidebar hides it (#446).
+      // The SAME expression `listMetadata` serves, Bot rows included (#446).
       const snapshot = coldSnapshotWithBots(deps)
       let prose: Map<string, ProseEntry[]> | undefined
       const tokens = tokenizeQuery(args.query)

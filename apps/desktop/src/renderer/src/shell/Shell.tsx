@@ -72,7 +72,12 @@ export function Shell({
   nav: NavState
   /** Per-Workspace rolled-up live status, keyed by Workspace id (switcher badges). */
   workspaceFlags: Readonly<Record<string, WorkspaceFlags>>
-  /** The unified rows (cold + live) for the SELECTED Workspace — Bots already excluded. */
+  /**
+   * The unified rows (cold + live) for the SELECTED Workspace, exactly as App
+   * derived them — Mistro Bot rows INCLUDED. `WorkspaceNav` drops them per project
+   * (`partitionBots`) at the single point that renders a Thread list; anything new
+   * that reads these rows here must do the same.
+   */
   rows: UnifiedThreadRow[]
   /** The Bots, most-recently-active first, for the bounded section above Projects (#446). */
   botRows: BotSidebarRow[]

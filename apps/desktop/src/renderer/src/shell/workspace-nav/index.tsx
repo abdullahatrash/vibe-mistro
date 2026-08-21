@@ -283,12 +283,10 @@ function ProjectRow({
   // The "Remove project" confirmation dialog (Codex-style): a destructive, controlled
   // modal opened from this project's ⋯ menu. Confirming calls `actions.removeWorkspace`.
   const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false)
-  // Drop this project's Mistro Bots (#446) — a Bot has its own bounded sidebar
-  // section, so its Thread must not also appear here. This is the SIDEBAR half of
-  // "hidden from the Thread list, visible in Search": the exclusion lives here, on
-  // a per-row flag, and never in the store (which Search reads from the same
-  // expression). A deleted Bot loses the flag and correctly returns as an archived
-  // Thread below.
+  // Drop this project's Mistro Bots (#446): a Bot has its own bounded sidebar
+  // section, so its Thread must not also appear here. This is the ONLY point that
+  // renders a Thread list — for the active project and every peeked one alike — so
+  // it is the only place the exclusion has to happen.
   const { threads: threadRows } = partitionBots(rows)
   // Split archived rows out (#133) then float pinned rows to the top of the active
   // list (#132) — both pure post-processing over the derived rows (deriveUnifiedThreads

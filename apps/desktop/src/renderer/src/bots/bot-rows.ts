@@ -40,9 +40,15 @@ export type BotSeenMap = Readonly<Record<string, number>>
  *
  * We have no read receipts and inventing one would be dishonest, so "unread" is
  * defined from signals that already exist: the Bot has been active since the last
- * time the user opened it, or it is blocked on a permission (which needs you
+ * time the user WATCHED it, or it is blocked on a permission (which needs you
  * whether or not you have read it). The Bot currently on screen is never unread —
  * you are looking at it.
+ *
+ * "Watched" — not "opened" — is the load-bearing word, and it is what
+ * {@link botBeingRead} exists to keep true. Stamping only at open makes this rule
+ * compare against an input that is stale by construction: your own prompt and the
+ * reply both advance `lastActiveAt` AFTER the open, so every Bot you actually used
+ * would be dotted on the next launch and the dot would mean nothing.
  */
 export function isBotUnread(args: {
   lastActiveAt: number
@@ -53,6 +59,26 @@ export function isBotUnread(args: {
   if (args.selected) return false
   if (args.needsAttention) return true
   return args.lastActiveAt > (args.seenAt ?? 0)
+}
+
+/**
+ * The Bot whose "seen" time must be kept CURRENT: the selected one, because it is
+ * on screen and being read. Null when nothing is selected or the selection is an
+ * ordinary Thread.
+ *
+ * This is the whole stamping policy, stated once and purely, so the App effect
+ * that carries it out is a thin wrapper. Keying it off the SELECTION rather than
+ * off a click handler is what makes every route into a Bot count as reading it —
+ * the sidebar row, a ⌘K hit, and a back/forward history jump alike — and it is
+ * what lets the stamp be re-taken while the Bot stays on screen, so a turn read to
+ * the end is recorded as read.
+ */
+export function botBeingRead(
+  selectedThreadId: string | null,
+  bots: readonly BotRecord[],
+): string | null {
+  if (!selectedThreadId) return null
+  return bots.some((bot) => bot.threadId === selectedThreadId) ? selectedThreadId : null
 }
 
 /**

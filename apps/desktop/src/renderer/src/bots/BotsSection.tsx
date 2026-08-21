@@ -11,20 +11,14 @@ import { cn } from '../lib/utils'
 /**
  * The **Bots** section of the sidebar, above Projects (#446, ADR-0027 decision 4).
  *
- * Two things here are decided, prototyped and captured on `proto/422-bots-view`,
- * and neither is a style preference:
+ * **It is BOUNDED**, and that is not a style preference: the row list carries its
+ * own `max-height` and scrollbar, so Projects stays reachable at any Bot count.
+ * Unbounded, twenty Bots push Projects entirely off screen (prototyped and
+ * captured on `proto/422-bots-view` as `D-scale-20.png`), and a *collapsible*
+ * section does NOT fix it — expanded is its default, so the first twenty-Bot user
+ * meets exactly the broken state.
  *
- * 1. **It is BOUNDED.** The row list carries its own `max-height` and scrollbar, so
- *    Projects stays reachable at any Bot count. Unbounded, twenty Bots push Projects
- *    entirely off screen (captured as `D-scale-20.png`), and a *collapsible* section
- *    does NOT fix it — expanded is its default, so the first twenty-Bot user meets
- *    exactly the broken state.
- * 2. **A row carries mark + name + right-aligned last-active + unread dot, and
- *    nothing else.** Description, message count and project were tried and rejected:
- *    at sidebar width they truncate to noise. The timestamp is the whole identity
- *    answer — colour and name alone read as a bookmark list, "Rex · 1h" reads as a
- *    teammate.
- *
+ * What a row may carry is decided in `bot-rows.ts`, which is also what orders them.
  * Selecting a row swaps the outlet to that Bot's conversation, exactly as selecting
  * a Thread does. There is no Bots page and no fourth outlet view.
  */
@@ -51,7 +45,13 @@ export function BotsSection({
    * rendered inert, because a button that does nothing is worse than no button.
    */
   onCreateBot?: () => void
-}): JSX.Element {
+}): JSX.Element | null {
+  // Nothing to show and nothing to do: the section is absent rather than an empty
+  // block. Without the ＋ (slice 3) an empty section is a permanent, actionless
+  // header in EVERY existing user's sidebar — so it earns its space only once
+  // there are Bots, or once there is a way to make one.
+  if (rows.length === 0 && !onCreateBot) return null
+
   // ONE Date.now() per render, injected into the pure formatter at each call site.
   const nowMs = Date.now()
   return (

@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import type { BotRecord, ListMetadataResult } from '../../../shared/ipc'
 import type { ThreadStatusMap } from '../conversation/thread-status'
-import { deriveBotRows, isBotUnread } from './bot-rows'
+import { botBeingRead, deriveBotRows, isBotUnread } from './bot-rows'
+import { getBotsSeen, markBotSeen } from './bot-seen-store'
 
 function bot(name: string, threadId: string, updatedAt = 100): BotRecord {
   return {
@@ -135,6 +136,75 @@ describe('deriveBotRows — live flags', () => {
       selectedThreadId: null,
     })
     expect(rows[0]).toMatchObject({ streaming: false, needsAttention: false, unread: false })
+  })
+})
+
+describe('botBeingRead — the stamping policy', () => {
+  const bots = [bot('Rex', 't-rex'), bot('Ada', 't-ada')]
+
+  it('names the selected Bot, whose seen time must be kept current', () => {
+    expect(botBeingRead('t-rex', bots)).toBe('t-rex')
+  })
+
+  it('is null when the selection is an ordinary Thread', () => {
+    expect(botBeingRead('t-plain', bots)).toBeNull()
+  })
+
+  it('is null when nothing is selected', () => {
+    expect(botBeingRead(null, bots)).toBeNull()
+  })
+
+  it('is null before the Bot records have loaded', () => {
+    expect(botBeingRead('t-rex', [])).toBeNull()
+  })
+})
+
+describe('the relaunch case — a Bot you used must not be dotted on the next launch', () => {
+  function relaunchRow(args: { lastActiveAt: number; seenAt: number }): boolean {
+    // A relaunch: nothing is selected yet and the rows come from disk.
+    const rows = deriveBotRows({
+      bots: [bot('Rex', 't-rex')],
+      workspaces: workspaces([{ id: 't-rex', lastActiveAt: args.lastActiveAt }]),
+      statuses: noStatus,
+      seen: { 't-rex': args.seenAt },
+      selectedThreadId: null,
+    })
+    return rows[0]?.unread === true
+  }
+
+  it('is READ when the Bot was still on screen after its last activity', () => {
+    // Open at T0, prompt at T1 (which moves the Thread's lastActiveAt), read the
+    // reply — the turn settles at T2 while Rex is still selected, and App re-stamps
+    // then. Quit, relaunch: nothing new has happened, so there is no dot.
+    expect(relaunchRow({ lastActiveAt: 2_000, seenAt: 2_500 })).toBe(false)
+  })
+
+  it('is UNREAD when the last activity landed after you looked away', () => {
+    // The stamp is from the open; the turn finished while you were elsewhere.
+    expect(relaunchRow({ lastActiveAt: 2_000, seenAt: 1_000 })).toBe(true)
+  })
+
+  it('is UNREAD for a Bot that has never been opened', () => {
+    expect(relaunchRow({ lastActiveAt: 2_000, seenAt: 0 })).toBe(true)
+  })
+
+  it('stays READ across a second relaunch (the stamp is durable, not per-session)', () => {
+    const storage = new Map<string, string>()
+    const seenStore = {
+      getItem: (k: string) => storage.get(k) ?? null,
+      setItem: (k: string, v: string) => void storage.set(k, v),
+    }
+    // Session 1 stamps after the turn settled...
+    markBotSeen(seenStore, 't-rex', 2_500)
+    // ...session 2 reads it back and finds nothing new.
+    const rows = deriveBotRows({
+      bots: [bot('Rex', 't-rex')],
+      workspaces: workspaces([{ id: 't-rex', lastActiveAt: 2_000 }]),
+      statuses: noStatus,
+      seen: getBotsSeen(seenStore),
+      selectedThreadId: null,
+    })
+    expect(rows[0]?.unread).toBe(false)
   })
 })
 

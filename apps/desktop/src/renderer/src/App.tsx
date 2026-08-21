@@ -85,7 +85,7 @@ import {
   type SideThreadLifecycle,
 } from './side-panel/side-panel-store'
 import { deriveUnifiedThreads, workspaceFlags, type UnifiedThreadRow } from './shell/unified-threads'
-import { deriveBotRows, type BotSidebarRow } from './bots/bot-rows'
+import { botBeingRead, deriveBotRows, type BotSidebarRow } from './bots/bot-rows'
 import { getBotsSeen, markBotSeen } from './bots/bot-seen-store'
 import { useBots } from './bots/use-bots'
 import type { BotIdentity } from './bots/BotHeader'
@@ -346,12 +346,6 @@ export function App(): JSX.Element {
     }
     selectThreadInNavigation({ workspaceId, threadId })
     hostSelectedThread(workspaceId, threadId, promotion.view)
-    // Opening a Mistro Bot clears its unread dot (#446) — here rather than in the
-    // sidebar's handler, so a ⌘K hit on a Bot (PRD story 11) counts as reading it
-    // exactly as a click on its row does.
-    if (bots.some((bot) => bot.threadId === threadId)) {
-      setBotsSeen(markBotSeen(window.localStorage, threadId, Date.now()))
-    }
   }
 
   /**
@@ -576,6 +570,30 @@ export function App(): JSX.Element {
       void refreshRecents()
     })
   }, [])
+
+  // Keep the SELECTED Bot's "seen" stamp current (#446) — the input the sidebar's
+  // unread dot is derived from. The stamp is taken when a Bot becomes the selected
+  // Thread, again whenever its live status flips (a turn opening or settling while
+  // it is on screen), and once more as it stops being selected.
+  //
+  // Stamping ONLY at open is the bug this shape exists to avoid: your own prompt
+  // and the agent's reply both advance the Thread's `lastActiveAt` after the open,
+  // so on the next launch every Bot you had actually used would carry a dot that
+  // means "unread" about a conversation you read to the end. Re-stamping while it
+  // is watched is what makes the dot mean something.
+  //
+  // Keyed off the SELECTION, not off a click handler, so the sidebar row, a ⌘K hit
+  // and a back/forward jump all count as reading it. `markBotSeen` is monotonic, so
+  // a redundant stamp is harmless; the deps are primitives, so this cannot loop.
+  const readBotThreadId = botBeingRead(nav.selectedThreadId, bots)
+  const readBotStatus = readBotThreadId ? statuses[readBotThreadId] : undefined
+  useEffect(() => {
+    if (!readBotThreadId) return
+    const stamp = (): void =>
+      setBotsSeen(markBotSeen(window.localStorage, readBotThreadId, Date.now()))
+    stamp()
+    return stamp
+  }, [readBotThreadId, readBotStatus?.streaming, readBotStatus?.needsAttention])
 
   // Wire the replay-cache invalidation ONCE: any acp:event session-tagged to a
   // cached (unmounted) Thread means main teed to its transcript behind our back,

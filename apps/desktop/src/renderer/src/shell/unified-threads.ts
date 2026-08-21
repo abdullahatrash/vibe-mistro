@@ -99,17 +99,15 @@ export function partitionArchived(rows: UnifiedThreadRow[]): {
 /**
  * Split a Workspace's rows into the ones its Thread list SHOWS and the **Mistro
  * Bot** rows it does not (#446, ADR-0027) — the sidebar half of "hidden from the
- * Thread list, visible in Search". Sits beside `partitionArchived` deliberately:
- * both are per-row presentation splits applied over the same derived rows, and
- * this one is here — in the renderer, on a flag — rather than in the store,
- * because `listMetadata` and `searchQuery` share one snapshot expression in main.
- * Filtering there would delete Bots from Search too (PRD story 11).
+ * Thread list, visible in Search", a Bot having its own bounded section instead.
  *
- * A Bot appears in its own bounded sidebar section instead. Both halves preserve
- * the incoming order; pure (the input array is never mutated).
+ * It sits beside `partitionArchived` deliberately: both are per-row presentation
+ * splits over the same derived rows. That the exclusion belongs HERE, on a flag,
+ * rather than in main's store is argued once at `main/bots/mark-bot-threads.ts`.
  *
- * Note that a DELETED Bot's Thread survives as an archived Thread whose record is
- * gone — so it loses this flag and correctly reappears in the Archived section.
+ * Both halves preserve the incoming order; pure (the input is never mutated).
+ * A DELETED Bot's Thread survives as an archived Thread whose record is gone — so
+ * it loses the flag and correctly reappears in the Archived section.
  */
 export function partitionBots(rows: UnifiedThreadRow[]): {
   threads: UnifiedThreadRow[]

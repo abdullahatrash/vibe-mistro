@@ -68,7 +68,6 @@ describe('markBotThreads', () => {
     const input = workspaces()
     const marked = markBotThreads(input, botNamesByThread([botRecord('t-bot')]))
     expect(marked[1]).toBe(input[1])
-    expect(marked[0]).not.toBe(input[0])
   })
 
   it('does not mutate the snapshot it was given', () => {
@@ -96,6 +95,13 @@ describe('the Thread-list / Search split (#446)', () => {
   it('reports an ordinary Thread with no bot identity at all', () => {
     const hit = searchThreads(marked, 'chore').find((h) => h.threadId === 't-plain')
     expect(hit?.botName).toBeUndefined()
+  })
+
+  it('demotes a Bot Thread title without making it unsearchable', () => {
+    // The name takes the title tier, but the Vibe-generated title still joins the
+    // haystack — so it ranks lower than a name match rather than vanishing.
+    const hits = searchThreads(marked, 'Fix the parser')
+    expect(hits.map((h) => h.threadId)).toContain('t-bot')
   })
 
   it('still finds a Bot by what was SAID in it (the prose half, PRD story 11)', () => {

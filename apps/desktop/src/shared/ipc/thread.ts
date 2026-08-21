@@ -371,12 +371,10 @@ export interface ThreadMeta {
    * reply by joining the `bots` table (`markBotThreads`), so the Bot record stays
    * the single source of truth.
    *
-   * It is a per-row FLAG, deliberately not a store-level filter, because
-   * `listMetadata` and `searchQuery` share one snapshot expression. Each side reads
-   * it differently: the sidebar's Thread list EXCLUDES these rows
-   * (`partitionBots` — a Bot has its own section), while Search KEEPS them and
-   * identifies them. Filtering in the store would delete Bots from Search too,
-   * which is exactly the hole PRD user story 11 exists to close.
+   * A per-row FLAG rather than a store-level filter, read differently by each side:
+   * the sidebar's Thread list excludes these rows (`partitionBots`), Search keeps
+   * and identifies them. The reason it cannot be a filter is written down once, at
+   * `main/bots/mark-bot-threads.ts`.
    *
    * It carries the Bot's `name` because Search is the ONLY place a Bot's
    * conversation can be found by text, and the Thread's own title is whatever Vibe

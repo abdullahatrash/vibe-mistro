@@ -85,10 +85,13 @@ export function searchThreads(
     for (const thread of workspace.threads) {
       const archived = thread.archived === true
       if (resting && archived) continue // switcher context — archived stays out
-      // A Mistro Bot is searched — and ranked — by its NAME, not by the title Vibe
-      // generated from its first prompt (#446): the name is what the user knows it
-      // as, and Search is the only place a Bot's conversation can be found by text.
+      // A Mistro Bot RANKS on its NAME rather than on the title Vibe generated from
+      // its first prompt (#446): the name is what the user knows it as, and Search
+      // is the only place a Bot's conversation can be found by text. The displaced
+      // title still joins the haystack below, so it is demoted, never made
+      // unsearchable.
       const foldedTitle = foldSearchText(thread.bot?.name ?? thread.title ?? '')
+      const foldedAlias = thread.bot ? foldSearchText(thread.title ?? '') : ''
       const prose = proseByThread?.get(thread.id) ?? []
       let strong: { entry: ProseEntry; count: number } | null = null
       if (!resting) {
@@ -101,7 +104,7 @@ export function searchThreads(
           else strong = { entry: prose[i] as ProseEntry, count: 1 }
         }
         if (!strong) {
-          const haystack = `${foldedTitle}\n${foldedWorkspace}\n${foldedProse.join('\n')}`
+          const haystack = `${foldedTitle}\n${foldedAlias}\n${foldedWorkspace}\n${foldedProse.join('\n')}`
           if (!tokens.every((token) => haystack.includes(token))) continue
         }
       }

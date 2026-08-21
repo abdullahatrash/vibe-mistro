@@ -1,5 +1,4 @@
-import type { ListMetadataResult, ThreadMeta } from '../../shared/ipc'
-import type { BotRecord } from '../../shared/ipc'
+import type { BotRecord, ListMetadataResult, ThreadMeta } from '../../shared/ipc'
 
 /**
  * Tag the Threads that are **Mistro Bot** conversations (#446, ADR-0027) with the
