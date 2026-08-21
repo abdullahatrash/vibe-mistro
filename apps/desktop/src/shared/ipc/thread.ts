@@ -86,6 +86,15 @@ export interface ThreadBoundEvent {
    * fallback state; the renderer surfaces a notice instead of failing silently.
    */
   controlFailures?: ThreadConfigAxis[]
+  /**
+   * A Mistro Bot's persona could NOT be selected on the session this bind produced
+   * (#446, ADR-0027): the profile the record names is not among the session's modes,
+   * or the validating `session/set_config_option` rejected it. Carries the
+   * human-readable reason, which the renderer weaves in as a system notice — a Bot
+   * that quietly answers as a plain agent is the one failure ADR-0027 forbids.
+   * Absent on every ordinary Thread and on a successful persona selection.
+   */
+  botProfileError?: string
 }
 
 /**
@@ -355,6 +364,26 @@ export interface ThreadMeta {
    * via `setThreadFlags`; split out by `partitionArchived`.
    */
   archived?: boolean
+  /**
+   * Present when this Thread is a **Mistro Bot**'s conversation (#446, ADR-0027) —
+   * one durable Thread that carries a teammate's identity and persona. Absent on
+   * every ordinary Thread, and NOT persisted on the Thread row: main derives it per
+   * reply by joining the `bots` table (`markBotThreads`), so the Bot record stays
+   * the single source of truth.
+   *
+   * It is a per-row FLAG, deliberately not a store-level filter, because
+   * `listMetadata` and `searchQuery` share one snapshot expression. Each side reads
+   * it differently: the sidebar's Thread list EXCLUDES these rows
+   * (`partitionBots` — a Bot has its own section), while Search KEEPS them and
+   * identifies them. Filtering in the store would delete Bots from Search too,
+   * which is exactly the hole PRD user story 11 exists to close.
+   *
+   * It carries the Bot's `name` because Search is the ONLY place a Bot's
+   * conversation can be found by text, and the Thread's own title is whatever Vibe
+   * auto-generated from the first prompt — so without the name, searching for the
+   * teammate you are looking for would miss it (PRD story 12).
+   */
+  bot?: { name: string }
 }
 
 /** A Workspace with its Threads nested, both most-recent-first — the cold list. */

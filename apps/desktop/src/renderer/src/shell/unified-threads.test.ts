@@ -4,6 +4,7 @@ import {
   isThreadDeletable,
   orderByPin,
   partitionArchived,
+  partitionBots,
   workspaceFlags,
   type UnifiedThreadRow,
 } from './unified-threads'
@@ -195,6 +196,51 @@ describe('partitionArchived (#133 split, order-preserving)', () => {
 
   it('handles an empty list', () => {
     expect(partitionArchived([])).toEqual({ active: [], archived: [] })
+  })
+})
+
+describe('partitionBots (#446 — hidden from the Thread list, visible in Search)', () => {
+  function row(id: string, botName?: string): UnifiedThreadRow {
+    return {
+      thread: { ...thread(id), ...(botName ? { bot: { name: botName } } : {}) },
+      live: false,
+      streaming: false,
+      needsAttention: false,
+    }
+  }
+
+  it('keeps every ordinary Thread in the list when there are no Bots', () => {
+    const { threads, bots } = partitionBots([row('a'), row('b')])
+    expect(threads.map((r) => r.thread.id)).toEqual(['a', 'b'])
+    expect(bots).toEqual([])
+  })
+
+  it('EXCLUDES a Bot from the Thread list — it has its own sidebar section', () => {
+    const { threads, bots } = partitionBots([row('a'), row('rex', 'Rex'), row('c')])
+    expect(threads.map((r) => r.thread.id)).toEqual(['a', 'c'])
+    expect(bots.map((r) => r.thread.id)).toEqual(['rex'])
+  })
+
+  it('preserves the incoming order in both halves', () => {
+    const rows = [row('a', 'Ada'), row('b'), row('c', 'Rex'), row('d')]
+    const { threads, bots } = partitionBots(rows)
+    expect(threads.map((r) => r.thread.id)).toEqual(['b', 'd'])
+    expect(bots.map((r) => r.thread.id)).toEqual(['a', 'c'])
+  })
+
+  it('treats an absent flag as an ordinary Thread', () => {
+    const { threads } = partitionBots([row('a', undefined), row('b')])
+    expect(threads.map((r) => r.thread.id)).toEqual(['a', 'b'])
+  })
+
+  it('does not mutate its input', () => {
+    const rows = [row('a'), row('rex', 'Rex')]
+    partitionBots(rows)
+    expect(rows.map((r) => r.thread.id)).toEqual(['a', 'rex'])
+  })
+
+  it('handles an empty list', () => {
+    expect(partitionBots([])).toEqual({ threads: [], bots: [] })
   })
 })
 

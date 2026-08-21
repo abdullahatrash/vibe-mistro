@@ -17,6 +17,11 @@ import { buildSnippet, type ProseEntry } from './transcript-prose'
  * - An EMPTY query is the palette's resting state: recent Threads, ARCHIVED
  *   EXCLUDED (a switcher context, not a search). A non-empty query includes
  *   archived Threads — archived is exactly what scrolling can't find.
+ * - **Mistro Bots are included in both** (#446, ADR-0027). They are hidden from
+ *   the sidebar's Thread list, so Search is the only place their conversations can
+ *   be found; and the same "switcher context" argument that EXCLUDES archived
+ *   Threads from the resting recents ARGUES FOR including the things you switch to
+ *   most. Their rows carry `bot` so the palette can badge them.
  */
 
 /** Ranked-hit cap (top-N); the palette never pages. */
@@ -80,7 +85,10 @@ export function searchThreads(
     for (const thread of workspace.threads) {
       const archived = thread.archived === true
       if (resting && archived) continue // switcher context — archived stays out
-      const foldedTitle = foldSearchText(thread.title ?? '')
+      // A Mistro Bot is searched — and ranked — by its NAME, not by the title Vibe
+      // generated from its first prompt (#446): the name is what the user knows it
+      // as, and Search is the only place a Bot's conversation can be found by text.
+      const foldedTitle = foldSearchText(thread.bot?.name ?? thread.title ?? '')
       const prose = proseByThread?.get(thread.id) ?? []
       let strong: { entry: ProseEntry; count: number } | null = null
       if (!resting) {
@@ -104,6 +112,9 @@ export function searchThreads(
           workspaceName: workspace.displayName,
           title: thread.title,
           archived,
+          // A Mistro Bot (#446) stays fully searchable — it is only the SIDEBAR
+          // that hides it — so the identity is carried through, never filtered on.
+          ...(thread.bot ? { botName: thread.bot.name } : {}),
           lastActiveAt: thread.lastActiveAt,
           ...(strong
             ? {

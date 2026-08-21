@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
-import { MessageSquare } from 'lucide-react'
+import { Bot, MessageSquare } from 'lucide-react'
 import type { SearchHit } from '../../../shared/ipc'
 import { formatRelativeTime } from '../shell/relative-time'
 import { setPendingJump } from './jump-store'
@@ -78,7 +78,7 @@ export function SearchPalette({
         <Command
           aria-label="Search threads"
           items={hits}
-          itemToStringValue={(hit: SearchHit) => hit.title ?? 'Untitled'}
+          itemToStringValue={(hit: SearchHit) => hit.botName ?? hit.title ?? 'Untitled'}
           value={query}
           onValueChange={setQuery}
         >
@@ -96,10 +96,25 @@ export function SearchPalette({
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => selectHit(hit)}
                 >
-                  <MessageSquare className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  {/* A Mistro Bot's conversation is hidden from the sidebar's Thread
+                      list, so the palette is where it is found (#446) — and in the
+                      resting recents, it is one of the things switched to most. The
+                      marker is what tells the two kinds of row apart at a glance. */}
+                  {hit.botName ? (
+                    <Bot className="size-4 shrink-0 text-primary" aria-label="Bot" />
+                  ) : (
+                    <MessageSquare className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                  )}
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="flex min-w-0 items-center gap-1.5">
-                      <span className="truncate text-foreground">{hit.title ?? 'Untitled'}</span>
+                      <span className="truncate text-foreground">
+                        {hit.botName ?? hit.title ?? 'Untitled'}
+                      </span>
+                      {hit.botName && (
+                        <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
+                          Bot
+                        </Badge>
+                      )}
                       {hit.archived && (
                         <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
                           Archived

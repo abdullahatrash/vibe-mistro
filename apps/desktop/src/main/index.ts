@@ -109,6 +109,8 @@ import { registerFilesIpc } from './files/register-ipc'
 import { registerSkillsIpc } from './skills/register-ipc'
 import { createBotLifecycleDeps, registerBotsIpc } from './bots/register-ipc'
 import { cleanRemovedBots } from './bots/clean-removed-bots'
+import { botNamesByThread, markBotThreads } from './bots/mark-bot-threads'
+import { applyBotProfile, planBotProfileSelection } from './bots/select-bot-profile'
 import { SqliteBotStore } from './persistence/sqlite-bot-store'
 import type { BotStoreApi } from './persistence/bot-store-api'
 import { registerEditorsIpc } from './editors/register-ipc'
@@ -120,6 +122,7 @@ import { clampWebviewAttachment } from './browser/webview-clamp'
 import { safeExternalUrl } from './files/safe-external-url'
 import { APP_DISPLAY_NAME, buildMenuTemplate } from './app-menu'
 import { applyPendingThreadControls } from './pending-thread-controls'
+import { controlsWithCurrentValue } from '../shared/thread-control-intent'
 import { resolveTheme, THEME_BACKGROUND } from './theme/resolve-theme'
 import {
   DEFAULT_THEME_PREFERENCE,
@@ -439,6 +442,21 @@ interface MainDeps {
 }
 
 /**
+ * The cold Workspace/Thread snapshot, with Mistro Bot Threads FLAGGED (#446).
+ *
+ * The one expression behind BOTH `metadata:list` and `search:query`, which is
+ * exactly why the Bot handling is a per-row mark and not a filter (ADR-0027):
+ * whatever this returns, the sidebar and Search both see. The sidebar drops Bot
+ * rows from its Thread list (`partitionBots`, renderer-side) and Search keeps them.
+ */
+function coldSnapshotWithBots(deps: MainDeps): ListMetadataResult {
+  return markBotThreads(
+    groupThreadsByWorkspace(deps.store.snapshot()),
+    botNamesByThread(deps.bots.list()),
+  )
+}
+
+/**
  * Push an eviction notice to every renderer (TB5 #50) so it drops the now-dead
  * agents' Workspace connections and re-warms them lazily on next select. Also
  * clears the agents' activity + transcript-bridge entries so neither can leak
@@ -697,6 +715,8 @@ async function runPromptTurn(
     const reportedControls = bound.controls
     let actualControls = reportedControls
     let controlFailures: ThreadConfigAxis[] = []
+    /** A Bot whose persona could not be selected on this session (#446) — surfaced below. */
+    let botProfileError: string | undefined
     if (reportedControls && args.controlIntent) {
       const applied = await applyPendingThreadControls(
         agent,
@@ -712,6 +732,31 @@ async function runPromptTurn(
       )
       actualControls = applied.controls
       controlFailures = applied.failedAxes
+    }
+    // A Mistro Bot's persona is a Vibe agent profile selected on the MODE axis
+    // (#446, ADR-0027), and it must be re-selected on EVERY bind: Mode does not
+    // survive `session/load` and ADR-0007's re-assert cache is in-memory, so a Bot
+    // reopened after a restart would otherwise answer as a nameless agent. It runs
+    // AFTER any pending control intent so the Bot's profile always wins the axis.
+    //
+    // `setMode` routes through the VALIDATING `session/set_config_option` (a bogus
+    // id is rejected with -32602), never `session/set_mode`, which answers a bad id
+    // with `{}` — a silent no-op indistinguishable from success (#427). A failure
+    // is reported, never swallowed: a Bot that quietly answers with no persona is
+    // the one failure ADR-0027 forbids.
+    const botProfileId = deps.bots.get(args.threadId)?.profileId ?? null
+    const profileOutcome = await applyBotProfile(
+      agent,
+      sessionId,
+      planBotProfileSelection(botProfileId, reportedControls),
+    )
+    if (profileOutcome.ok) {
+      if (profileOutcome.selected && actualControls) {
+        actualControls = controlsWithCurrentValue(actualControls, 'mode', profileOutcome.selected)
+      }
+    } else {
+      botProfileError = profileOutcome.message
+      console.error(`[vibe-mistro:bots] ${args.threadId}: ${profileOutcome.message}`)
     }
     // Tell the renderer this Thread is now bound after any validated pending Side
     // Draft controls have been awaited, and BEFORE `agent.prompt` streams below
@@ -737,6 +782,7 @@ async function runPromptTurn(
         rebound,
         controls: actualControls,
         controlFailures: controlFailures.length > 0 ? controlFailures : undefined,
+        botProfileError,
       })
     }
   } catch (err) {
@@ -1408,7 +1454,11 @@ function registerIpc(deps: MainDeps): void {
   ipcMain.handle(IPC.listMetadata, (): ListMetadataResult => {
     // The cold launch list (ADR-0005): persisted Workspaces + Threads from
     // metadata alone — no agent spawned, no transcript loaded.
-    return groupThreadsByWorkspace(deps.store.snapshot())
+    //
+    // Mistro Bot Threads are MARKED, never dropped (#446, ADR-0027): this
+    // expression is shared with `searchQuery` below, so a filter here would delete
+    // Bots from Search too. The sidebar does its own excluding from the flag.
+    return coldSnapshotWithBots(deps)
   })
 
   ipcMain.handle(
@@ -1419,7 +1469,9 @@ function registerIpc(deps: MainDeps): void {
       // A NON-empty query also searches transcript prose via the FTS projection
       // (ADR-0019, #296) — the "measured slow" moment ADR-0005 deferred the
       // index for arrived with the epic.
-      const snapshot = groupThreadsByWorkspace(deps.store.snapshot())
+      // The SAME expression `listMetadata` serves — Bot rows marked and kept, so a
+      // Bot's conversation is findable here even though the sidebar hides it (#446).
+      const snapshot = coldSnapshotWithBots(deps)
       let prose: Map<string, ProseEntry[]> | undefined
       const tokens = tokenizeQuery(args.query)
       if (tokens.length > 0 && !deps.stateDb.locked) {

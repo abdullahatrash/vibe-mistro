@@ -85,6 +85,10 @@ import {
   type SideThreadLifecycle,
 } from './side-panel/side-panel-store'
 import { deriveUnifiedThreads, workspaceFlags, type UnifiedThreadRow } from './shell/unified-threads'
+import { deriveBotRows, type BotSidebarRow } from './bots/bot-rows'
+import { getBotsSeen, markBotSeen } from './bots/bot-seen-store'
+import { useBots } from './bots/use-bots'
+import type { BotIdentity } from './bots/BotHeader'
 import { EmptyState } from './shell/EmptyState'
 import { ColdOutlet, TransientOutlet } from './shell/Outlet'
 import { SettingsView } from './settings/SettingsView'
@@ -198,6 +202,14 @@ export function App(): JSX.Element {
   // Persisted Workspaces + Threads (ADR-0005), listed cold on launch from
   // metadata alone — no agent spawned, no transcript loaded.
   const [recents, setRecents] = useState<ListMetadataResult>([])
+  // The Mistro Bot records (#446, ADR-0027). Their ORDER and timestamps come from
+  // the Threads in `recents`, not from these records — a record moves on an edit,
+  // a conversation moves on a turn, and the sidebar answers "who did I speak to
+  // most recently" (PRD story 5).
+  const { bots } = useBots()
+  // When each Bot was last OPENED — renderer-only UI state (localStorage), the one
+  // input the unread dot needs that nothing else in the app tracks.
+  const [botsSeen, setBotsSeen] = useState(() => getBotsSeen(window.localStorage))
   // Restoration reconciliation must happen exactly once. Re-running it for live
   // state changes can race a just-bound Side Thread's metadata refresh or erase an
   // in-memory Draft (which intentionally has no metadata yet).
@@ -334,6 +346,12 @@ export function App(): JSX.Element {
     }
     selectThreadInNavigation({ workspaceId, threadId })
     hostSelectedThread(workspaceId, threadId, promotion.view)
+    // Opening a Mistro Bot clears its unread dot (#446) — here rather than in the
+    // sidebar's handler, so a ⌘K hit on a Bot (PRD story 11) counts as reading it
+    // exactly as a click on its row does.
+    if (bots.some((bot) => bot.threadId === threadId)) {
+      setBotsSeen(markBotSeen(window.localStorage, threadId, Date.now()))
+    }
   }
 
   /**
@@ -736,6 +754,45 @@ export function App(): JSX.Element {
     }
   }
 
+  // The Bots section (#446): the records joined with their Threads' activity and
+  // live status. Bots do NOT appear in the Thread list — `partitionBots` drops them
+  // there — but they are still ordinary Threads underneath, which is why selecting
+  // one is just `selectThreadInWorkspace`.
+  const botRows = deriveBotRows({
+    bots,
+    workspaces: recents,
+    statuses,
+    seen: botsSeen,
+    selectedThreadId: nav.selectedThreadId,
+  })
+
+  /**
+   * Open a Bot from the sidebar section. It is the ORDINARY Thread-selection path —
+   * which connects its Workspace if needed, hosts the Thread, and replays its
+   * history — because a Bot's conversation IS an ordinary Thread conversation
+   * (ADR-0027). Nothing Bot-specific happens here.
+   */
+  function selectBot(row: BotSidebarRow): void {
+    selectThreadInWorkspace(row.workspaceId, row.bot.threadId)
+  }
+
+  /**
+   * Who a Thread is, when it is a Bot — the conversation header's source (#446).
+   * Null for every ordinary Thread, which is what keeps the Bot-ness out of the
+   * conversation slice: it renders an identity it was handed, it never looks one up.
+   */
+  function botIdentityFor(threadId: string): BotIdentity | null {
+    const bot = bots.find((b) => b.threadId === threadId)
+    if (!bot) return null
+    return {
+      threadId: bot.threadId,
+      name: bot.name,
+      colour: bot.colour,
+      description: bot.description,
+      projectName: recents.find((w) => w.id === bot.workspaceId)?.displayName ?? '',
+    }
+  }
+
   /** The connected view for a Workspace (the controlled outlet). `busy` is the
    *  Workspace's rolled-up streaming flag (#86) — threaded to the Changes panel so the
    *  commit affordance is disabled while a turn is in flight (the v1 guard). Sign-out now
@@ -855,6 +912,7 @@ export function App(): JSX.Element {
         key={conn.agentId}
         connection={conn}
         activeThread={activeThread}
+        activeBot={botIdentityFor(activeThread.id)}
         isLive={isLive}
         isActive={isActive}
         busy={busy}
@@ -1135,11 +1193,13 @@ export function App(): JSX.Element {
         nav={nav}
         workspaceFlags={wsFlags}
         rows={rows}
+        botRows={botRows}
         protectedThreadId={protectedThreadId}
         outlet={outlet}
         opening={opening}
         onOpenProject={() => void openProject()}
         onNewThread={startNewChat}
+        onSelectBot={selectBot}
         actions={{
           selectThread: selectThreadInWorkspace,
           newThreadInWorkspace,
