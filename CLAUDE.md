@@ -181,6 +181,12 @@ durable fold snapshot + fold only the entry tail → full fold through the same 
 - Log, don't swallow — surface failures to the renderer even when a flow is best-effort.
 - ACP param field names: verify against the live `vibe-acp` binary as each method is implemented;
   don't hardcode unverified shapes. Protocol reference: `docs/vibe-acp-protocol.md`, `docs/acp-capture.md`.
+- **This repository is PUBLIC, and `mistral-vibe` is not ours to reproduce.** Capture and document what
+  Vibe does on the **wire** — request/response shapes, error codes, observed behaviour — freely; that is
+  the contract we consume. Never paste Vibe's **implementation** into anything that leaves this machine:
+  no function bodies, no constant definitions, no internal file/line citations, in tracked files, issues,
+  PRs or comments. Describe the mechanism in your own words and say how to re-verify it against the
+  binary. This applies to subagents and probes too — say it in their prompt, because they cannot infer it.
 
 ## Reference docs
 
