@@ -9,7 +9,12 @@ import type {
 import type { BotStoreApi } from '../persistence/bot-store-api'
 import type { BotProfileSource } from './bot-profile'
 import type { WriteBotProfileResult } from './write-bot-profile'
-import { collectProblems, describeProblems, validateBotProfileSource } from './validate-bot-profile'
+import {
+  collectProblems,
+  describeProblems,
+  validateBotColour,
+  validateBotProfileSource,
+} from './validate-bot-profile'
 
 /**
  * Create / edit / delete a Mistro Bot (#445, ADR-0027) — the orchestration the
@@ -60,16 +65,25 @@ export async function createBot(
   deps: BotLifecycleDeps,
   args: BotsCreateArgs,
 ): Promise<BotWriteResult> {
+  // Only the fields `BotsCreateArgs` marks optional get a default — `name` and
+  // `colour` are required by the typed contract, so defending them here would be
+  // dead code that implies a runtime-defence posture the rest of the file
+  // doesn't share.
   const source: BotProfileSource = {
+    // Minting is pure and nothing consumes the id until step 2, so it is safe
+    // above the validation that reads it.
     profileId: deps.mintProfileId(),
-    name: args.name ?? '',
+    name: args.name,
     description: args.description ?? '',
     instructions: args.instructions ?? '',
   }
 
   // 1. Refuse a record that would produce a dud profile BEFORE anything is
-  //    minted or written — Vibe would accept it and silently ignore it (#424).
-  const invalid = describeProblems(collectProblems(validateBotProfileSource(source)))
+  //    WRITTEN or persisted — Vibe would accept it and silently ignore it (#424).
+  const invalid = describeProblems([
+    ...collectProblems(validateBotProfileSource(source)),
+    ...collectProblems(validateBotColour(args.colour)),
+  ])
   if (invalid.length) return { ok: false, reason: 'invalid', problems: invalid }
   if (!args.workspaceId) {
     return { ok: false, reason: 'invalid', problems: ['workspaceId: a Bot needs a Project.'] }
@@ -81,6 +95,10 @@ export async function createBot(
 
   // 3. The Thread, then the record. From here on a failure has to clean up the
   //    files it already wrote, or they would linger as a mode with no Bot.
+  //    ACCEPTED RESIDUE: the two writes are not one transaction, so a genuine
+  //    mid-sequence disk failure below leaves a stray untitled Thread in the
+  //    Project. Harmless (an ordinary empty Thread, deletable) and preferable to
+  //    a second speculative delete on an already-failing disk.
   let threadId: string
   try {
     threadId = (await deps.threads.upsertThread({ workspaceId: args.workspaceId })).id
@@ -124,12 +142,22 @@ export async function updateBot(
     description: args.description ?? existing.description,
     instructions: args.instructions ?? existing.instructions,
   }
-  const invalid = describeProblems(collectProblems(validateBotProfileSource(source)))
+  const invalid = describeProblems([
+    ...collectProblems(validateBotProfileSource(source)),
+    ...(args.colour === undefined ? [] : collectProblems(validateBotColour(args.colour))),
+  ])
   if (invalid.length) return { ok: false, reason: 'invalid', problems: invalid }
 
   // Files first again: if the rewrite fails the record still describes what is
   // actually on disk, so the Bot keeps the persona it had rather than claiming
   // a new one it never got.
+  //
+  // The other direction is the accepted cost of that choice: if the rewrite
+  // succeeds and the row update then fails, the files are AHEAD of the record —
+  // the Bot behaves as edited while the row still describes the old persona.
+  // That is the lesser evil (a record claiming a persona that was never written
+  // is worse), it is reported as `io` rather than swallowed, and slice 4's
+  // rebuild-from-record heals it.
   const written = await deps.profiles.write(source)
   if (!written.ok) return { ok: false, reason: profileFailureReason(written), problems: written.problems }
 

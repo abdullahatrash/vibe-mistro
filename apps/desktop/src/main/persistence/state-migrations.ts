@@ -154,7 +154,7 @@ export const STATE_MIGRATIONS: readonly Migration[] = [
       // `profile_id` is the durable half of the persona (`mistro-bot-<uuid>`):
       // Mode does not survive `session/load` and the re-assert cache is
       // in-memory by design, so without this column a Bot reopened after a
-      // restart is a nameless agent. UNIQUE because it names two files on disk.
+      // restart is a nameless Thread. UNIQUE because it names two files on disk.
       db.exec(`
         CREATE TABLE bots (
           thread_id    TEXT PRIMARY KEY REFERENCES threads(id) ON DELETE CASCADE,

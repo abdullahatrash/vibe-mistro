@@ -58,16 +58,26 @@ describe('deleteThread (TB6 #35)', () => {
     // onClick has no .catch — mirrors recordWorkspaceOpen's guard).
     store.deleteThread.mockRejectedValue(new Error('EROFS: read-only file system'))
 
-    await expect(deleteThread({ threadId: 't4', store, transcript })).resolves.toBeUndefined()
+    // REPORTED as "nothing removed" (#445): the caller cleans cascaded data —
+    // a Bot's profile files — by these ids, and on this path the `threads` row
+    // survived, so the `bots` row did NOT cascade. Destroying the files here
+    // would leave a Bot whose persona is silently gone from disk.
+    await expect(deleteThread({ threadId: 't4', store, transcript })).resolves.toEqual([])
     // The transcript removal is still attempted despite the store failure.
     expect(transcript.delete).toHaveBeenCalledWith('t4')
+  })
+
+  it('reports the removed Thread id when the record actually came down', async () => {
+    const { store, transcript } = fakes()
+
+    await expect(deleteThread({ threadId: 't4b', store, transcript })).resolves.toEqual(['t4b'])
   })
 
   it('RESOLVES even when the transcript removal rejects (best-effort)', async () => {
     const { store, transcript } = fakes()
     transcript.delete.mockRejectedValue(new Error('EACCES: permission denied'))
 
-    await expect(deleteThread({ threadId: 't5', store, transcript })).resolves.toBeUndefined()
+    await expect(deleteThread({ threadId: 't5', store, transcript })).resolves.toEqual(['t5'])
     expect(store.deleteThread).toHaveBeenCalledWith('t5')
   })
 
@@ -90,7 +100,7 @@ describe('deleteThread (TB6 #35)', () => {
 
     await expect(
       deleteThread({ threadId: 't7', store, transcript, attachments }),
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual(['t7'])
     expect(store.deleteThread).toHaveBeenCalledWith('t7')
     expect(transcript.delete).toHaveBeenCalledWith('t7')
   })
@@ -104,7 +114,7 @@ describe('deleteThread (TB6 #35)', () => {
     // A close failure must not propagate, and must not block record removal.
     await expect(
       deleteThread({ threadId: 't3', store, transcript, closeSession }),
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual(['t3'])
     expect(store.deleteThread).toHaveBeenCalledWith('t3')
     expect(transcript.delete).toHaveBeenCalledWith('t3')
   })

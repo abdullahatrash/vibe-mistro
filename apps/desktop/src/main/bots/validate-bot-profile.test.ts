@@ -1,11 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import { projectBotProfile, type BotProfileFiles, type BotProfileSource } from './bot-profile'
 import {
+  BOT_COLOUR_MAX_LENGTH,
   BOT_DESCRIPTION_MAX_LENGTH,
   BOT_INSTRUCTIONS_MAX_LENGTH,
   BOT_NAME_MAX_LENGTH,
   collectProblems,
   describeProblems,
+  validateBotColour,
   validateBotProfile,
   validateBotProfileFiles,
   validateBotProfileSource,
@@ -166,3 +168,41 @@ describe('describeProblems', () => {
 function withToml(files: BotProfileFiles, mutate: (toml: string) => string): BotProfileFiles {
   return { ...files, agentToml: mutate(files.agentToml) }
 }
+
+describe('validateBotColour — the one field only we bound', () => {
+  it('accepts a hex colour in every length CSS allows', () => {
+    for (const colour of ['#fff', '#e8734a', '#e8734aff', '#ABC']) {
+      expect(validateBotColour(colour)).toEqual({ ok: true })
+    }
+  })
+
+  it('accepts a lowercase colour token', () => {
+    for (const colour of ['tomato', 'accent-orange', 'a']) {
+      expect(validateBotColour(colour)).toEqual({ ok: true })
+    }
+  })
+
+  it('rejects an absent colour', () => {
+    expect(collectProblems(validateBotColour('')).map((p) => p.field)).toEqual(['colour'])
+  })
+
+  it('rejects anything that could break out of a style attribute', () => {
+    for (const colour of [
+      'red; background: url(x)',
+      '"><script>',
+      'rgb(1,2,3)',
+      '#xyz',
+      '#12',
+      'Tomato',
+      'url(evil)',
+    ]) {
+      expect(collectProblems(validateBotColour(colour)).map((p) => p.field)).toEqual(['colour'])
+    }
+  })
+
+  it('rejects an unbounded value', () => {
+    expect(
+      collectProblems(validateBotColour('a'.repeat(BOT_COLOUR_MAX_LENGTH + 1))).map((p) => p.field),
+    ).toEqual(['colour'])
+  })
+})

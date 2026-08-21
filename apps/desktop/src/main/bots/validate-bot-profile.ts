@@ -59,6 +59,51 @@ export const BOT_NAME_MAX_LENGTH = 60
 export const BOT_DESCRIPTION_MAX_LENGTH = 200
 /** The persona proper. Generous — it is the whole personality — but not unbounded. */
 export const BOT_INSTRUCTIONS_MAX_LENGTH = 100_000
+/** A hex colour or a short token name; nothing legitimate needs more. */
+export const BOT_COLOUR_MAX_LENGTH = 32
+
+/** `#abc` … `#aabbccdd`. */
+const BOT_COLOUR_HEX = /^#[0-9a-fA-F]{3,8}$/
+/** A design-token / CSS colour keyword: `accent-orange`, `tomato`. */
+const BOT_COLOUR_TOKEN = /^[a-z][a-z0-9-]*$/
+
+/**
+ * Validate the Bot's `colour` — the one field of the record that is purely OURS.
+ * It never reaches Vibe, so neither profile layer above sees it; it goes into a
+ * `NOT NULL` column and, from slice 3, into the sidebar mark's style. In a
+ * module whose whole thesis is "we validate because nobody else will", leaving
+ * the one field we fully own unbounded would be the odd one out. Bounded to a
+ * hex colour or a lowercase token name, so it can never carry markup, break out
+ * of a CSS declaration, or arrive as unbounded text.
+ *
+ * Kept separate from `validateBotProfileSource` because it is not part of the
+ * profile projection at all — the split follows what the value is for.
+ */
+export function validateBotColour(colour: string): BotProfileValidation {
+  if (typeof colour !== 'string' || !colour) {
+    return { ok: false, problems: [{ field: 'colour', message: 'A Bot needs a colour.' }] }
+  }
+  if (colour.length > BOT_COLOUR_MAX_LENGTH) {
+    return {
+      ok: false,
+      problems: [
+        { field: 'colour', message: `A colour can be at most ${BOT_COLOUR_MAX_LENGTH} characters.` },
+      ],
+    }
+  }
+  if (!BOT_COLOUR_HEX.test(colour) && !BOT_COLOUR_TOKEN.test(colour)) {
+    return {
+      ok: false,
+      problems: [
+        {
+          field: 'colour',
+          message: `"${colour}" is not a hex colour (#rrggbb) or a colour token.`,
+        },
+      ],
+    }
+  }
+  return { ok: true }
+}
 
 /**
  * Validate the RECORD. An empty `instructions` is deliberately allowed: the

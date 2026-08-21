@@ -11,7 +11,13 @@
 
 /** The bots channel entries, merged into the single `IPC` const in `./index`. */
 export const botsChannels = {
-  /** List every Bot, newest-active first — see {@link BotsListResult}. */
+  /**
+   * List every Bot, most-recently-EDITED first — see {@link BotsListResult}.
+   * NOT conversation activity: this orders by the record's own `updatedAt`, which
+   * moves on a rename and never on a turn. The sidebar's "which Bot I spoke to
+   * most recently" (PRD user story 5) needs the Thread's `lastActiveAt` instead;
+   * slice 3 must join, not reuse this ordering.
+   */
   botsList: 'bots:list',
   /** Create a Bot: mint its Thread + profile id, write its profile, insert the record. */
   botsCreate: 'bots:create',
@@ -31,7 +37,7 @@ export const botsChannels = {
  * so changing it would break a running Bot), prefixed so it can never shadow a
  * Vibe builtin mode. It is DURABLE because Mode does not survive `session/load`
  * and ADR-0007's re-assert cache is in-memory by design — without persistence a
- * Bot reopened after a restart is a nameless agent with no persona.
+ * Bot reopened after a restart is a nameless Thread with no persona and no signal.
  */
 export interface BotRecord {
   /** The Bot's durable Thread — its identity and primary key. */
@@ -42,7 +48,11 @@ export interface BotRecord {
   profileId: string
   /** The teammate's name, shown in the sidebar and written as `display_name`. */
   name: string
-  /** The sidebar mark's colour, as authored by the user (e.g. `#e8734a`). */
+  /**
+   * The sidebar mark's colour: a hex colour (`#e8734a`) or a lowercase colour
+   * token. Validated in main (`validateBotColour`) — it never reaches Vibe, so
+   * it is the one field of the record only WE bound.
+   */
   colour: string
   /** One line about the Bot; becomes the profile's `description`. */
   description: string

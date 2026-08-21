@@ -35,7 +35,11 @@ export interface BotPatch {
 }
 
 export interface BotStoreApi {
-  /** Every Bot, most-recently-updated first. Empty on a locked database. */
+  /**
+   * Every Bot, most-recently-EDITED first (the record's own `updatedAt`). Not
+   * conversation activity — see `botsChannels.botsList`.
+   * Empty on a locked database.
+   */
   list(): BotRecord[]
   /** One Project's Bots. Read BEFORE removing a Workspace — the rows cascade away with it. */
   listByWorkspace(workspaceId: string): BotRecord[]

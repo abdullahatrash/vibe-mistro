@@ -1228,8 +1228,15 @@ function registerIpc(deps: MainDeps): void {
     // afterwards there is nothing left to look its profile id up in, and the two
     // generated files would be orphaned as a mode for a Bot that no longer exists
     // (#445, ADR-0027). Deleting a Bot proper goes through `bots:delete`.
+    // (On a LOCKED database `bots.get` presents null, so nothing is cleaned there.)
     const doomedBot = deps.bots.get(threadId)
-    await deleteThread({
+    // The ids `deleteThread` REPORTS, not the one we asked it to remove: the
+    // record removal is best-effort and swallowed, and on that path the Thread
+    // row survives, the Bot row does not cascade, and destroying its profile
+    // files would leave a Bot whose persona is silently gone from disk — the one
+    // failure ADR-0027 says must never be silent. Same shape as the Workspace
+    // path below.
+    const removedThreadIds = await deleteThread({
       threadId,
       store: deps.store,
       transcript: deps.transcript,
@@ -1239,7 +1246,7 @@ function registerIpc(deps: MainDeps): void {
     if (doomedBot) {
       await cleanRemovedBots({
         candidates: [doomedBot],
-        removedThreadIds: [threadId],
+        removedThreadIds,
         removeProfile: (profileId) => botProfiles.remove(profileId),
       })
     }

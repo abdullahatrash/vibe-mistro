@@ -130,7 +130,7 @@ describe('createBot', () => {
     if (result.ok) expect(result.bot.description).toBe('')
   })
 
-  it('refuses an invalid record BEFORE anything is written or minted', async () => {
+  it('refuses an invalid record BEFORE anything is written or persisted', async () => {
     const h = harness()
     const result = await createBot(h.deps, { workspaceId: 'ws-1', name: '   ', colour: '#fff' })
 
@@ -138,6 +138,20 @@ describe('createBot', () => {
     expect(h.written).toHaveLength(0)
     expect(h.threads.created).toHaveLength(0)
     expect(h.bots.list()).toHaveLength(0)
+  })
+
+  it('refuses an out-of-shape colour, the one field only we bound', async () => {
+    const h = harness()
+    const result = await createBot(h.deps, {
+      workspaceId: 'ws-1',
+      name: 'Rex',
+      colour: 'red; background: url(x)',
+    })
+
+    expect(result).toMatchObject({ ok: false, reason: 'invalid' })
+    expect(result.ok === false && result.problems.join(' ')).toContain('colour')
+    expect(h.written).toHaveLength(0)
+    expect(h.threads.created).toHaveLength(0)
   })
 
   it('refuses a Bot with no Project — a Bot cannot exist without one', async () => {
@@ -221,6 +235,15 @@ describe('updateBot', () => {
       description: 'Reviews my diffs',
       instructions: 'Now also read the tests.',
     })
+  })
+
+  it('refuses an out-of-shape colour on an edit, leaving the record untouched', async () => {
+    const h = harness()
+    const bot = await created(h)
+    const result = await updateBot(h.deps, { threadId: bot.threadId, colour: 'javascript:alert(1)' })
+
+    expect(result).toMatchObject({ ok: false, reason: 'invalid' })
+    expect(h.bots.get(bot.threadId)?.colour).toBe('#e8734a')
   })
 
   it('reports an unknown Bot as notFound', async () => {
