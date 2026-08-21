@@ -6,6 +6,8 @@ import {
   extractThreadControls,
   hasConfigOption,
   missingControlAxes,
+  readModeDiscovery,
+  type ModeDiscovery,
 } from './acp/agent-controls'
 import { AcpClient, type SpawnFn } from './acp/client'
 import { handleFsReadTextFile, type ReadTextFn } from './acp/fs-read'
@@ -155,6 +157,15 @@ export class WorkspaceAgent extends EventEmitter {
   private readonly sessionConfigIds = new Map<string, Set<string>>()
   /** Axes we have already warned are unadvertised — warn once per agent, not per session. */
   private readonly driftWarnedAxes = new Set<ThreadConfigAxis>()
+  /**
+   * The most recent reading of Vibe's agent-profile registry (#448): the mode ids
+   * the last `session/new` / `session/load` advertised, and when. This is the ONLY
+   * wire evidence that a Mistro Bot's profile still exists — a broken profile is
+   * dropped at scan with no error to catch (acp-capture §14.6) — so it is kept per
+   * agent rather than per session, and stays readable after the session is
+   * consumed or closed.
+   */
+  private modeDiscoveryValue: ModeDiscovery | null = null
   /** `agentInfo.version` from `initialize` (acp-capture §1) — for drift diagnostics. */
   private agentVersionValue: string | null = null
   /**
@@ -615,6 +626,16 @@ export class WorkspaceAgent extends EventEmitter {
   }
 
   /**
+   * The agent's latest agent-profile registry reading (#448) — the mode ids the
+   * last session result advertised, and when. Null until this agent has opened or
+   * loaded one session; a spawn that never got that far simply has nothing to say
+   * about a Bot's persona, which is exactly what `unknown` is for.
+   */
+  get modeDiscovery(): ModeDiscovery | null {
+    return this.modeDiscoveryValue
+  }
+
+  /**
    * Claim the unconsumed primary session for a Draft's FIRST prompt (ADR-0012 #2),
    * marking it consumed so a second concurrent Draft mints its own session instead.
    * Returns the primary `ThreadInfo` exactly once, then null (none open, or already
@@ -782,6 +803,9 @@ export class WorkspaceAgent extends EventEmitter {
    */
   private readControls(result: SessionNewResult, method: string): ThreadAgentControls {
     const controls = extractThreadControls(result)
+    // Every `session/new` and `session/load` result carries a FRESH registry scan
+    // (acp-capture §14.6), so this is the one place a reading is taken.
+    this.modeDiscoveryValue = readModeDiscovery(controls, Date.now()) ?? this.modeDiscoveryValue
     const advertised = new Set(
       [MODE_CONFIG_ID, MODEL_CONFIG_ID, REASONING_EFFORT_CONFIG_ID].filter((id) =>
         hasConfigOption(result.configOptions, id),

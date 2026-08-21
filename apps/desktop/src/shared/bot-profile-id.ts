@@ -16,6 +16,12 @@
  *   is FOREIGN — a hand-written profile the user owns — and we never read,
  *   rewrite or delete it. The prefix + uuid shape is a mechanical check, not a
  *   heuristic, so there is nothing to get wrong at the boundary.
+ *
+ * It lives in `shared/` (Node- and DOM-free, like `thread-control-intent.ts`)
+ * because BOTH sides ask the ownership question: main gates every profile-file
+ * read, write and delete on it, and the renderer uses it to keep Bot profiles out
+ * of ordinary Threads' Mode pickers (#448). One regex, two consumers — a second
+ * copy in the renderer is exactly the drift this shape exists to prevent.
  */
 
 /** The reserved prefix. Everything after it is a uuid. */

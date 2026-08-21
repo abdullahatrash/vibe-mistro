@@ -1,5 +1,5 @@
 import type { BotProfileFiles, BotProfileSource } from './bot-profile'
-import { isMistroBotProfileId } from './profile-id'
+import { isMistroBotProfileId } from '../../shared/bot-profile-id'
 
 /**
  * The validation Vibe will not do for us (#424, #445; ADR-0027).

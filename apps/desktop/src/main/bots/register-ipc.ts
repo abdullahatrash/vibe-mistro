@@ -3,17 +3,29 @@ import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import {
   IPC,
+  type BotProfileStatus,
   type BotsCreateArgs,
   type BotsDeleteArgs,
   type BotsDeleteResult,
   type BotsListResult,
+  type BotsProfileStatusArgs,
+  type BotsRebuildProfileArgs,
   type BotsUpdateArgs,
   type BotWriteResult,
 } from '../../shared/ipc'
+import { mintBotProfileId } from '../../shared/bot-profile-id'
+import type { ModeDiscovery } from '../acp/agent-controls'
 import type { BotStoreApi } from '../persistence/bot-store-api'
 import { getShellEnv } from '../shell-env'
-import { createBot, deleteBot, listBots, updateBot, type BotLifecycleDeps } from './bot-lifecycle'
-import { mintBotProfileId } from './profile-id'
+import { assessBotProfile } from './assess-bot-profile'
+import {
+  createBot,
+  deleteBot,
+  listBots,
+  rebuildBotProfile,
+  updateBot,
+  type BotLifecycleDeps,
+} from './bot-lifecycle'
 import { vibeProfileDirs } from './profile-dirs'
 import { nodeProfileFs } from './node-profile-fs'
 import { removeBotProfile, writeBotProfile, type BotProfileFs } from './write-bot-profile'
@@ -33,6 +45,15 @@ export interface BotsIpcDeps {
   threads: BotLifecycleDeps['threads']
   /** Overridable for tests; production uses the real `node:fs` binding. */
   fs?: BotProfileFs
+  /**
+   * The Workspace agent's latest agent-profile registry reading (#448), by
+   * `agentId` — the wire evidence the open-path persona check diffs against.
+   * Injected because the pool lives in `index.ts`; it awaits the Workspace's
+   * eager primary session (ADR-0012) so a Bot opened the instant its Project
+   * connects gets a real answer rather than a shrug. Null when the agent is gone
+   * or never opened a session.
+   */
+  discoverModes?: (agentId: string) => Promise<ModeDiscovery | null>
 }
 
 /**
@@ -73,5 +94,36 @@ export function registerBotsIpc(deps: BotsIpcDeps): void {
   ipcMain.handle(
     IPC.botsDelete,
     (_event, args: BotsDeleteArgs): Promise<BotsDeleteResult> => deleteBot(lifecycle, args),
+  )
+
+  // The OPEN-path persona check (#448). Slice 2 decides the same question on a
+  // bind, but a bind needs a prompt — and ADR-0027's "failure is loud" means the
+  // user is told when the Bot OPENS, before typing into what looks like their
+  // teammate. Thin by design: the answer is `assessBotProfile`'s.
+  ipcMain.handle(
+    IPC.botsProfileStatus,
+    async (_event, args: BotsProfileStatusArgs): Promise<BotProfileStatus> => {
+      const bot = deps.bots.get(args.threadId)
+      if (!bot) return { kind: 'unknown' } // an ordinary Thread, or a deleted Bot
+      const discovery = deps.discoverModes ? await deps.discoverModes(args.agentId) : null
+      const status = assessBotProfile({
+        profileId: bot.profileId,
+        profileWrittenAt: bot.updatedAt,
+        discovery,
+      })
+      if (status.kind === 'missing') {
+        console.error(
+          `[vibe-mistro:bots] ${bot.name} (${args.threadId}): persona ${status.profileId} ` +
+            `is not among the agent's modes — ${status.reason}`,
+        )
+      }
+      return status
+    },
+  )
+
+  ipcMain.handle(
+    IPC.botsRebuildProfile,
+    (_event, args: BotsRebuildProfileArgs): Promise<BotWriteResult> =>
+      rebuildBotProfile(lifecycle, args),
   )
 }

@@ -25,6 +25,19 @@ export const botsChannels = {
   botsUpdate: 'bots:update',
   /** Delete a Bot: destroy the identity + its profile files, ARCHIVE its Thread. */
   botsDelete: 'bots:delete',
+  /**
+   * Is this Bot's persona still there? (#448) Asked when the Bot is OPENED —
+   * before any prompt — because "the profile file went missing" must never be
+   * discovered by the Bot silently answering as a plain agent. See
+   * {@link BotProfileStatus}.
+   */
+  botsProfileStatus: 'bots:profile-status',
+  /**
+   * Re-write a Bot's profile files from its record — the banner's repair action.
+   * The record is the source of truth and the files are a projection (ADR-0027),
+   * so a rebuild is just that projection run again.
+   */
+  botsRebuildProfile: 'bots:rebuild-profile',
 } as const
 
 /**
@@ -116,4 +129,35 @@ export type BotWriteResult =
 /** The reply to `bots:delete`. Best-effort: `ok:false` means nothing was removed. */
 export interface BotsDeleteResult {
   ok: boolean
+}
+
+/** Args for `bots:profile-status`: which Bot, and on which Workspace agent. */
+export interface BotsProfileStatusArgs {
+  threadId: string
+  /** The Workspace agent whose advertised modes answer the question. */
+  agentId: string
+}
+
+/**
+ * Whether a Bot's persona is still selectable on its Workspace's agent (#448).
+ *
+ * Answered by DIFFING the Bot's expected `profileId` against the modes the agent
+ * last advertised, never by waiting for an error: a broken profile (hand-deleted
+ * TOML, malformed TOML, missing prompt `.md`) is indistinguishable from an absent
+ * one over the wire — Vibe drops it at registry scan with only a log line (#424,
+ * acp-capture §14.6). The absence IS the signal.
+ *
+ * `unknown` is the deliberate third answer, and the reason this is not a boolean:
+ * the app must not accuse a profile it has no fresh reading for. No agent, no
+ * session yet, or a profile WRITTEN since the last registry scan (creating a Bot
+ * on an already-warm agent) all land here, and say nothing to the user.
+ */
+export type BotProfileStatus =
+  | { kind: 'healthy' }
+  | { kind: 'unknown' }
+  | { kind: 'missing'; profileId: string; reason: string }
+
+/** Args for `bots:rebuild-profile`: the Bot whose files to re-project. */
+export interface BotsRebuildProfileArgs {
+  threadId: string
 }

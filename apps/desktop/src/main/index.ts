@@ -111,6 +111,7 @@ import { createBotLifecycleDeps, registerBotsIpc } from './bots/register-ipc'
 import { cleanRemovedBots } from './bots/clean-removed-bots'
 import { botNamesByThread, markBotThreads } from './bots/mark-bot-threads'
 import { applyBotProfile, planBotProfileSelection } from './bots/select-bot-profile'
+import type { ModeDiscovery } from './acp/agent-controls'
 import { SqliteBotStore } from './persistence/sqlite-bot-store'
 import type { BotStoreApi } from './persistence/bot-store-api'
 import { registerEditorsIpc } from './editors/register-ipc'
@@ -511,6 +512,26 @@ function bestEffortCloseFor(deps: MainDeps, threadId: string): (() => Promise<vo
   return async () => {
     for (const agent of pool.agents()) await agent.closeSession(sessionId)
   }
+}
+
+/**
+ * The agent's latest agent-profile registry reading (#448) — what the open-path
+ * Bot persona check diffs against, resolved from the pool by `agentId`.
+ *
+ * It first ensures the Workspace's eager primary session (ADR-0012) — idempotent
+ * and already time-bounded — so a Bot opened the moment its Project connects gets
+ * a real reading instead of `unknown`. Best-effort: an agent that cannot open a
+ * session simply has nothing to report, which is a shrug, never an accusation.
+ */
+async function discoverModes(agentId: string): Promise<ModeDiscovery | null> {
+  const agent = pool.get(agentId)
+  if (!agent) return null
+  try {
+    await agent.openPrimarySession()
+  } catch {
+    // Already best-effort inside; a failure just leaves the reading as it was.
+  }
+  return agent.modeDiscovery
 }
 
 /**
@@ -944,7 +965,7 @@ function registerIpc(deps: MainDeps): void {
   })
   registerFilesIpc({ pool, cache: filesListCache })
   registerSkillsIpc()
-  registerBotsIpc({ bots: deps.bots, threads: deps.store })
+  registerBotsIpc({ bots: deps.bots, threads: deps.store, discoverModes })
   // The same profile-file seam the Bot CRUD uses, reused by the Thread- and
   // Workspace-removal cleanup below so both paths refuse a foreign profile id
   // through exactly one gate (#445).
