@@ -1013,3 +1013,107 @@ later session does not mistake the resulting UI for something half-finished:
 The child session directory (I) is the only place the subagent's real transcript exists. It stays
 off-limits: reading it would couple us to an unversioned internal format, which is exactly what
 ADR-0002 forbids.
+
+---
+
+## 17. A routine-gated profile, and where a shell command's text actually lives (captured 2026-08-21 via `scripts/spike-routine-gate.ts`, vibe-acp **2.24.3**)
+
+The permission half of Bot Routines (#469, ADR-0028 part 4). Two questions: does a profile carrying
+`[tools.*]` blocks force `vibe-acp` to ASK over a user `config.toml` that otherwise auto-approves, and
+what exactly does the resulting request carry?
+
+Hygiene, same as §14.7: an isolated `VIBE_HOME` under `$TMPDIR` with the user's real `config.toml`
+COPIED in (the original only read), a scratch `cwd`, `zz-probe-*` profile names, every
+`fs/write_text_file` refused and every permission answered `reject_once`.
+
+### 17.1 The gate profile, and that it holds
+
+```toml
+display_name = "ZZ Probe Routine"
+agent_type = "agent"
+safety = "neutral"
+system_prompt_id = "zz-probe-prompt"
+
+[tools.write_file]
+permission = "never"
+
+[tools.edit]
+permission = "never"
+
+[tools.bash]
+permission = "ask"
+allowlist = []
+```
+
+Under this profile, `ls -la` — a command on the **schema-default** bash allowlist, which does not
+prompt under the shipped Bot profile — **raised a permission request**, as did
+`echo hello > probe.txt`. Emptying `allowlist` is what removes the defaults; §14 and #458 established
+the same at 2.24.1, and it still holds at 2.24.3.
+
+### 17.2 🚨 The request's `invocation_pattern` is TOKENISED — the redirect is erased
+
+For the command `echo hello > probe.txt`, the request (verbatim, options trimmed for length):
+
+```json
+{"sessionId":"7f2a997d-…","toolCall":{"toolCallId":"sbjyDUwlc"},
+ "options":[
+   {"optionId":"allow_once","name":"Allow once","kind":"allow_once"},
+   {"optionId":"allow_always","name":"Allow for remainder of this session","kind":"allow_always",
+    "_meta":{"required_permissions":[{"scope":"command_pattern",
+      "invocation_pattern":"echo hello <redirect>",
+      "session_pattern":"echo *","label":"echo *"}]}},
+   {"optionId":"allow_always_permanent","name":"Always allow","kind":"allow_always","_meta":{…same…}},
+   {"optionId":"reject_once","name":"Deny","kind":"reject_once"}]}
+```
+
+Three things a client must not get wrong:
+
+1. **`invocation_pattern` is not the command.** `echo hello <redirect>` names no file. A client that
+   matched a user's allow-list against it would authorise a command that writes somewhere the string
+   it matched never mentions — the #458 hole, re-opened one layer up.
+2. **`session_pattern` / `label` are WIDER still** (`echo *`). They are what the allow-always options
+   would grant, not what is being asked.
+3. **`scope` distinguishes the kind of permission** — `command_pattern` here, `outside_directory` for
+   a path (§15F). A client answering automatically should refuse a scope it does not understand.
+
+For `ls -la` the same fields read `invocation_pattern: "ls -la"` and `session_pattern: "ls *"` — i.e.
+the pattern happens to equal the command whenever the command contains nothing to tokenise, which is
+exactly what makes matching on it look correct in testing.
+
+### 17.3 The command text is `rawInput.command` on an EARLIER `tool_call_update`
+
+The frames for one bash call, in order:
+
+```jsonc
+{"toolCallId":"sbjyDUwlc","title":"bash","kind":"execute","status":"in_progress",
+ "_meta":{"tool_name":"bash","effect_kind":"shell"},"sessionUpdate":"tool_call"}
+{"toolCallId":"sbjyDUwlc","kind":"execute","status":"in_progress",
+ "title":"bash: echo hello > probe.txt","rawInput":{"command":"echo hello > probe.txt"},
+ "_meta":{"tool_name":"bash","effect_kind":"shell"},"sessionUpdate":"tool_call_update"}
+{"toolCallId":"sbjyDUwlc","kind":"execute","status":"in_progress",
+ "_meta":{"tool_name":"bash","effect_kind":"shell"},"sessionUpdate":"tool_call_update"}   // ← no rawInput
+// then session/request_permission
+```
+
+⇒ **Merge frames by `toolCallId`.** The update immediately before the request carries only a status,
+so a client that reads "the last frame" finds no command at all. `_meta` is snake_case and sits on the
+update object (§15B).
+
+### 17.4 A denial does not end the turn — `session/cancel` does
+
+Answering `reject_once` produced `status:"failed"` on that tool call with
+`rawOutput: "User rejected the tool call; provide an alternative plan"`, and the turn **continued**
+(five requests for one one-file task before the probe stopped it). Sending `session/cancel` right
+after the denial resolved the in-flight `session/prompt` with:
+
+```json
+{"stopReason":"cancelled","usage":{…}}
+```
+
+⇒ the cancel resolves through the ordinary turn-complete path (§12), so a blocked routine looks like a
+cancelled turn on the wire and only the client's own gate knows it was a refusal.
+
+### Infra — same `node`-not-`bun` gotcha as §9–§12, §15
+
+`bun build scripts/spike-routine-gate.ts --target=node --outfile=/tmp/spike-gate.mjs && node /tmp/spike-gate.mjs`
+(`--phase=a|b|c|d`, `--keep`). LIVE — costs credits.

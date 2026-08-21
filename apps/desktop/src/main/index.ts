@@ -10,6 +10,7 @@ import {
 } from 'electron'
 import electronUpdater, { type UpdateInfo } from 'electron-updater'
 import { mkdir } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { basename, join } from 'node:path'
 import {
@@ -76,7 +77,7 @@ import type { MetadataStoreApi } from './persistence/metadata-store-api'
 import { createMetadataStore } from './persistence/create-metadata-store'
 import { maybeBackupStateDb } from './persistence/state-backup'
 import type { StateDb } from './persistence/sqlite-db'
-import { resolvePermissionEntry } from './persistence/transcript'
+import { resolvePermissionEntry, turnErrorEntry, userPromptEntry } from './persistence/transcript'
 import type { TranscriptStoreApi } from './persistence/transcript-store-api'
 import { createTranscriptStore } from './persistence/create-transcript-store'
 import { TranscriptBridge } from './persistence/transcript-bridge'
@@ -104,6 +105,9 @@ import type { ModeDiscovery } from './acp/agent-controls'
 import { SqliteBotStore } from './persistence/sqlite-bot-store'
 import type { BotStoreApi } from './persistence/bot-store-api'
 import { registerRoutinesIpc } from './routines/register-ipc'
+import { ensureRoutineGate } from './routines/write-routine-profile'
+import { nodeRoutineProfileFs } from './routines/node-routine-profile-fs'
+import { vibeProfileDirs } from './bots/profile-dirs'
 import { SqliteRoutineStore } from './persistence/sqlite-routine-store'
 import type { RoutineStoreApi } from './persistence/routine-store-api'
 import { registerEditorsIpc } from './editors/register-ipc'
@@ -829,7 +833,27 @@ function registerIpc(deps: MainDeps): void {
         activity.beginRoutine(agentId)
       },
       endProtection: (agentId) => activity.endRoutine(agentId),
-      runTurn: (agent, args) => runPromptTurn(deps, { kind: 'headless' }, agent, args),
+      // The permission gate (#469): written and CONFIRMED before every run, into
+      // the same `~/.vibe/agents/` the Bot's own profile lives in. Dirs resolved
+      // lazily, like the Bots registrar's, so `getShellEnv`'s login-shell probe
+      // stays off the launch path.
+      ensureGate: (source) =>
+        ensureRoutineGate({
+          source,
+          dirs: vibeProfileDirs(getShellEnv(), homedir()),
+          fs: nodeRoutineProfileFs,
+        }),
+      // A routine failure lands in the Bot's OWN conversation (ADR-0028 part 5 —
+      // always an entry, success or failure) through the same turn-error tee every
+      // other failed turn uses, and moves `lastActiveAt` so the unread dot appears.
+      reportFailure: ({ threadId, message, prompt }) => {
+        if (prompt !== undefined) deps.bridge.tee(threadId, userPromptEntry(randomUUID(), prompt))
+        deps.bridge.tee(threadId, turnErrorEntry(message))
+        void deps.store.touchThread(threadId).catch((err) => {
+          console.error(`[vibe-mistro:routines] touchThread failed (${threadId}): ${String(err)}`)
+        })
+      },
+      runTurn: (agent, args, gate) => runPromptTurn(deps, { kind: 'headless', gate }, agent, args),
       now: () => Date.now(),
     },
   })

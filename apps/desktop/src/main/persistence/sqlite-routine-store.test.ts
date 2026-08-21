@@ -197,6 +197,33 @@ describe('SqliteRoutineStore CRUD', () => {
     expect(recovered).toMatchObject({ lastRunAt: 1800, lastOutcome: 'ok', lastError: null })
   })
 
+  it('keeps the blocked invocation as its own value, and clears it on the next run', async () => {
+    // #469: slice 5 offers to ADD this command to the routine's allowed commands,
+    // so what comes back has to be the bytes the agent asked to run — not a
+    // fragment parsed out of a sentence.
+    const f = openFixture()
+    const bot = await seedBot(f)
+    insertRoutine(f, bot.threadId)
+
+    const blocked = f.routines.recordRun('routine-1', {
+      lastRunAt: 1700,
+      lastOutcome: 'blocked',
+      lastError: 'It was stopped before running `echo hi > a.txt`.',
+      lastBlockedCommand: 'echo hi > a.txt',
+    })
+    expect(blocked?.lastBlockedCommand).toBe('echo hi > a.txt')
+    expect(f.routines.get('routine-1')?.lastBlockedCommand).toBe('echo hi > a.txt')
+
+    // A later failure for an unrelated reason must not still be offering to allow
+    // yesterday's command — unlike `lastError`, this is never carried forward.
+    const failed = f.routines.recordRun('routine-1', {
+      lastRunAt: 1800,
+      lastOutcome: 'failed',
+      lastError: 'Context too long.',
+    })
+    expect(failed?.lastBlockedCommand).toBeNull()
+  })
+
   it('reports an unknown Routine rather than throwing', async () => {
     const f = openFixture()
     expect(f.routines.get('nope')).toBeNull()

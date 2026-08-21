@@ -138,14 +138,20 @@ describe('writeBotProfile', () => {
 })
 
 describe('removeBotProfile', () => {
-  it('deletes both files, TOML first', async () => {
+  it('deletes every generated file, TOML first — including the routine gate (#469)', async () => {
     const fs = fakeFs()
     await writeBotProfile({ source: source(), dirs: DIRS, fs })
+    // The routine-only gate profile a scheduled turn wears. It is generated from
+    // this Bot and meaningless without it, so it comes down with it — otherwise it
+    // lingers in every Mode picker as a mode for a teammate that is gone.
+    const routineToml = `${DIRS.agentsDir}/mistro-routine-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.toml`
+    fs.files.set(routineToml, 'gate')
     const ok = await removeBotProfile({ profileId: PROFILE_ID, dirs: DIRS, fs })
 
     expect(ok).toBe(true)
     expect(fs.removed).toEqual([
       `${DIRS.agentsDir}/${PROFILE_ID}.toml`,
+      routineToml,
       `${DIRS.promptsDir}/${PROFILE_ID}.md`,
     ])
     expect(fs.files.size).toBe(0)
@@ -166,6 +172,7 @@ describe('removeBotProfile', () => {
     const fs = fakeFs({ failRm: '.toml' })
     const ok = await removeBotProfile({ profileId: PROFILE_ID, dirs: DIRS, fs })
     expect(ok).toBe(false)
+    // Both TOMLs failed; the prompt still came down.
     expect(fs.removed).toEqual([`${DIRS.promptsDir}/${PROFILE_ID}.md`])
   })
 })

@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { projectBotProfile, type BotProfileSource } from './bot-profile'
-import { isMistroBotProfileId } from '../../shared/bot-profile-id'
+import { isMistroBotProfileId, routineProfileIdFor } from '../../shared/bot-profile-id'
 import type { VibeProfileDirs } from './profile-dirs'
 import {
   collectProblems,
@@ -96,11 +96,18 @@ export interface RemoveBotProfileArgs {
 }
 
 /**
- * Destroy a Bot's two generated files. Refuses a foreign id outright — the whole
+ * Destroy a Bot's generated files. Refuses a foreign id outright — the whole
  * point of the `mistro-bot-` prefix is that this can never reach a profile the
  * user wrote. Best-effort otherwise: the TOML is removed FIRST so a half-failed
  * delete leaves an orphan prompt rather than a mode with no persona, and each
  * removal is attempted independently.
+ *
+ * Since #469 that is THREE files, not two: a Bot also owns a routine-only gate
+ * profile derived from the same id (`mistro-routine-<uuid>`). It comes down here
+ * because it is generated from the Bot and has no meaning without it — left
+ * behind it would keep appearing in every Mode picker as a mode for a teammate
+ * that no longer exists, which is the exact orphan `cleanRemovedBots` was written
+ * to prevent.
  */
 export async function removeBotProfile(args: RemoveBotProfileArgs): Promise<boolean> {
   const { profileId, dirs, fs } = args
@@ -108,9 +115,11 @@ export async function removeBotProfile(args: RemoveBotProfileArgs): Promise<bool
     console.error(`[vibe-mistro:bots] refusing to delete a profile we do not own: ${profileId}`)
     return false
   }
+  const routineProfileId = routineProfileIdFor(profileId)
   let ok = true
   for (const path of [
     join(dirs.agentsDir, `${profileId}.toml`),
+    ...(routineProfileId ? [join(dirs.agentsDir, `${routineProfileId}.toml`)] : []),
     join(dirs.promptsDir, `${profileId}.md`),
   ]) {
     try {

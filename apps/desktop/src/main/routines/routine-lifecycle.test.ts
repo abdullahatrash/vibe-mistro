@@ -47,6 +47,7 @@ class FakeRoutineStore implements RoutineStoreApi {
       lastRunAt: null,
       lastOutcome: null,
       lastError: null,
+      lastBlockedCommand: null,
       createdAt: 1000,
       updatedAt: 1000,
     }

@@ -28,12 +28,33 @@
 export const MISTRO_BOT_PROFILE_PREFIX = 'mistro-bot-'
 
 /**
+ * The prefix of a Bot's SECOND profile — the routine-only gate (#469, ADR-0028
+ * part 4).
+ *
+ * A Bot has two generated profiles that share one uuid: `mistro-bot-<uuid>` is
+ * its persona, worn whenever a person is talking to it, and
+ * `mistro-routine-<uuid>` is that same persona with the permission gate bolted
+ * on, worn ONLY by a scheduled turn. They are two files rather than one rewritten
+ * file on purpose: a Bot must not become read-only when you talk to it, and a
+ * rewrite would leave a window where a crash strands the wrong posture.
+ *
+ * Sharing the uuid means the routine profile is derivable from the Bot's id
+ * (`routineProfileIdFor`) and never has to be stored, and it keeps the pair
+ * adjacent in `~/.vibe/agents/` for anyone reading the directory by hand.
+ */
+export const MISTRO_ROUTINE_PROFILE_PREFIX = 'mistro-routine-'
+
+/**
  * Exactly `mistro-bot-` + a canonical lowercase uuid. Deliberately strict: a
  * near-miss (uppercase, a truncated uuid, a nested path) is treated as foreign
  * rather than as one of ours, so the failure direction is always "leave it alone".
  */
 const MISTRO_BOT_PROFILE_ID =
   /^mistro-bot-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+/** The same shape for the routine-only gate profile. Equally strict, same reason. */
+const MISTRO_ROUTINE_PROFILE_ID =
+  /^mistro-routine-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /** Mint a profile id from a freshly generated uuid (`randomUUID()`). */
 export function mintBotProfileId(uuid: string): string {
@@ -47,4 +68,36 @@ export function mintBotProfileId(uuid: string): string {
  */
 export function isMistroBotProfileId(profileId: string): boolean {
   return MISTRO_BOT_PROFILE_ID.test(profileId)
+}
+
+/** Whether this id names a Bot's routine-only gate profile (#469). */
+export function isMistroRoutineProfileId(profileId: string): boolean {
+  return MISTRO_ROUTINE_PROFILE_ID.test(profileId)
+}
+
+/**
+ * Whether this id is one WE generated at all — a Bot's persona OR its routine
+ * gate. The question every consumer that asks "is this profile ours?" for
+ * PRESENTATION should ask: both are published over ACP as selectable modes, so a
+ * filter that knows only about personas would leak the gate profile into every
+ * ordinary Thread's Mode picker.
+ *
+ * The file-ownership gates deliberately do NOT use this: each writer refuses
+ * anything that is not the exact shape it owns, so a Bot writer can never touch a
+ * routine profile and vice versa.
+ */
+export function isMistroProfileId(profileId: string): boolean {
+  return isMistroBotProfileId(profileId) || isMistroRoutineProfileId(profileId)
+}
+
+/**
+ * The routine-gate profile id that belongs with this Bot profile id, or null when
+ * the argument is not one of ours.
+ *
+ * Derived, never stored: the pair shares a uuid, so there is no second id to keep
+ * in sync and no way for the record to name a gate that belongs to another Bot.
+ */
+export function routineProfileIdFor(botProfileId: string): string | null {
+  if (!isMistroBotProfileId(botProfileId)) return null
+  return `${MISTRO_ROUTINE_PROFILE_PREFIX}${botProfileId.slice(MISTRO_BOT_PROFILE_PREFIX.length)}`
 }

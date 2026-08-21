@@ -263,3 +263,86 @@ describe('runPromptTurn — the turn itself does not care who is watching', () =
     expect(withoutRenderer.teed.map((t) => t.entry.t)).toEqual(withRenderer.teed.map((t) => t.entry.t))
   })
 })
+
+/**
+ * The routine permission gate on a headless turn (#469, ADR-0028 part 4).
+ *
+ * Two properties, and both are about REFUSING rather than about running: a turn
+ * whose gate profile cannot be selected must not be sent at all, and the answerer
+ * must be listening before it is.
+ */
+describe('runPromptTurn — the routine gate (#469)', () => {
+  const GATE_PROFILE = 'mistro-routine-11111111-2222-3333-4444-555555555555'
+
+  function gated(over: Partial<{ onSessionBound: (sessionId: string) => void }> = {}): {
+    delivery: PromptTurnDelivery
+    bound: string[]
+  } {
+    const bound: string[] = []
+    return {
+      bound,
+      delivery: {
+        kind: 'headless',
+        gate: {
+          profileId: GATE_PROFILE,
+          onSessionBound: (sessionId) => {
+            bound.push(sessionId)
+            over.onSessionBound?.(sessionId)
+          },
+        },
+      },
+    }
+  }
+
+  it('selects the gate profile before prompting, and reports the bound session', async () => {
+    const h = harness()
+    const agent = fakeAgent()
+    const modes: string[] = []
+    agent.setMode = async (_sessionId: string, modeId: string) => void modes.push(modeId)
+    const { delivery, bound } = gated()
+
+    const result = await runPromptTurn(h.deps, delivery, agent, args())
+
+    expect(result.ok).toBe(true)
+    expect(modes).toEqual([GATE_PROFILE])
+    // Reported before the prompt — the only window in which the answerer can be
+    // armed, since permission requests only arrive during `session/prompt`.
+    expect(bound).toEqual(['s1'])
+  })
+
+  it('REFUSES the turn when the gate profile cannot be selected', async () => {
+    // `setMode` routes through the validating `session/set_config_option`, so a
+    // rejection means the session does not offer the profile — the gate is not on.
+    // A routine that cannot be gated must not be prompted at all.
+    const h = harness()
+    const agent = fakeAgent()
+    agent.setMode = async () => {
+      throw new Error('-32602 unknown mode')
+    }
+    const { delivery, bound } = gated()
+
+    const result = await runPromptTurn(h.deps, delivery, agent, args())
+
+    expect(result).toMatchObject({ ok: false, kind: 'error' })
+    expect((result as { error: string }).error).toContain('permission gate')
+    expect(agent.prompts).toBe(0) // nothing was ever sent to the agent
+    expect(bound).toEqual([]) // and nothing was armed
+    // It still WRITES: the attempted prompt and the reason land in the Bot's own
+    // conversation, like every other headless pre-bind failure.
+    expect(h.teed.map((t) => t.entry.t)).toEqual(['user-prompt', 'turn-error'])
+    expect(h.touched).toEqual(['bot-thread'])
+  })
+
+  it('leaves an UNGATED headless turn exactly as it was', async () => {
+    const h = harness()
+    const agent = fakeAgent()
+    const modes: string[] = []
+    agent.setMode = async (_sessionId: string, modeId: string) => void modes.push(modeId)
+
+    await runPromptTurn(h.deps, h.headless, agent, args())
+
+    // No Bot record in this harness, so no persona and no gate: nothing selected.
+    expect(modes).toEqual([])
+    expect(agent.prompts).toBe(1)
+  })
+})

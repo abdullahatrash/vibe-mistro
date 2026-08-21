@@ -62,13 +62,40 @@ export interface ThreadBoundSender {
 }
 
 /**
+ * The permission gate a scheduled turn wears (#469, ADR-0028 part 4).
+ *
+ * A Bot's own profile is its persona and is shared with interactive use, so the
+ * gate lives in a SECOND profile selected for this turn alone. Two properties
+ * make it a gate rather than a preference:
+ *
+ *  - it is selected on EVERY gated turn, including one that merely reuses a
+ *    session bound earlier — a reuse reports no controls, which the ordinary
+ *    persona plan reads as "already selected", and for a routine that reading
+ *    would mean running ungated;
+ *  - a selection failure is FATAL. `setMode` routes through the validating
+ *    `session/set_config_option`, so a rejection means the session does not offer
+ *    the profile — the gate is not on, and a routine whose gate cannot be
+ *    confirmed must not run.
+ */
+export interface PromptTurnGate {
+  /** The routine-only profile id to select on the mode axis. */
+  profileId: string
+  /**
+   * The session this turn bound to, reported the instant it is known and always
+   * before `session/prompt` — which is the only time a permission request can
+   * arrive, and so the moment the answerer must be listening by.
+   */
+  onSessionBound(sessionId: string): void
+}
+
+/**
  * Who receives this turn's out-of-band signals. `headless` carries no sender
  * because a Routine has no window: `thread:bound` has no consumer, and the
  * conversation itself becomes the reporting surface.
  */
 export type PromptTurnDelivery =
   | { kind: 'renderer'; sender: ThreadBoundSender }
-  | { kind: 'headless' }
+  | { kind: 'headless'; gate?: PromptTurnGate }
 
 /** The agent surface one turn drives — structural, so tests never spawn `vibe-acp`. */
 export interface PromptTurnAgent extends SessionBinder, PendingThreadControlAgent {
@@ -111,6 +138,10 @@ export async function runPromptTurn(
   // never pointed at a Thread whose row doesn't exist yet.
   let sessionId: string
   let rebound: boolean
+  // The routine gate (#469), when this turn is a scheduled one. Present ONLY on
+  // the headless path — every user-initiated turn keeps the Bot's own persona and
+  // the renderer's own answering (ADR-0001).
+  const gate = delivery.kind === 'headless' ? delivery.gate : undefined
   try {
     // A Routine warms a Workspace nobody selected, so the child may not be running
     // yet — the renderer path always arrives here on an agent `startThread` already
@@ -136,8 +167,13 @@ export async function runPromptTurn(
     // can never wear its persona — silently, for the rest of the run (every later
     // turn reuses that session and re-selection is skipped). Minting a fresh
     // `session/new` re-scans and costs one extra session in that case alone.
+    //
+    // A GATED turn asks the same question about the GATE profile instead: the
+    // primary session must be able to wear the gate, not merely the persona, or
+    // the selection below fails and the routine refuses to run.
     const preopened =
-      args.sessionId === null && mayClaimPreopenedSession(botProfileId, agent.primarySessionControls)
+      args.sessionId === null &&
+      mayClaimPreopenedSession(gate?.profileId ?? botProfileId, agent.primarySessionControls)
         ? (agent.consumePrimarySession() ?? undefined)
         : undefined
     const bound = await ensureBoundSession({
@@ -183,11 +219,28 @@ export async function runPromptTurn(
     // 2.24.x binary, all of which advertise the `mode` config option. A failure is
     // reported, never swallowed: a Bot that quietly answers with no persona is the
     // one failure ADR-0027 forbids.
+    //
+    // For a GATED turn the plan is not a plan at all: select the routine profile,
+    // unconditionally, and treat a failure as the end of the turn. See
+    // {@link PromptTurnGate} for why "the session already has a mode selected" is
+    // not an acceptable answer here.
     const profileOutcome = await applyBotProfile(
       agent,
       sessionId,
-      planBotProfileSelection(botProfileId, reportedControls),
+      gate ? { kind: 'select', profileId: gate.profileId } : planBotProfileSelection(botProfileId, reportedControls),
     )
+    if (gate && !profileOutcome.ok) {
+      // Thrown, so it lands in the catch below with every other pre-prompt
+      // failure: the attempted prompt and the reason are teed into the Bot's own
+      // conversation and NOTHING is sent to the agent.
+      throw new Error(
+        `${profileOutcome.message} A routine will not run without its permission gate.`,
+      )
+    }
+    // The answerer must be listening before `session/prompt`, and this is the
+    // first moment the session id exists. Ordered after the gate selection so a
+    // turn that never runs never arms anything.
+    if (gate) gate.onSessionBound(sessionId)
     if (profileOutcome.ok) {
       if (profileOutcome.selected && actualControls) {
         actualControls = controlsWithCurrentValue(actualControls, 'mode', profileOutcome.selected)
