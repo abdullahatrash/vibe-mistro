@@ -56,7 +56,7 @@ describe('removeWorkspace ("Remove project")', () => {
 
     await expect(
       removeWorkspace({ workspaceId: 'w1', store, transcript, attachments }),
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual(['t1', 't2'])
     expect(attachments.delete).toHaveBeenCalledWith('t2')
     expect(transcript.delete).toHaveBeenCalledTimes(2)
   })
@@ -84,7 +84,7 @@ describe('removeWorkspace ("Remove project")', () => {
   it('is fine with NO stopAgent (a cold Workspace) — still removes records + transcripts', async () => {
     const { store, transcript } = fakes(['t1'])
 
-    await expect(removeWorkspace({ workspaceId: 'w1', store, transcript })).resolves.toBeUndefined()
+    await expect(removeWorkspace({ workspaceId: 'w1', store, transcript })).resolves.toEqual(['t1'])
     expect(store.removeWorkspace).toHaveBeenCalledWith('w1')
     expect(transcript.delete).toHaveBeenCalledWith('t1')
   })
@@ -93,7 +93,9 @@ describe('removeWorkspace ("Remove project")', () => {
     const { store, transcript } = fakes(['t1'])
     store.removeWorkspace.mockRejectedValue(new Error('EROFS: read-only file system'))
 
-    await expect(removeWorkspace({ workspaceId: 'w1', store, transcript })).resolves.toBeUndefined()
+    // The returned ids are what the caller cleans profile files by (#445), so an
+    // aborted removal must report NOTHING removed rather than the doomed list.
+    await expect(removeWorkspace({ workspaceId: 'w1', store, transcript })).resolves.toEqual([])
     // A throw is treated as "nothing removed", so no transcript is deleted.
     expect(transcript.delete).not.toHaveBeenCalled()
   })
@@ -104,7 +106,11 @@ describe('removeWorkspace ("Remove project")', () => {
       if (id === 't2') throw new Error('EACCES: permission denied')
     })
 
-    await expect(removeWorkspace({ workspaceId: 'w1', store, transcript })).resolves.toBeUndefined()
+    await expect(removeWorkspace({ workspaceId: 'w1', store, transcript })).resolves.toEqual([
+      't1',
+      't2',
+      't3',
+    ])
     // All three attempted despite t2 rejecting.
     expect(transcript.delete).toHaveBeenCalledWith('t1')
     expect(transcript.delete).toHaveBeenCalledWith('t2')
@@ -120,7 +126,7 @@ describe('removeWorkspace ("Remove project")', () => {
 
     await expect(
       removeWorkspace({ workspaceId: 'w1', store, transcript, stopAgent }),
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual(['t1'])
     expect(store.removeWorkspace).toHaveBeenCalledWith('w1')
     expect(transcript.delete).toHaveBeenCalledWith('t1')
   })

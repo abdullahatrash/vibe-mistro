@@ -54,6 +54,12 @@ import {
   type OpenThreadArgs,
   type SearchQueryArgs,
   type SearchQueryResult,
+  type BotsCreateArgs,
+  type BotsDeleteArgs,
+  type BotsDeleteResult,
+  type BotsListResult,
+  type BotsUpdateArgs,
+  type BotWriteResult,
   type SkillsListArgs,
   type SkillsListResult,
   type SkillsReadArgs,
@@ -156,6 +162,13 @@ const api = {
     ipcRenderer.invoke(IPC.skillsReveal, args),
   skillsRead: (args: SkillsReadArgs): Promise<SkillsReadResult> =>
     ipcRenderer.invoke(IPC.skillsRead, args),
+  botsList: (): Promise<BotsListResult> => ipcRenderer.invoke(IPC.botsList),
+  botsCreate: (args: BotsCreateArgs): Promise<BotWriteResult> =>
+    ipcRenderer.invoke(IPC.botsCreate, args),
+  botsUpdate: (args: BotsUpdateArgs): Promise<BotWriteResult> =>
+    ipcRenderer.invoke(IPC.botsUpdate, args),
+  botsDelete: (args: BotsDeleteArgs): Promise<BotsDeleteResult> =>
+    ipcRenderer.invoke(IPC.botsDelete, args),
   gitSubscribeStatus: (args: GitStatusSubscriptionArgs): Promise<void> =>
     ipcRenderer.invoke(IPC.gitSubscribeStatus, args),
   gitUnsubscribeStatus: (args: GitStatusSubscriptionArgs): Promise<void> =>

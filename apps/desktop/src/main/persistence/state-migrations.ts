@@ -141,4 +141,35 @@ export const STATE_MIGRATIONS: readonly Migration[] = [
       `)
     },
   },
+  {
+    id: 5,
+    name: 'bots',
+    up: (db) => {
+      // The Mistro Bot record (#445, ADR-0027): a Bot IS one continuing Thread,
+      // so `thread_id` is BOTH the primary key and the identity — there is no
+      // second id. Cascades with its Thread, which itself cascades with its
+      // Workspace, so removing a Project takes its Bots' rows down with it (the
+      // profile FILES are cleaned separately — read the rows BEFORE removal).
+      //
+      // `profile_id` is the durable half of the persona (`mistro-bot-<uuid>`):
+      // Mode does not survive `session/load` and the re-assert cache is
+      // in-memory by design, so without this column a Bot reopened after a
+      // restart is a nameless agent. UNIQUE because it names two files on disk.
+      db.exec(`
+        CREATE TABLE bots (
+          thread_id    TEXT PRIMARY KEY REFERENCES threads(id) ON DELETE CASCADE,
+          workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          profile_id   TEXT NOT NULL UNIQUE,
+          name         TEXT NOT NULL,
+          colour       TEXT NOT NULL,
+          description  TEXT NOT NULL,
+          instructions TEXT NOT NULL,
+          created_at   INTEGER NOT NULL,
+          updated_at   INTEGER NOT NULL
+        );
+
+        CREATE INDEX idx_bots_workspace ON bots(workspace_id);
+      `)
+    },
+  },
 ]

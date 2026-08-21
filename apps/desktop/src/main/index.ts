@@ -107,6 +107,10 @@ import { chokidarWatchFactory, realClock } from './git/runtime'
 import { registerGitIpc } from './git/register-ipc'
 import { registerFilesIpc } from './files/register-ipc'
 import { registerSkillsIpc } from './skills/register-ipc'
+import { createBotLifecycleDeps, registerBotsIpc } from './bots/register-ipc'
+import { cleanRemovedBots } from './bots/clean-removed-bots'
+import { SqliteBotStore } from './persistence/sqlite-bot-store'
+import type { BotStoreApi } from './persistence/bot-store-api'
 import { registerEditorsIpc } from './editors/register-ipc'
 import { createTerminalManager, registerTerminalIpc } from './terminal/register-ipc'
 import { registerBrowserIpc } from './browser/register-ipc'
@@ -430,6 +434,8 @@ interface MainDeps {
   bridge: TranscriptBridge
   /** Null when the attachments dir `mkdir` failed — image persistence no-ops (logged). */
   attachments: AttachmentStore | null
+  /** The Mistro Bot records (#445, ADR-0027), on the same state database. */
+  bots: BotStoreApi
 }
 
 /**
@@ -895,6 +901,11 @@ function registerIpc(deps: MainDeps): void {
   })
   registerFilesIpc({ pool, cache: filesListCache })
   registerSkillsIpc()
+  registerBotsIpc({ bots: deps.bots, threads: deps.store })
+  // The same profile-file seam the Bot CRUD uses, reused by the Thread- and
+  // Workspace-removal cleanup below so both paths refuse a foreign profile id
+  // through exactly one gate (#445).
+  const botProfiles = createBotLifecycleDeps({ bots: deps.bots, threads: deps.store }).profiles
   registerEditorsIpc({ store: deps.store })
   terminalManager = createTerminalManager()
   registerTerminalIpc({ pool, manager: terminalManager })
@@ -1213,6 +1224,11 @@ function registerIpc(deps: MainDeps): void {
     // Thread, so this clear plus `bestEffortCloseFor` (which reads the bound session
     // from the metadata snapshot, not the bridge) tears the session down safely.
     deps.bridge.clearThread(threadId)
+    // A Bot's row cascades away with its Thread, so read it BEFORE the delete —
+    // afterwards there is nothing left to look its profile id up in, and the two
+    // generated files would be orphaned as a mode for a Bot that no longer exists
+    // (#445, ADR-0027). Deleting a Bot proper goes through `bots:delete`.
+    const doomedBot = deps.bots.get(threadId)
     await deleteThread({
       threadId,
       store: deps.store,
@@ -1220,6 +1236,13 @@ function registerIpc(deps: MainDeps): void {
       attachments: deps.attachments ?? undefined,
       closeSession: bestEffortCloseFor(deps, threadId),
     })
+    if (doomedBot) {
+      await cleanRemovedBots({
+        candidates: [doomedBot],
+        removedThreadIds: [threadId],
+        removeProfile: (profileId) => botProfiles.remove(profileId),
+      })
+    }
     return { ok: true }
   })
 
@@ -1233,6 +1256,10 @@ function registerIpc(deps: MainDeps): void {
       // orchestrator + `MetadataStore.removeWorkspace`. Best-effort throughout, so a
       // cold Workspace just no-ops — never a throw.
       const snapshot = deps.store.snapshot()
+      // The Workspace's Bots, read BEFORE removal for the same reason as above:
+      // their rows cascade away with the Threads, which cascade with the
+      // Workspace, so the profile ids must be captured while they still exist.
+      const doomedBots = deps.bots.listByWorkspace(workspaceId)
       // Resolve the Workspace dir → its warm agentId (null when cold). The dir is the
       // pool's key, so a warm agent for this Workspace is found here before removal.
       const dir = snapshot.workspaces.find((w) => w.id === workspaceId)?.dir
@@ -1247,7 +1274,7 @@ function registerIpc(deps: MainDeps): void {
       // Kill EVERY shell session the Workspace hosts (ADR-0014) — a removed project
       // must not leave live PTYs behind. Best-effort like every other step here.
       terminalManager?.closeWorkspace(workspaceId)
-      await removeWorkspace({
+      const removedThreadIds = await removeWorkspace({
         workspaceId,
         store: deps.store,
         transcript: deps.transcript,
@@ -1263,6 +1290,15 @@ function registerIpc(deps: MainDeps): void {
               notifyAgentsEvicted(deps.bridge, [agentId])
             }
           : undefined,
+      })
+      // Destruction is honest (ADR-0027): removing a Project destroys its Bots'
+      // generated profile files too, matched against the Thread ids the removal
+      // actually took down. Orphaned TOMLs would keep appearing in every Mode
+      // picker as modes for Bots that no longer exist.
+      await cleanRemovedBots({
+        candidates: doomedBots,
+        removedThreadIds,
+        removeProfile: (profileId) => botProfiles.remove(profileId),
       })
       return { ok: true }
     },
@@ -1468,7 +1504,11 @@ app.whenReady().then(async () => {
     sink: transcript,
     resolveBySession: (sessionId) => store.findThreadIdBySessionId(sessionId),
   })
-  const deps: MainDeps = { store, transcript, bridge, attachments, stateDb }
+  // The Mistro Bot records (#445, ADR-0027) ride the same `state.sqlite` as the
+  // metadata and transcript stores — a Bot IS a Thread, so its row cascades
+  // with the Thread and the Workspace and can never be left dangling.
+  const bots = new SqliteBotStore({ stateDb })
+  const deps: MainDeps = { store, transcript, bridge, attachments, stateDb, bots }
 
   // Daily rotating backup of state.sqlite (ADR-0019, #298) — scheduled off the
   // launch path, best-effort, and never on the non-durable memory fallback
