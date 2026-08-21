@@ -77,7 +77,12 @@ import type { MetadataStoreApi } from './persistence/metadata-store-api'
 import { createMetadataStore } from './persistence/create-metadata-store'
 import { maybeBackupStateDb } from './persistence/state-backup'
 import type { StateDb } from './persistence/sqlite-db'
-import { resolvePermissionEntry, turnErrorEntry, userPromptEntry } from './persistence/transcript'
+import {
+  resolvePermissionEntry,
+  routineLateEntry,
+  turnErrorEntry,
+  userPromptEntry,
+} from './persistence/transcript'
 import type { TranscriptStoreApi } from './persistence/transcript-store-api'
 import { createTranscriptStore } from './persistence/create-transcript-store'
 import { TranscriptBridge } from './persistence/transcript-bridge'
@@ -105,6 +110,7 @@ import type { ModeDiscovery } from './acp/agent-controls'
 import { SqliteBotStore } from './persistence/sqlite-bot-store'
 import type { BotStoreApi } from './persistence/bot-store-api'
 import { registerRoutinesIpc } from './routines/register-ipc'
+import { createRoutineScheduler, type RoutineScheduler } from './routines/scheduler'
 import { ensureRoutineGate } from './routines/write-routine-profile'
 import { nodeRoutineProfileFs } from './routines/node-routine-profile-fs'
 import { vibeProfileDirs } from './bots/profile-dirs'
@@ -413,6 +419,20 @@ const gitStatus = new GitStatusManager({
 
 /** The periodic idle-evict sweep timer (cleared on quit). */
 let sweepTimer: ReturnType<typeof setInterval> | null = null
+
+/**
+ * The Routine scheduler (#470, ADR-0028), built with the IPC seams and held here
+ * so launch can start it and quit can stop it — module-level for the same reason
+ * the sweep timer is: no timer may outlive the app.
+ */
+let routineScheduler: RoutineScheduler | null = null
+
+/**
+ * How long after launch the missed-run catch-up runs. Off the launch path, like
+ * the daily state backup: a catch-up warms an agent for a Workspace nobody
+ * selected, and that must not compete with the first window's paint.
+ */
+const ROUTINE_CATCH_UP_DELAY_MS = 8 * 1000
 
 /**
  * The Workspace terminal sessions (ADR-0014), created at app-ready (its env comes
@@ -804,11 +824,11 @@ function registerIpc(deps: MainDeps): void {
   // Bot store: a Routine can only ever be attached to a Bot.
   //
   // The returned `runRoutineNow` is the ONE entry point a Routine's turn goes
-  // through, and NOTHING calls it in this slice — deciding when a Routine is due is
-  // the scheduler's job (#470), which will hold this handle. Everything the run
+  // through, and the scheduler built just below is its only caller (#470) —
+  // deciding WHEN is the scheduler's job and nothing else's. Everything the run
   // needs that only main has (the pool, the busy claim, eviction protection, the
   // turn) is passed in here rather than reached for, so the run stays testable.
-  registerRoutinesIpc({
+  const routinesRegistration = registerRoutinesIpc({
     routines: deps.routines,
     bots: deps.bots,
     turn: {
@@ -846,16 +866,39 @@ function registerIpc(deps: MainDeps): void {
       // A routine failure lands in the Bot's OWN conversation (ADR-0028 part 5 —
       // always an entry, success or failure) through the same turn-error tee every
       // other failed turn uses, and moves `lastActiveAt` so the unread dot appears.
-      reportFailure: ({ threadId, message, prompt }) => {
-        if (prompt !== undefined) deps.bridge.tee(threadId, userPromptEntry(randomUUID(), prompt))
+      reportFailure: ({ threadId, message, prompt, routine }) => {
+        if (prompt !== undefined) {
+          deps.bridge.tee(threadId, userPromptEntry(randomUUID(), prompt, undefined, routine))
+        }
         deps.bridge.tee(threadId, turnErrorEntry(message))
         void deps.store.touchThread(threadId).catch((err) => {
           console.error(`[vibe-mistro:routines] touchThread failed (${threadId}): ${String(err)}`)
         })
       },
-      runTurn: (agent, args, gate) => runPromptTurn(deps, { kind: 'headless', gate }, agent, args),
+      // "Late" is stated TWICE (#470, ADR-0028 part 3). This is our half: a notice
+      // in the Bot's own conversation, carrying only the two timestamps — the copy
+      // is a renderer-side constant, exactly like the context-reset notice. The
+      // other half is inside the prompt, because only the agent can act on the
+      // period the report has to cover.
+      reportLate: ({ threadId, dueAt, lastRunAt }) => {
+        deps.bridge.tee(threadId, routineLateEntry(dueAt, lastRunAt))
+      },
+      // The Routine's name rides the DELIVERY, not the args: a prompt is a routine
+      // prompt because the scheduler sent it, so the renderer can never claim it.
+      runTurn: (agent, args, gate) =>
+        runPromptTurn(deps, { kind: 'headless', gate, routine: args.routine }, agent, args),
       now: () => Date.now(),
     },
+  })
+  // The scheduler (#470): the periodic tick that decides what is due, what waits
+  // for a busy Bot and what is owed after the app was shut. It holds the ONE entry
+  // point above and the per-THREAD streaming flag; every decision it makes is a
+  // pure function tested beside it. Started (and caught up) at launch below.
+  routineScheduler = createRoutineScheduler({
+    routines: deps.routines,
+    isStreaming: (threadId) => threadStatus.statusFor(threadId).streaming,
+    runRoutine: (routineId, options) => routinesRegistration.runRoutineNow(routineId, options),
+    now: () => Date.now(),
   })
   // The same profile-file seam the Bot CRUD uses, reused by the Thread- and
   // Workspace-removal cleanup below so both paths refuse a foreign profile id
@@ -1546,6 +1589,25 @@ app.whenReady().then(async () => {
   }, SWEEP_INTERVAL_MS)
   sweepTimer.unref?.()
 
+  // Routines (#470, ADR-0028). Two starts, on purpose:
+  //
+  //  - the TICK, which fires what comes due while the app runs;
+  //  - the LAUNCH CATCH-UP, which recomputes what was owed while it was not, from
+  //    each Routine's stored schedule, and shares no code with the thing that
+  //    failed to fire it. A missed run happens ONCE and says so — nobody wants
+  //    Tuesday's triage on Thursday, and nobody can act on silence.
+  //
+  // Deliberately not on the launch path itself: a catch-up warms an agent for a
+  // Workspace nobody selected. Timers `unref`'d like the sweep's, and the tick is
+  // stopped on quit.
+  routineScheduler?.start()
+  setTimeout(() => {
+    const started = routineScheduler?.catchUp() ?? []
+    if (started.length > 0) {
+      console.log(`[vibe-mistro:routines] catching up ${started.length} missed run(s)`)
+    }
+  }, ROUTINE_CATCH_UP_DELAY_MS).unref?.()
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -1602,6 +1664,8 @@ app.on('will-quit', () => {
     clearInterval(sweepTimer)
     sweepTimer = null
   }
+  // And the Routine tick, for the same reason (#470).
+  routineScheduler?.stop()
   // Tear down every git-status subscription (#84) so no fs watcher or fetch timer
   // outlives the app — mirrors the sweep-timer cleanup above.
   gitStatus.disposeAll()

@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
-import { Check, Clipboard, Copy, File, MessageSquareText, MousePointerClick, Sparkles } from 'lucide-react'
+import {
+  Check,
+  Clipboard,
+  Copy,
+  File,
+  MessageSquareText,
+  MousePointerClick,
+  Sparkles,
+  Timer,
+} from 'lucide-react'
 import { IconButton } from '../../ui/icon-button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../../ui/tooltip'
 import { Response } from '../Response'
@@ -30,13 +39,30 @@ export function UserRow({ item, selectable }: { item: UserItem; selectable: bool
   // instead of spanning the pane. Echoed attachments (#100) re-home into the bubble.
   return (
     <div className="group flex flex-col items-end gap-1.5">
-      {(command ||
+      {(item.routine ||
+        command ||
         files.length > 0 ||
         elements.length > 0 ||
         reviews.length > 0 ||
         pasted.length > 0 ||
         selections.length > 0) && (
         <div className="flex max-w-[80%] flex-wrap justify-end gap-1.5">
+          {item.routine && (
+            // Routine chip (#470, ADR-0028 part 5): this prompt was sent by a
+            // schedule, not typed. Same treatment as the slash-command chip beside
+            // it, for the same reason — real input the agent received, which you
+            // did not write. Stamped at SEND time (unlike the command chip, which
+            // is matched at render), because the Routine that sent it is a fact
+            // about the turn rather than a guess from the text.
+            <span
+              data-routine-chip
+              title={`Sent by the "${item.routine.name}" routine`}
+              className="inline-flex max-w-full items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-1.5 py-0.5 font-mono text-xs leading-none text-primary"
+            >
+              <Timer className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">{item.routine.name}</span>
+            </span>
+          )}
           {command && (
             <span
               data-command-chip

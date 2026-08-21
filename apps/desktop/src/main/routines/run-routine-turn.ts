@@ -1,9 +1,10 @@
-import type { RoutineOutcome, SendPromptResult } from '../../shared/ipc'
+import type { RoutineOutcome, SendPromptResult, TranscriptRoutineRef } from '../../shared/ipc'
 import type { BotStoreApi } from '../persistence/bot-store-api'
 import type { MetadataStoreApi } from '../persistence/metadata-store-api'
 import type { RoutineStoreApi } from '../persistence/routine-store-api'
 import type { PromptTurnAgent, PromptTurnGate } from '../prompt-turn'
 import { refusalMessage } from './allowed-commands'
+import { promptWithCoverage, type LateRun } from './late-run'
 import { createRoutinePermissionGate } from './routine-permission-gate'
 import type { RoutineProfileSource } from './routine-profile'
 import type { RoutineGateResult } from './write-routine-profile'
@@ -112,7 +113,23 @@ export interface RoutineTurnDeps {
    * as "what was asked, then why it did not happen" (ADR-0028 part 5: a routine
    * turn always writes an entry).
    */
-  reportFailure(args: { threadId: string; message: string; prompt?: string }): void
+  reportFailure(args: {
+    threadId: string
+    message: string
+    prompt?: string
+    /** Names the Routine on the teed prompt, so even a refused run's bubble says who sent it. */
+    routine?: TranscriptRoutineRef
+  }): void
+  /**
+   * Write the "this run is late" notice into the Bot's conversation (#470,
+   * ADR-0028 part 3), just before the prompt it explains. Copy is a renderer-side
+   * constant, so only the two timestamps cross — `lastRunAt: null` says the
+   * Routine has never run, which is the distinction this whole slice exists for.
+   *
+   * The agent is told the same fact a second time, inside its prompt, because only
+   * it can act on the period. Neither statement replaces the other.
+   */
+  reportLate(args: { threadId: string; dueAt: number; lastRunAt: number | null }): void
   /** Run the turn itself — production passes `runPromptTurn` with headless delivery. */
   runTurn(agent: RoutineTurnAgent, args: RoutineTurnPrompt, gate: PromptTurnGate): Promise<SendPromptResult>
   /** Epoch-ms clock, injected so a run's recorded timestamp is deterministic in tests. */
@@ -126,6 +143,17 @@ export interface RoutineTurnPrompt {
   workspaceId: string
   sessionId: string | null
   text: string
+  /** Stamped onto the teed prompt so the bubble wears a chip naming the Routine. */
+  routine: TranscriptRoutineRef
+}
+
+/** What a caller may say about the run it is asking for. */
+export interface RunRoutineOptions {
+  /**
+   * This run is starting later than the slot it is for — the scheduler's launch
+   * catch-up, or a deferral that finally got the Bot. Null/absent = on time.
+   */
+  late?: LateRun | null
 }
 
 /**
@@ -140,6 +168,7 @@ export interface RoutineTurnPrompt {
 export async function runRoutineTurn(
   deps: RoutineTurnDeps,
   routineId: string,
+  options: RunRoutineOptions = {},
 ): Promise<RoutineTurnResult> {
   const routine = deps.routines.get(routineId)
   // No row means nothing to record against either — the only failure this function
@@ -187,7 +216,12 @@ export async function runRoutineTurn(
     const message =
       `"${routine.name}" did not run: its permission gate could not be confirmed, so it was ` +
       `refused rather than run unguarded. ${gate.problems.join(' ')}`
-    deps.reportFailure({ threadId: routine.threadId, message, prompt: routine.prompt })
+    deps.reportFailure({
+      threadId: routine.threadId,
+      message,
+      prompt: routine.prompt,
+      routine: { name: routine.name },
+    })
     return record({ outcome: 'failed', error: message })
   }
 
@@ -199,6 +233,12 @@ export async function runRoutineTurn(
     return record({ outcome: 'deferred', error: 'The Bot was busy, so this run was skipped.' })
   }
   deps.beginProtection(agentId)
+
+  // Late is stated TWICE, and both statements happen here — after the claim, so a
+  // deferred run writes nothing at all, and before the turn, so the notice sits
+  // above the prompt it explains.
+  const late = options.late ?? null
+  if (late) deps.reportLate({ threadId: routine.threadId, dueAt: late.dueAt, lastRunAt: late.lastRunAt })
 
   // We are the permission SERVER for this turn (the ADR-0001 amendment): main
   // answers, from the Routine's allowed commands, with no renderer in the loop.
@@ -223,7 +263,9 @@ export async function runRoutineTurn(
         threadId: routine.threadId,
         workspaceId: thread.workspaceId,
         sessionId: thread.sessionId,
-        text: routine.prompt,
+        // The prompt, verbatim, plus the coverage period when the run is late.
+        text: promptWithCoverage(routine.prompt, late, routine.schedule.timezone, deps.now()),
+        routine: { name: routine.name },
       },
       {
         profileId: gate.profileId,

@@ -36,6 +36,16 @@ export interface UserItem {
   text: string
   /** Image attachments echoed with this turn (#100); absent on replay from JSONL. */
   images?: UserImage[]
+  /**
+   * The **Routine** that sent this prompt (#470, ADR-0028 part 5), when it was not
+   * typed by anyone. Renders as a chip on the bubble, exactly like an invoked
+   * slash command — the prompt is real input the agent received, so hiding it
+   * behind a system line would conceal what shaped the answer.
+   *
+   * Optional and additive: absent means "not a routine turn", which is what every
+   * older entry means, so no `REDUCER_SCHEMA_VERSION` bump.
+   */
+  routine?: { name: string }
 }
 
 export interface ReasoningItem {
@@ -195,6 +205,29 @@ export const REBOUND_NOTICE =
   "Agent context was reset — the agent couldn't resume this thread, so it starts fresh and won't recall earlier turns. Your conversation history above is preserved."
 
 /**
+ * The "this run is late" copy (#470, ADR-0028 part 3), stated by US.
+ *
+ * A renderer-side constant over the entry's two timestamps, following
+ * {@link REBOUND_NOTICE} — the stored entry carries facts, never prose. The agent
+ * is told the same thing inside its prompt, because only it can act on the period;
+ * this half exists so the marker does not depend on the model complying.
+ *
+ * `lastRunAt === null` gets its own sentence on purpose: a routine that has never
+ * run must never read like one that ran and found nothing.
+ */
+export function routineLateNotice(dueAt: number, lastRunAt: number | null): string {
+  const when = (instant: number): string => new Date(instant).toLocaleString()
+  const covered =
+    lastRunAt === null
+      ? 'It has never run before, so this report starts from scratch.'
+      : `It last ran on ${when(lastRunAt)}, and this report covers the period since then.`
+  return (
+    `Scheduled run was late — it was due on ${when(dueAt)} and ran now instead, ` +
+    `because routines only run while the app is open. ${covered}`
+  )
+}
+
+/**
  * The DURABLE FOLD-SNAPSHOT schema version (ADR-0019, #297). A folded
  * `ConversationState` is persisted as an opaque blob keyed by this constant and
  * re-hydrated by a LATER app run — so it must be bumped in ANY PR that changes
@@ -235,7 +268,7 @@ export const initialConversationState: ConversationState = {
 }
 
 export type ConversationAction =
-  | { type: 'send-prompt'; id: string; text: string; images?: UserImage[] }
+  | { type: 'send-prompt'; id: string; text: string; images?: UserImage[]; routine?: { name: string } }
   | { type: 'acp-event'; payload: unknown }
   | { type: 'turn-complete' }
   | { type: 'turn-error'; message: string }
@@ -244,6 +277,9 @@ export type ConversationAction =
   // The agent's context was reset after a failed `session/load` resume (TB4 #33):
   // append the honest "context reset" notice. Not a turn error — input stays usable.
   | { type: 'agent-rebound' }
+  // A Routine's run started later than its slot (#470): append the honest "this run
+  // was late" notice, built from the two timestamps by `routineLateNotice`.
+  | { type: 'routine-late'; dueAt: number; lastRunAt: number | null }
   // A recoverable system condition that should be visible in the transcript without
   // ending the active turn (for example, a rejected initial Agent-control setter).
   | { type: 'system-notice'; message: string }
@@ -265,7 +301,13 @@ export function conversationReducer(
         isProcessing: true,
         items: [
           ...state.items,
-          { kind: 'user', id: action.id, text: action.text, images: action.images },
+          {
+            kind: 'user',
+            id: action.id,
+            text: action.text,
+            images: action.images,
+            routine: action.routine,
+          },
         ],
       }
     case 'turn-complete':
@@ -280,6 +322,8 @@ export function conversationReducer(
       return resolvePermission(state, action.requestId, action.optionId, action.name)
     case 'agent-rebound':
       return appendNotice(state, REBOUND_NOTICE)
+    case 'routine-late':
+      return appendNotice(state, routineLateNotice(action.dueAt, action.lastRunAt))
     case 'system-notice':
       return appendNotice(state, action.message)
     case 'acp-event':

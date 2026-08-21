@@ -10,6 +10,7 @@ import {
   type ThreadConfigAxis,
   type ThreadInfo,
   type TranscriptImageRef,
+  type TranscriptRoutineRef,
 } from '../shared/ipc'
 import { controlsWithCurrentValue } from '../shared/thread-control-intent'
 import type { AttachmentStore } from './persistence/attachment-store'
@@ -95,7 +96,17 @@ export interface PromptTurnGate {
  */
 export type PromptTurnDelivery =
   | { kind: 'renderer'; sender: ThreadBoundSender }
-  | { kind: 'headless'; gate?: PromptTurnGate }
+  | {
+      kind: 'headless'
+      gate?: PromptTurnGate
+      /**
+       * The Routine that raised this turn (#470), stamped onto the teed prompt so
+       * the bubble wears a chip naming it. It rides the DELIVERY rather than
+       * `SendPromptArgs` because no renderer can ever set it: a prompt is a routine
+       * prompt because the scheduler sent it, not because someone said so.
+       */
+      routine?: TranscriptRoutineRef
+    }
 
 /** The agent surface one turn drives — structural, so tests never spawn `vibe-acp`. */
 export interface PromptTurnAgent extends SessionBinder, PendingThreadControlAgent {
@@ -285,7 +296,7 @@ export async function runPromptTurn(
     // The pre-bind hole (#456, ADR-0028 part 5): with a renderer this returns and
     // the composer renders it; headless, the return value has no reader, so the
     // Bot's own conversation is where it has to land.
-    if (delivery.kind === 'headless') reportPreBindFailure(deps, args, message)
+    if (delivery.kind === 'headless') reportPreBindFailure(deps, args, message, delivery.routine)
     if (err instanceof WorkspaceAgentError && err.authState === 'not-signed-in') {
       return { ok: false, kind: 'not-signed-in', agentId: args.agentId, authMethods: agent.authMethods }
     }
@@ -316,7 +327,10 @@ export async function runPromptTurn(
     imageRefs = await deps.attachments.saveAll(args.threadId, args.images)
     if (imageRefs.length === 0) imageRefs = undefined
   }
-  deps.bridge.tee(args.threadId, userPromptEntry(randomUUID(), args.text, imageRefs))
+  deps.bridge.tee(
+    args.threadId,
+    userPromptEntry(randomUUID(), args.text, imageRefs, routineRefOf(delivery)),
+  )
   // On a re-bind (TB4 #33), persist the "context reset" notice right AFTER the
   // user's prompt and BEFORE the turn's events — so a later reopen replays it
   // in the same position the live view rendered it (`thread:bound` -> notice).
@@ -362,10 +376,20 @@ export async function runPromptTurn(
  * bridge, and the touch cannot reject. The turn already failed; reporting it must
  * not fail louder.
  */
-function reportPreBindFailure(deps: PromptTurnDeps, args: SendPromptArgs, message: string): void {
-  deps.bridge.tee(args.threadId, userPromptEntry(randomUUID(), args.text))
+function reportPreBindFailure(
+  deps: PromptTurnDeps,
+  args: SendPromptArgs,
+  message: string,
+  routine?: TranscriptRoutineRef,
+): void {
+  deps.bridge.tee(args.threadId, userPromptEntry(randomUUID(), args.text, undefined, routine))
   deps.bridge.tee(args.threadId, turnErrorEntry(message))
   touchThread(deps, args.threadId)
+}
+
+/** The Routine marker to stamp on the teed prompt — never set for a renderer turn. */
+function routineRefOf(delivery: PromptTurnDelivery): TranscriptRoutineRef | undefined {
+  return delivery.kind === 'headless' ? delivery.routine : undefined
 }
 
 /** Bump `lastActiveAt`, fire-and-forget: a persist failure logs and gates nothing. */

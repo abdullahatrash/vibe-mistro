@@ -404,7 +404,7 @@ export type ListMetadataResult = WorkspaceThreads[]
  * — the renderer cannot import the main process. `transcript.ts` re-exports it.
  */
 export type TranscriptEntry =
-  | { t: 'user-prompt'; id: string; text: string; images?: TranscriptImageRef[] }
+  | { t: 'user-prompt'; id: string; text: string; images?: TranscriptImageRef[]; routine?: TranscriptRoutineRef }
   | { t: 'acp-event'; payload: unknown }
   | { t: 'turn-complete' }
   | { t: 'turn-error'; message: string }
@@ -414,6 +414,29 @@ export type TranscriptEntry =
   // "context reset" notice persists in history across a later reopen. The copy is
   // a renderer-side constant, so the entry carries no payload.
   | { t: 'agent-rebound' }
+  // A **Routine** run started later than its slot (#470, ADR-0028 part 3): the app
+  // was shut when it came due, or the Bot was busy through the whole window. The
+  // copy is a renderer-side constant like `agent-rebound`'s, so the entry carries
+  // only the two timestamps the sentence is about — `lastRunAt: null` says the
+  // Routine has NEVER run, which must never read like one that ran and found
+  // nothing. Written by us; the agent is told the same fact inside its prompt,
+  // because only it can act on the period.
+  | { t: 'routine-late'; dueAt: number; lastRunAt: number | null }
+
+/**
+ * The **Routine** a prompt was sent by (#470, ADR-0028 part 5) — carried on the
+ * `user-prompt` entry so the bubble can wear a chip naming it, the treatment an
+ * invoked slash command already gets and for the same reason: real input the agent
+ * received, which you did not type.
+ *
+ * OPTIONAL and additive, so no `REDUCER_SCHEMA_VERSION` bump: an entry without it
+ * reads as "not a routine turn", which is true (same precedent as
+ * `TranscriptImageRef` and `ThreadMeta.pinned`). Only the NAME is stored — a
+ * Routine's id would let a renamed or deleted Routine leave the chip unlabelled.
+ */
+export interface TranscriptRoutineRef {
+  name: string
+}
 
 /** The `readTranscript` request (ADR-0019, #297): the renderer states which
  * reducer schema it can hydrate; `forceFull` bypasses a stored-but-unparseable

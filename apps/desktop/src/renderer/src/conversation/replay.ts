@@ -128,6 +128,9 @@ function toAction(
         id: entry.id,
         text: entry.text,
         images: images && images.length > 0 ? images : undefined,
+        // Present only on a Routine's turn (#470); absent reads as "typed by you",
+        // which is what every entry written before Routines existed means.
+        routine: entry.routine,
       }
     }
     case 'acp-event':
@@ -138,6 +141,8 @@ function toAction(
       return { type: 'turn-error', message: entry.message }
     case 'agent-rebound':
       return { type: 'agent-rebound' }
+    case 'routine-late':
+      return { type: 'routine-late', dueAt: entry.dueAt, lastRunAt: entry.lastRunAt }
     case 'resolve-permission':
       return {
         type: 'resolve-permission',

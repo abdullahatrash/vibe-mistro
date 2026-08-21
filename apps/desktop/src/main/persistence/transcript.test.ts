@@ -4,6 +4,7 @@ import {
   agentReboundEntry,
   parseTranscript,
   resolvePermissionEntry,
+  routineLateEntry,
   sessionIdFromPayload,
   titleFromSessionInfoUpdate,
   TRANSCRIPT_SCHEMA_VERSION,
@@ -71,6 +72,22 @@ describe('entry constructors mirror the reducer inputs', () => {
     expect(turnCompleteEntry()).toEqual({ t: 'turn-complete' })
     expect(turnErrorEntry('boom')).toEqual({ t: 'turn-error', message: 'boom' })
     expect(agentReboundEntry()).toEqual({ t: 'agent-rebound' })
+    // A Routine's late run (#470): only the two timestamps, because the copy is a
+    // renderer-side constant — and `lastRunAt: null` means it has NEVER run, which
+    // must never read like a run that found nothing.
+    expect(routineLateEntry(1_000, 500)).toEqual({ t: 'routine-late', dueAt: 1_000, lastRunAt: 500 })
+    expect(routineLateEntry(1_000, null)).toEqual({
+      t: 'routine-late',
+      dueAt: 1_000,
+      lastRunAt: null,
+    })
+    // The Routine marker is additive: omitted for a prompt somebody typed.
+    expect(userPromptEntry('id-1', 'text', undefined, { name: 'Morning triage' })).toEqual({
+      t: 'user-prompt',
+      id: 'id-1',
+      text: 'text',
+      routine: { name: 'Morning triage' },
+    })
     expect(resolvePermissionEntry(7, 'allow')).toEqual({
       t: 'resolve-permission',
       requestId: 7,
