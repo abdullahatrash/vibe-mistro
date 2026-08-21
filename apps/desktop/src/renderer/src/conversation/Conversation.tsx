@@ -17,7 +17,7 @@ import type {
   ThreadModes,
   ThreadReasoningEffort,
 } from '../../../shared/ipc'
-import { BotHeader, type BotIdentity } from '../bots/BotHeader'
+import { BotHeader, type BotHeaderActions, type BotIdentity } from '../bots/BotHeader'
 import { FileOpenProvider } from './file-open-context'
 import { isRejectOption } from './permission-option'
 import type { FileLink } from './file-link'
@@ -107,6 +107,7 @@ export interface LiveThread {
 export function Conversation({
   thread,
   bot = null,
+  botActions = null,
   modes,
   models,
   reasoningEffort,
@@ -127,6 +128,12 @@ export function Conversation({
    * Bot's turn is an ordinary Thread turn (ADR-0027).
    */
   bot?: BotIdentity | null
+  /**
+   * Edit / Start over for a Bot's header (#447), supplied by App beside the
+   * identity. Null for an ordinary Thread and for any surface that renders a Bot
+   * without offering to change it.
+   */
+  botActions?: BotHeaderActions | null
   /** The connection's current Mode + options (#66) — display-from-session-state. */
   modes: ThreadModes | null
   /** The connection's current Model + options (#66). */
@@ -576,7 +583,7 @@ export function Conversation({
     <FileOpenProvider value={openFile}>
       <div className="conv" ref={convRef}>
         {bot ? (
-          <BotHeader bot={bot} />
+          <BotHeader bot={bot} actions={botActions} />
         ) : (
           <div className="conv__head">
             <span className="dot dot--ok" aria-hidden />

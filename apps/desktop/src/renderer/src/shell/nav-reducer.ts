@@ -16,11 +16,18 @@ export interface NavState {
   /**
    * WHICH top-level outlet view is showing (#130). `'settings'` swaps the outlet for
    * the on-demand Settings page (env/CLI status + future settings); `'skills'` for
-   * the Skills browser (#259) — both leave the Workspace/Thread selection intact so
-   * closing returns to the same conversation. Any `select-workspace` / `select-thread`
-   * (picking a project or thread from the sidebar) resets it to `'conversation'`.
+   * the Skills browser (#259); `'bot-form'` for creating or editing a **Mistro Bot**
+   * (#447) — all leave the Workspace/Thread selection intact so closing returns to
+   * the same conversation. Any `select-workspace` / `select-thread` (picking a
+   * project or thread from the sidebar) resets it to `'conversation'`.
+   *
+   * `'bot-form'` is NOT the "Bots page" ADR-0027 rules out: there is no list column
+   * and no way to browse Bots in it — it is a transient form the sidebar's ＋ (or a
+   * Bot's Edit) opens and Cancel/Save closes. WHICH Bot it is editing is App state,
+   * not nav state, for the same reason Settings' account payload is: nav answers
+   * "what am I looking at", not "with what data".
    */
-  view: 'conversation' | 'settings' | 'skills'
+  view: 'conversation' | 'settings' | 'skills' | 'bot-form'
 }
 
 export type NavAction =
@@ -30,6 +37,8 @@ export type NavAction =
   | { type: 'close-settings' }
   | { type: 'open-skills' }
   | { type: 'close-skills' }
+  | { type: 'open-bot-form' }
+  | { type: 'close-bot-form' }
   | { type: 'clear' }
 
 export const initialNavState: NavState = {
@@ -71,8 +80,14 @@ export function navReducer(state: NavState, action: NavAction): NavState {
     case 'open-skills':
       // Swap the outlet for the Skills browser (#259) — same contract as Settings.
       return state.view === 'skills' ? state : { ...state, view: 'skills' }
+    case 'open-bot-form':
+      // Swap the outlet for the Bot create/edit form (#447) — same contract again:
+      // the selection is preserved, so Cancel returns to what was on screen (a Bot's
+      // own conversation, when the form was opened from its Edit).
+      return state.view === 'bot-form' ? state : { ...state, view: 'bot-form' }
     case 'close-settings':
     case 'close-skills':
+    case 'close-bot-form':
       // Return to the conversation view, PRESERVING the current selection.
       return state.view === 'conversation' ? state : { ...state, view: 'conversation' }
     case 'clear':

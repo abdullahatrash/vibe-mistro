@@ -6,7 +6,7 @@ import type {
   ThreadConnection,
   ThreadMeta,
 } from '../../../shared/ipc'
-import type { BotIdentity } from '../bots/BotHeader'
+import type { BotHeaderActions, BotIdentity } from '../bots/BotHeader'
 import { ColdThread } from '../conversation/ColdThread'
 import { Conversation } from '../conversation/Conversation'
 import type { MessageSelection } from '../conversation/message-selection'
@@ -39,6 +39,8 @@ export function ConnectedWorkspace({
   connection,
   activeThread,
   activeBot,
+  activeBotActions,
+  conversationKey,
   isLive,
   isActive,
   busy,
@@ -64,6 +66,16 @@ export function ConnectedWorkspace({
    * because a Bot's behaviour is its profile and changing it means editing the Bot.
    */
   activeBot: BotIdentity | null
+  /** Edit / Start over for that Bot's header (#447); null for an ordinary Thread. */
+  activeBotActions: BotHeaderActions | null
+  /**
+   * The key the LIVE view is mounted under (#447). Normally the Thread id, exactly
+   * as before; after a "Start over" it changes once, which remounts `Conversation`
+   * so it drops the session it bound at mount and seeds the now-cleared cursor —
+   * see `bots/conversation-reset.ts`. Never derive this from the session id: it
+   * changes on every bind, and remounting mid-turn would drop a streaming view.
+   */
+  conversationKey: string
   /** Whether `activeThread` is hosted live on this session's agent (vs cold replay). */
   isLive: boolean
   /**
@@ -113,7 +125,7 @@ export function ConnectedWorkspace({
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-3 p-6">
         {isLive ? (
           <Conversation
-            key={activeThread.id}
+            key={conversationKey}
             thread={{
               agentId: connection.agentId,
               threadId: activeThread.id,
@@ -123,6 +135,7 @@ export function ConnectedWorkspace({
               title: activeThread.title,
             }}
             bot={activeBot}
+            botActions={activeBotActions}
             // A Bot's behaviour is its profile (ADR-0027 decision 5), so it gets no
             // Mode / Model / Reasoning-effort picker: the Mode axis is exactly where
             // its persona is selected, and a picker there is a one-click way to

@@ -121,6 +121,31 @@ describe('navReducer', () => {
       expect(navReducer(start, { type: 'open-settings' }).view).toBe('settings')
     })
   })
+
+  describe('Bot form view (#447)', () => {
+    it('open-bot-form / close-bot-form mirror the Settings contract, preserving the selection', () => {
+      // The selection MUST survive: the form is opened from a Bot's own
+      // conversation ("Edit"), and Cancel has to land back on it.
+      const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'conversation' }
+      const open = navReducer(start, { type: 'open-bot-form' })
+      expect(open).toEqual({ selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'bot-form' })
+      expect(navReducer(open, { type: 'open-bot-form' })).toBe(open) // referential no-op
+      expect(navReducer(open, { type: 'close-bot-form' })).toEqual(start)
+    })
+
+    it('selecting a Bot from the sidebar leaves the form', () => {
+      const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: null, view: 'bot-form' }
+      const next = navReducer(start, { type: 'select-thread', workspaceId: 'w1', threadId: 't-rex' })
+      expect(next).toEqual({ selectedWorkspaceId: 'w1', selectedThreadId: 't-rex', view: 'conversation' })
+    })
+
+    it('the ＋ works from Settings or Skills — the form swaps in directly', () => {
+      const fromSkills: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: null, view: 'skills' }
+      expect(navReducer(fromSkills, { type: 'open-bot-form' }).view).toBe('bot-form')
+      const fromSettings: NavState = { ...fromSkills, view: 'settings' }
+      expect(navReducer(fromSettings, { type: 'open-bot-form' }).view).toBe('bot-form')
+    })
+  })
 })
 
 describe('findSelectedThread (cold-outlet derivation)', () => {

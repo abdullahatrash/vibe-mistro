@@ -53,6 +53,7 @@ export function Shell({
   onOpenProject,
   onNewThread,
   onSelectBot,
+  onCreateBot,
   actions,
   onOpenSettings,
   onOpenSearch,
@@ -93,6 +94,8 @@ export function Shell({
   onNewThread: () => void
   /** Open a Bot's conversation in the outlet (#446) — an ordinary Thread select underneath. */
   onSelectBot: (row: BotSidebarRow) => void
+  /** Open the Bot create form in the outlet (#447) — the section's ＋ and its empty-state CTA. */
+  onCreateBot: () => void
   /** The bundled per-Thread-row actions (select / new / delete / remove / flags / rename). */
   actions: ThreadRowActions
   /** Open the routed Settings page (#130) — from the account chip's menu. */
@@ -210,6 +213,7 @@ export function Shell({
               rows={botRows}
               selectedThreadId={nav.selectedThreadId}
               onSelectBot={onSelectBot}
+              onCreateBot={onCreateBot}
             />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">

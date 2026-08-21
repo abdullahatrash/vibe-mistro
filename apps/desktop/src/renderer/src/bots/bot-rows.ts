@@ -1,4 +1,4 @@
-import type { BotRecord, ListMetadataResult } from '../../../shared/ipc'
+import type { BotRecord, ListMetadataResult, ThreadMeta } from '../../../shared/ipc'
 import type { ThreadStatusMap } from '../conversation/thread-status'
 
 /**
@@ -126,6 +126,28 @@ export function deriveBotRows(args: {
   return rows.sort(
     (a, b) => b.lastActiveAt - a.lastActiveAt || a.bot.name.localeCompare(b.bot.name),
   )
+}
+
+/**
+ * Carry the per-row **Bot** mark onto a meta the RENDERER synthesized (#447, the
+ * deferred #446 finding). Main marks every meta it lists (`markBotThreads`), but
+ * App synthesizes metas for live Threads that are not in the cold list yet — a
+ * just-created Bot before the metadata refresh lands, or the connection's own
+ * auto-opened Thread. Those arrive unmarked, and an unmarked Bot is a Bot that
+ * `partitionBots` cannot drop: its Thread shows up in the project's Thread list,
+ * as an untitled duplicate of the row already in the Bots section.
+ *
+ * Unreachable before this slice (nothing created a Bot while its Workspace was
+ * connected); reachable the moment the create form exists, which is why it is
+ * fixed here rather than there.
+ *
+ * Same shape as main's marker: it MARKS and never drops, and a meta that already
+ * carries the flag (or belongs to no Bot) is returned untouched.
+ */
+export function markBotMeta(meta: ThreadMeta, bots: readonly BotRecord[]): ThreadMeta {
+  if (meta.bot) return meta
+  const bot = bots.find((candidate) => candidate.threadId === meta.id)
+  return bot ? { ...meta, bot: { name: bot.name } } : meta
 }
 
 /** Every listed Thread's `lastActiveAt`, keyed by Thread id. */

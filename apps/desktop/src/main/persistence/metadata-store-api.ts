@@ -26,6 +26,13 @@ export interface MetadataStoreApi {
   touchThread(id: string): Promise<void>
   setThreadFlags(id: string, flags: { pinned?: boolean; archived?: boolean }): Promise<void>
   setThreadTitle(id: string, title: string | null): Promise<boolean>
+  /**
+   * Forget a Thread's ACP session cursor, so its next prompt binds a FRESH session
+   * instead of resuming (#447, "Start over"). `upsertThread` cannot express this —
+   * it coalesces `input.sessionId ?? existing.session_id`, so a null there means
+   * "keep", never "clear". The Thread, its transcript and its flags are untouched.
+   */
+  clearThreadSession(id: string): Promise<void>
   deleteThread(id: string): Promise<void>
   removeWorkspace(id: string): Promise<string[]>
   findThreadIdBySessionId(sessionId: string | null | undefined): string | null

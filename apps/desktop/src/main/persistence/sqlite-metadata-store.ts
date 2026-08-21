@@ -177,6 +177,14 @@ export class SqliteMetadataStore implements MetadataStoreApi {
     return result.changes > 0
   }
 
+  async clearThreadSession(id: string): Promise<void> {
+    // "Start over" (#447): the row survives with its title, flags and timestamps —
+    // only the session cursor goes, so the next prompt takes `ensureBoundSession`'s
+    // DRAFT branch (one `session/new`) instead of resuming the retired session.
+    if (this.stateDb.locked) return
+    this.db.prepare('UPDATE threads SET session_id = NULL WHERE id = ?').run(id)
+  }
+
   async deleteThread(id: string): Promise<void> {
     if (this.stateDb.locked) return
     this.db.prepare('DELETE FROM threads WHERE id = ?').run(id)
