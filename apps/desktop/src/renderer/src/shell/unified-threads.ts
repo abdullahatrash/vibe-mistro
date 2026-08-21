@@ -97,6 +97,32 @@ export function partitionArchived(rows: UnifiedThreadRow[]): {
 }
 
 /**
+ * Split a Workspace's rows into the ones its Thread list SHOWS and the **Mistro
+ * Bot** rows it does not (#446, ADR-0027) — the sidebar half of "hidden from the
+ * Thread list, visible in Search", a Bot having its own bounded section instead.
+ *
+ * It sits beside `partitionArchived` deliberately: both are per-row presentation
+ * splits over the same derived rows. That the exclusion belongs HERE, on a flag,
+ * rather than in main's store is argued once at `main/bots/mark-bot-threads.ts`.
+ *
+ * Both halves preserve the incoming order; pure (the input is never mutated).
+ * A DELETED Bot's Thread survives as an archived Thread whose record is gone — so
+ * it loses the flag and correctly reappears in the Archived section.
+ */
+export function partitionBots(rows: UnifiedThreadRow[]): {
+  threads: UnifiedThreadRow[]
+  bots: UnifiedThreadRow[]
+} {
+  const threads: UnifiedThreadRow[] = []
+  const bots: UnifiedThreadRow[] = []
+  for (const row of rows) {
+    if (row.thread.bot) bots.push(row)
+    else threads.push(row)
+  }
+  return { threads, bots }
+}
+
+/**
  * Whether a unified row may be deleted (pure — the safe-delete gate, TB6 / #48 /
  * #53). The hazard is tearing a session out from under a mid-turn agent. Now that
  * main pushes real per-Thread `streaming` for ALL live Threads (#53, not just the

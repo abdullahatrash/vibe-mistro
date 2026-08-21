@@ -20,6 +20,7 @@ import {
   isThreadDeletable,
   orderByPin,
   partitionArchived,
+  partitionBots,
   type UnifiedThreadRow,
 } from '../unified-threads'
 import { getOpenProjects, setOpenProjects } from '../project-open-store'
@@ -282,10 +283,15 @@ function ProjectRow({
   // The "Remove project" confirmation dialog (Codex-style): a destructive, controlled
   // modal opened from this project's ⋯ menu. Confirming calls `actions.removeWorkspace`.
   const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false)
+  // Drop this project's Mistro Bots (#446): a Bot has its own bounded sidebar
+  // section, so its Thread must not also appear here. This is the ONLY point that
+  // renders a Thread list — for the active project and every peeked one alike — so
+  // it is the only place the exclusion has to happen.
+  const { threads: threadRows } = partitionBots(rows)
   // Split archived rows out (#133) then float pinned rows to the top of the active
   // list (#132) — both pure post-processing over the derived rows (deriveUnifiedThreads
   // stays flag-agnostic). Archived rows fold into a collapsible section at the bottom.
-  const { active: activeRows, archived: archivedRows } = partitionArchived(rows)
+  const { active: activeRows, archived: archivedRows } = partitionArchived(threadRows)
   const mainRows = orderByPin(activeRows)
   // Cap the main list, PINNING the selected row so opening a thread that sorts below
   // the cap never hides its (highlighted) row (#113 review). Only the active project

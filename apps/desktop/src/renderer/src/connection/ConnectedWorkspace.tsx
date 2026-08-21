@@ -6,6 +6,7 @@ import type {
   ThreadConnection,
   ThreadMeta,
 } from '../../../shared/ipc'
+import type { BotIdentity } from '../bots/BotHeader'
 import { ColdThread } from '../conversation/ColdThread'
 import { Conversation } from '../conversation/Conversation'
 import type { MessageSelection } from '../conversation/message-selection'
@@ -37,6 +38,7 @@ import type { SideThreadLifecycle } from '../side-panel/side-panel-store'
 export function ConnectedWorkspace({
   connection,
   activeThread,
+  activeBot,
   isLive,
   isActive,
   busy,
@@ -55,6 +57,13 @@ export function ConnectedWorkspace({
   connection: ThreadConnection
   /** The Thread App chose to show (its remembered active Thread for this Workspace). */
   activeThread: ThreadMeta
+  /**
+   * Who `activeThread` is when it belongs to a **Mistro Bot** (#446), else null.
+   * A Bot's conversation IS an ordinary Thread conversation (ADR-0027) — this only
+   * swaps the head for the Bot's identity and withdraws the agent-control pickers,
+   * because a Bot's behaviour is its profile and changing it means editing the Bot.
+   */
+  activeBot: BotIdentity | null
   /** Whether `activeThread` is hosted live on this session's agent (vs cold replay). */
   isLive: boolean
   /**
@@ -113,9 +122,14 @@ export function ConnectedWorkspace({
               sessionId: seedSessionId,
               title: activeThread.title,
             }}
-            modes={controls?.modes ?? null}
-            models={controls?.models ?? null}
-            reasoningEffort={controls?.reasoningEffort ?? null}
+            bot={activeBot}
+            // A Bot's behaviour is its profile (ADR-0027 decision 5), so it gets no
+            // Mode / Model / Reasoning-effort picker: the Mode axis is exactly where
+            // its persona is selected, and a picker there is a one-click way to
+            // silently switch off the personality the user configured.
+            modes={activeBot ? null : (controls?.modes ?? null)}
+            models={activeBot ? null : (controls?.models ?? null)}
+            reasoningEffort={activeBot ? null : (controls?.reasoningEffort ?? null)}
             onSetConfig={onSetConfig}
             onAuthExpired={onAuthExpired}
             onBound={onBound}

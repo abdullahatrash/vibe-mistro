@@ -17,6 +17,7 @@ import type {
   ThreadModes,
   ThreadReasoningEffort,
 } from '../../../shared/ipc'
+import { BotHeader, type BotIdentity } from '../bots/BotHeader'
 import { FileOpenProvider } from './file-open-context'
 import { isRejectOption } from './permission-option'
 import type { FileLink } from './file-link'
@@ -105,6 +106,7 @@ export interface LiveThread {
  */
 export function Conversation({
   thread,
+  bot = null,
   modes,
   models,
   reasoningEffort,
@@ -117,6 +119,14 @@ export function Conversation({
   skipInitialHydration = false,
 }: {
   thread: LiveThread
+  /**
+   * Who this Thread is, when it is a **Mistro Bot**'s conversation (#446) — the
+   * head renders its identity instead of the auto-generated Thread title, because a
+   * teammate's identity does not change with what you last asked it. Null (the
+   * default) for every ordinary Thread. Everything below the head is unchanged: a
+   * Bot's turn is an ordinary Thread turn (ADR-0027).
+   */
+  bot?: BotIdentity | null
   /** The connection's current Mode + options (#66) — display-from-session-state. */
   modes: ThreadModes | null
   /** The connection's current Model + options (#66). */
@@ -301,6 +311,13 @@ export function Conversation({
       if (e.rebound) dispatch({ type: 'agent-rebound' })
       if (e.controlFailures && e.controlFailures.length > 0) {
         dispatch({ type: 'system-notice', message: controlFailureNotice(e.controlFailures) })
+      }
+      // A Mistro Bot whose persona could NOT be selected on this session (#446).
+      // ADR-0027: failure is loud — a Bot that quietly answers as a plain agent is
+      // the one outcome the design forbids, so it says so in the transcript, where
+      // the answers it is about to give will appear.
+      if (e.botProfileError) {
+        dispatch({ type: 'system-notice', message: e.botProfileError })
       }
     })
   }, [thread.threadId])
@@ -558,11 +575,15 @@ export function Conversation({
     // for the FileChips streamdown renders far below in the assistant markdown.
     <FileOpenProvider value={openFile}>
       <div className="conv" ref={convRef}>
-        <div className="conv__head">
-          <span className="dot dot--ok" aria-hidden />
-          <span className="conv__title">{title}</span>
-          <span className="badge">connected</span>
-        </div>
+        {bot ? (
+          <BotHeader bot={bot} />
+        ) : (
+          <div className="conv__head">
+            <span className="dot dot--ok" aria-hidden />
+            <span className="conv__title">{title}</span>
+            <span className="badge">connected</span>
+          </div>
+        )}
 
         <UsageBar state={state} />
 

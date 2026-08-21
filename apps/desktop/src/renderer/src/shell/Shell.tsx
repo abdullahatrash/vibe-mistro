@@ -4,6 +4,8 @@ import type { ListMetadataResult } from '../../../shared/ipc'
 import type { NavState } from './nav-reducer'
 import type { UnifiedThreadRow } from './unified-threads'
 import { WorkspaceNav, type ThreadRowActions, type WorkspaceFlags } from './workspace-nav'
+import { BotsSection } from '../bots/BotsSection'
+import type { BotSidebarRow } from '../bots/bot-rows'
 import { UpdateReadyChip } from './UpdateReadyChip'
 import {
   clampSidebarWidth,
@@ -44,11 +46,13 @@ export function Shell({
   nav,
   workspaceFlags,
   rows,
+  botRows,
   protectedThreadId,
   outlet,
   opening,
   onOpenProject,
   onNewThread,
+  onSelectBot,
   actions,
   onOpenSettings,
   onOpenSearch,
@@ -68,8 +72,15 @@ export function Shell({
   nav: NavState
   /** Per-Workspace rolled-up live status, keyed by Workspace id (switcher badges). */
   workspaceFlags: Readonly<Record<string, WorkspaceFlags>>
-  /** The unified rows (cold + live) for the SELECTED Workspace. */
+  /**
+   * The unified rows (cold + live) for the SELECTED Workspace, exactly as App
+   * derived them — Mistro Bot rows INCLUDED. `WorkspaceNav` drops them per project
+   * (`partitionBots`) at the single point that renders a Thread list; anything new
+   * that reads these rows here must do the same.
+   */
   rows: UnifiedThreadRow[]
+  /** The Bots, most-recently-active first, for the bounded section above Projects (#446). */
+  botRows: BotSidebarRow[]
   /** The connection's primary Thread (never deletable mid-connection), or null. */
   protectedThreadId: string | null
   /** The fully-computed conversation outlet (connection views / cold replay). */
@@ -80,6 +91,8 @@ export function Shell({
   onOpenProject: () => void
   /** Mint a New-thread draft on the selected Workspace's live agent. */
   onNewThread: () => void
+  /** Open a Bot's conversation in the outlet (#446) — an ordinary Thread select underneath. */
+  onSelectBot: (row: BotSidebarRow) => void
   /** The bundled per-Thread-row actions (select / new / delete / remove / flags / rename). */
   actions: ThreadRowActions
   /** Open the routed Settings page (#130) — from the account chip's menu. */
@@ -182,12 +195,21 @@ export function Shell({
             and account stay put while just the projects scroll. The INNER holds the
             resized width (not shrinking) so content slides under the clip on collapse. */}
         <div className="flex h-full flex-none flex-col gap-3 p-3" style={{ width }}>
-          <div className="flex flex-none flex-col gap-3">
+          <div className="flex min-h-0 flex-none flex-col gap-3">
             <PrimaryNav
               busy={opening}
               onNewThread={onNewThread}
               onOpenSearch={onOpenSearch}
               onOpenSkills={onOpenSkills}
+            />
+            {/* Bots sit ABOVE Projects and OUTSIDE the projects scroll region, with
+                their own bound + scrollbar (#446). That is the whole point: the
+                section can never grow past its cap, so Projects below stays reachable
+                however many teammates exist. */}
+            <BotsSection
+              rows={botRows}
+              selectedThreadId={nav.selectedThreadId}
+              onSelectBot={onSelectBot}
             />
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">

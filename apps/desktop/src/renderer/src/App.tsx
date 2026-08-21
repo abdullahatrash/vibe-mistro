@@ -85,6 +85,10 @@ import {
   type SideThreadLifecycle,
 } from './side-panel/side-panel-store'
 import { deriveUnifiedThreads, workspaceFlags, type UnifiedThreadRow } from './shell/unified-threads'
+import { botBeingRead, deriveBotRows, type BotSidebarRow } from './bots/bot-rows'
+import { getBotsSeen, markBotSeen } from './bots/bot-seen-store'
+import { useBots } from './bots/use-bots'
+import type { BotIdentity } from './bots/BotHeader'
 import { EmptyState } from './shell/EmptyState'
 import { ColdOutlet, TransientOutlet } from './shell/Outlet'
 import { SettingsView } from './settings/SettingsView'
@@ -198,6 +202,14 @@ export function App(): JSX.Element {
   // Persisted Workspaces + Threads (ADR-0005), listed cold on launch from
   // metadata alone — no agent spawned, no transcript loaded.
   const [recents, setRecents] = useState<ListMetadataResult>([])
+  // The Mistro Bot records (#446, ADR-0027). Their ORDER and timestamps come from
+  // the Threads in `recents`, not from these records — a record moves on an edit,
+  // a conversation moves on a turn, and the sidebar answers "who did I speak to
+  // most recently" (PRD story 5).
+  const { bots } = useBots()
+  // When each Bot was last OPENED — renderer-only UI state (localStorage), the one
+  // input the unread dot needs that nothing else in the app tracks.
+  const [botsSeen, setBotsSeen] = useState(() => getBotsSeen(window.localStorage))
   // Restoration reconciliation must happen exactly once. Re-running it for live
   // state changes can race a just-bound Side Thread's metadata refresh or erase an
   // in-memory Draft (which intentionally has no metadata yet).
@@ -559,6 +571,30 @@ export function App(): JSX.Element {
     })
   }, [])
 
+  // Keep the SELECTED Bot's "seen" stamp current (#446) — the input the sidebar's
+  // unread dot is derived from. The stamp is taken when a Bot becomes the selected
+  // Thread, again whenever its live status flips (a turn opening or settling while
+  // it is on screen), and once more as it stops being selected.
+  //
+  // Stamping ONLY at open is the bug this shape exists to avoid: your own prompt
+  // and the agent's reply both advance the Thread's `lastActiveAt` after the open,
+  // so on the next launch every Bot you had actually used would carry a dot that
+  // means "unread" about a conversation you read to the end. Re-stamping while it
+  // is watched is what makes the dot mean something.
+  //
+  // Keyed off the SELECTION, not off a click handler, so the sidebar row, a ⌘K hit
+  // and a back/forward jump all count as reading it. `markBotSeen` is monotonic, so
+  // a redundant stamp is harmless; the deps are primitives, so this cannot loop.
+  const readBotThreadId = botBeingRead(nav.selectedThreadId, bots)
+  const readBotStatus = readBotThreadId ? statuses[readBotThreadId] : undefined
+  useEffect(() => {
+    if (!readBotThreadId) return
+    const stamp = (): void =>
+      setBotsSeen(markBotSeen(window.localStorage, readBotThreadId, Date.now()))
+    stamp()
+    return stamp
+  }, [readBotThreadId, readBotStatus?.streaming, readBotStatus?.needsAttention])
+
   // Wire the replay-cache invalidation ONCE: any acp:event session-tagged to a
   // cached (unmounted) Thread means main teed to its transcript behind our back,
   // and a thread:title push covers the cold store-only rename — both dirty the
@@ -736,6 +772,45 @@ export function App(): JSX.Element {
     }
   }
 
+  // The Bots section (#446): the records joined with their Threads' activity and
+  // live status. Bots do NOT appear in the Thread list — `partitionBots` drops them
+  // there — but they are still ordinary Threads underneath, which is why selecting
+  // one is just `selectThreadInWorkspace`.
+  const botRows = deriveBotRows({
+    bots,
+    workspaces: recents,
+    statuses,
+    seen: botsSeen,
+    selectedThreadId: nav.selectedThreadId,
+  })
+
+  /**
+   * Open a Bot from the sidebar section. It is the ORDINARY Thread-selection path —
+   * which connects its Workspace if needed, hosts the Thread, and replays its
+   * history — because a Bot's conversation IS an ordinary Thread conversation
+   * (ADR-0027). Nothing Bot-specific happens here.
+   */
+  function selectBot(row: BotSidebarRow): void {
+    selectThreadInWorkspace(row.workspaceId, row.bot.threadId)
+  }
+
+  /**
+   * Who a Thread is, when it is a Bot — the conversation header's source (#446).
+   * Null for every ordinary Thread, which is what keeps the Bot-ness out of the
+   * conversation slice: it renders an identity it was handed, it never looks one up.
+   */
+  function botIdentityFor(threadId: string): BotIdentity | null {
+    const bot = bots.find((b) => b.threadId === threadId)
+    if (!bot) return null
+    return {
+      threadId: bot.threadId,
+      name: bot.name,
+      colour: bot.colour,
+      description: bot.description,
+      projectName: recents.find((w) => w.id === bot.workspaceId)?.displayName ?? '',
+    }
+  }
+
   /** The connected view for a Workspace (the controlled outlet). `busy` is the
    *  Workspace's rolled-up streaming flag (#86) — threaded to the Changes panel so the
    *  commit affordance is disabled while a turn is in flight (the v1 guard). Sign-out now
@@ -855,6 +930,7 @@ export function App(): JSX.Element {
         key={conn.agentId}
         connection={conn}
         activeThread={activeThread}
+        activeBot={botIdentityFor(activeThread.id)}
         isLive={isLive}
         isActive={isActive}
         busy={busy}
@@ -1135,11 +1211,13 @@ export function App(): JSX.Element {
         nav={nav}
         workspaceFlags={wsFlags}
         rows={rows}
+        botRows={botRows}
         protectedThreadId={protectedThreadId}
         outlet={outlet}
         opening={opening}
         onOpenProject={() => void openProject()}
         onNewThread={startNewChat}
+        onSelectBot={selectBot}
         actions={{
           selectThread: selectThreadInWorkspace,
           newThreadInWorkspace,

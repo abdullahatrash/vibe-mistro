@@ -33,6 +33,18 @@ export interface SearchHit {
   title: string | null
   /** Archived Threads are searchable but badged (and hidden from resting recents). */
   archived: boolean
+  /**
+   * The **Mistro Bot**'s name when this hit is a Bot's conversation (#446), absent
+   * otherwise. Bots are hidden from the sidebar's Thread list but deliberately KEPT
+   * here — both in query results (PRD story 11: the longest-running conversations
+   * must not be a hole in Search) and in the resting recents (story 12: a switcher
+   * should list what you switch to most).
+   *
+   * The palette shows this INSTEAD of `title` and marks the row, because a Thread
+   * title is what Vibe made of the first prompt while the name is who the teammate
+   * is — and it is matched on, so searching a Bot by name finds it.
+   */
+  botName?: string
   /** Epoch-ms recency — the ranking tiebreak and the row's relative timestamp. */
   lastActiveAt: number
   /** One display line from the best-matching message (whitespace-collapsed, windowed). */
