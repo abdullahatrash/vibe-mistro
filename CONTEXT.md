@@ -47,6 +47,28 @@ _Avoid_: reset the Bot / clear history / wipe (nothing is cleared and no history
 goes: the agent stops remembering the conversation above), new thread (a Bot is ONE Thread; starting
 over keeps it).
 
+**Routine** (a Mistro Bot capability):
+A named schedule attached to a **Mistro Bot**. When it is due, the app runs ONE headless prompt turn
+into that Bot's existing conversation and reports there — so the report lands where the previous ones
+are. Several per Bot, capped. A Routine holds a structured schedule (`daily` / `weekdays` / `weekly` +
+a time + a stored IANA timezone), a prompt, its **allowed commands**, and whether it is active.
+Routines fire only while the app is open — a limit that is always stated, never disguised — and a run
+missed while it was closed happens ONCE on next launch, marked late (ADR-0028).
+_Avoid_: schedule (that is the Routine's `when`, not the Routine), cron job / job / task (nothing here
+is cron-shaped, and "task" means work in a turn), **Scheduled** (the name of the parked Workspace-level
+epic #175 this replaced — routines belong to Bots, not Workspaces), trigger (time only for v1, so
+there is nothing else to trigger on).
+
+**Allowed commands** (a Routine's permission answer):
+The literal invocations a **Routine** may run unattended. Empty by default, matched against the WHOLE
+invocation string, and a command carrying a redirect, pipe or substitution is refused unless that exact
+string is listed. Because nobody is at the keyboard, main answers the agent's **Permission requests**
+from this list rather than the user, and the FIRST denial cancels the turn and reports the command that
+caused it. Never seeded from what the Bot has already run while you watched (ADR-0028).
+_Avoid_: allowlist (unqualified — Vibe's own profile config has one too, and they are different lists
+doing different jobs: that one makes Vibe ASK us, this one is our ANSWER), permissions, whitelist,
+safe commands (nothing here is judged safe — it is listed or it is not).
+
 **ACP session**:
 The protocol-level handle returned by `session/new` and addressed by `session/*` methods. Lives only
 at the main-process / protocol layer; never surfaced in the UI. One `vibe-acp` process hosts many.
