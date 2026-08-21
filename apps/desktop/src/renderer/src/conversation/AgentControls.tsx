@@ -8,6 +8,7 @@ import type {
 } from '../../../shared/ipc'
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '../ui/menu'
 import { cn } from '../lib/utils'
+import { modesWithoutBotProfiles } from './ordinary-modes'
 
 /**
  * The composer's agent-controls (#66): Mode / Model / Reasoning-effort pickers,
@@ -22,9 +23,12 @@ import { cn } from '../lib/utils'
  * streams (a pre-prompt draft is NOT processing, so its pickers are live: #75 lets the
  * user pre-select before a session exists, and App caches the pick to apply on the
  * first bind). The row renders nothing when the agent advertises no axes at all.
+ *
+ * One deliberate subtraction from session state: Mistro Bot personas are filtered
+ * out of the Mode list (`modesWithoutBotProfiles`, ADR-0007's recorded amendment).
  */
 export function AgentControls({
-  modes,
+  modes: sessionModes,
   models,
   reasoningEffort,
   disabled,
@@ -36,6 +40,11 @@ export function AgentControls({
   disabled: boolean
   onSetConfig: (axis: ThreadConfigAxis, value: string) => void
 }): JSX.Element | null {
+  // Mistro Bot personas are agent profiles, and Vibe publishes every profile as a
+  // selectable mode — so an ordinary Thread's approval-posture list would fill up
+  // with the user's teammates (#448). Filtered HERE, at the one component that
+  // renders a Mode picker, so no caller can route around it.
+  const modes = modesWithoutBotProfiles(sessionModes)
   if (!modes && !models && !reasoningEffort) return null
   return (
     // min-w-0 + no wrap: in a narrow composer the chips SHRINK (labels truncate, see

@@ -697,6 +697,15 @@ With a live session already switched to `zz-probe-bot`:
 picked up by the next Thread. The failure mode to design for is the opposite one: a mode id we cached
 per-Thread can vanish from `availableModes` between sessions, and re-asserting it will fail *silently*.
 
+**Addendum (captured 2026-08-21 for #448, vibe-acp 2.24.1): `session/load` re-scans too.** The
+`session/load` observation in §14.5 was taken from a *fresh process*, so it could not tell a rescan
+from a process-start cache. Probed directly, in ONE long-running process: `session/new` (no custom
+profile on disk) → prompt → write `~/.vibe/agents/<id>.toml` + the prompt `.md` → `session/load` of
+that same session ⇒ the load result **does** list the newly written profile in `availableModes` (a
+control `session/new` in the same process agreed). ⇒ **every** session result — new or load — carries
+a scan of the registry as it is at that moment, which is what lets a client treat an absent profile
+id as evidence the file is gone rather than as a stale list.
+
 ### 14.7 Safety note on the probe
 
 The probe answers every `session/request_permission` with `reject_once` and refuses

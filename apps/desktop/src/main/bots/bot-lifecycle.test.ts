@@ -1,7 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { BotRecord } from '../../shared/ipc'
 import type { BotInsert, BotPatch, BotStoreApi } from '../persistence/bot-store-api'
-import { createBot, deleteBot, listBots, updateBot, type BotLifecycleDeps } from './bot-lifecycle'
+import {
+  createBot,
+  deleteBot,
+  listBots,
+  rebuildBotProfile,
+  updateBot,
+  type BotLifecycleDeps,
+} from './bot-lifecycle'
 import type { BotProfileSource } from './bot-profile'
 import type { WriteBotProfileResult } from './write-bot-profile'
 
@@ -314,5 +321,65 @@ describe('listBots', () => {
     const h = harness()
     await createBot(h.deps, { workspaceId: 'ws-1', name: 'Rex', colour: '#fff' })
     expect(listBots(h.deps).map((b) => b.name)).toEqual(['Rex'])
+  })
+})
+
+describe('rebuildBotProfile', () => {
+  it('re-writes the profile files from the record, persona and id intact', async () => {
+    const h = harness()
+    const created = await createBot(h.deps, {
+      workspaceId: 'ws-1',
+      name: 'Rex',
+      colour: '#fff',
+      instructions: 'You know this project.',
+    })
+    if (!created.ok) throw new Error('setup failed')
+    h.written.length = 0
+
+    const rebuilt = await rebuildBotProfile(h.deps, { threadId: created.bot.threadId })
+
+    expect(rebuilt.ok).toBe(true)
+    expect(h.written).toEqual([
+      {
+        // The id the live session selected as a mode is NEVER re-minted.
+        profileId: created.bot.profileId,
+        name: 'Rex',
+        description: '',
+        instructions: 'You know this project.',
+      },
+    ])
+  })
+
+  it('re-stamps updatedAt, so the open-path check stops accusing the profile', async () => {
+    // `assessBotProfile` only calls a profile missing when the agent's registry
+    // reading is NEWER than the last write — so a rebuild must move that stamp.
+    const h = harness()
+    const created = await createBot(h.deps, { workspaceId: 'ws-1', name: 'Rex', colour: '#fff' })
+    if (!created.ok) throw new Error('setup failed')
+
+    const rebuilt = await rebuildBotProfile(h.deps, { threadId: created.bot.threadId })
+
+    if (!rebuilt.ok) throw new Error('rebuild failed')
+    expect(rebuilt.bot.updatedAt).toBeGreaterThan(created.bot.updatedAt)
+  })
+
+  it('reports a write failure instead of claiming a repair', async () => {
+    const h = harness()
+    const created = await createBot(h.deps, { workspaceId: 'ws-1', name: 'Rex', colour: '#fff' })
+    if (!created.ok) throw new Error('setup failed')
+    h.writeResult = { ok: false, reason: 'io', problems: ['EACCES'] }
+
+    const rebuilt = await rebuildBotProfile(h.deps, { threadId: created.bot.threadId })
+
+    expect(rebuilt).toEqual({ ok: false, reason: 'io', problems: ['EACCES'] })
+  })
+
+  it('refuses an unknown Bot — there is no record to rebuild from', async () => {
+    const h = harness()
+    expect(await rebuildBotProfile(h.deps, { threadId: 'nope' })).toEqual({
+      ok: false,
+      reason: 'notFound',
+      problems: ['No such Bot.'],
+    })
   })
 })

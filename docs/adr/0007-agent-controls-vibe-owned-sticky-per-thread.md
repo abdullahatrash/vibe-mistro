@@ -62,6 +62,40 @@ reflection, re-assert after resume) is unchanged. What changed underneath it:
 - Both drifts failed **silently** (a hidden picker, a dead setter). `missingControlAxes` now logs any
   axis the agent stops advertising, so the next drift leaves a trace instead of vanishing.
 
+## Amendment (#448, ADR-0027, 2026-08-21) — Mistro Bot profiles are filtered out of the Mode picker
+
+A **Mistro Bot**'s persona is a Vibe agent profile we generate, and Vibe publishes *every*
+`AgentType.AGENT` profile as a selectable mode. Left alone, every Bot a user owns would appear in
+every ordinary Thread's Mode picker, beside `ask` and `plan` — a list of approval postures filling up
+with teammates. Hiding them Vibe-side is impossible: `_is_primary_mode` re-derives from
+`build_mode_state`, so the presentation filter **is** the authorization gate (probed, #424).
+
+So the Mode picker **omits every `mistro-bot-<uuid>` id** — client-side and deliberate
+(`src/renderer/src/conversation/ordinary-modes.ts`, applied in `AgentControls`). This is a departure
+from display-from-session-state, and it is recorded here rather than assumed: the principle forbids
+**inventing** or **staling** state, not presenting a known subset. Nothing is fabricated, nothing goes
+stale, and the ids removed are only ever ones we minted — the `mistro-bot-<uuid>` shape is a
+mechanical ownership test, so a hand-written profile of the user's is never hidden from them.
+
+Two related consequences of the same design, for the reader who arrives here from the picker:
+
+- A **Bot's own** conversation shows no Mode, Model or reasoning-effort picker at all. Its persona is
+  selected on the Mode axis, so a Mode picker would offer `plan` as a peer of the personality — and
+  picking it would silently switch the Bot off while it kept its name, row and history.
+- The re-assert-after-resume choreography above is **in-memory by design**, which is right for a
+  Thread and not enough for a Bot: a cold restart has no cache. A Bot's `profile_id` is therefore
+  durable in our store and re-asserted on **every bind that produces a fresh session result** — a
+  mint, a re-bind, or a `session/load` resume (`src/main/bots/select-bot-profile.ts`). A plain reuse
+  of a session already bound this run is skipped, which is only safe because a Bot never binds to a
+  session that could not host its persona in the first place (it declines the eager primary session
+  unless that session advertises the profile). The re-assertion goes through `WorkspaceAgent.setMode`,
+  which prefers the **validating** `session/set_config_option` wherever the session advertises the
+  `mode` config option — every 2.24.x binary does, and 2.24 is our floor. The qualifier matters: the
+  same method falls back to `session/set_mode` for a session that advertises no such option, and that
+  method's silent no-op on an unknown id would leave a nameless agent wearing a teammate's name. When
+  the profile is absent from the session's advertised modes, the app says so (banner + rebuild)
+  instead of quietly proceeding.
+
 ## Considered alternatives
 
 - **Persist the selection per-Thread in our metadata (committed on the thread +
