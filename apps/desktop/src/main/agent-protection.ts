@@ -13,7 +13,10 @@
  *     disposed while a prompt is running;
  *   - mid-sign-in (`signingInAgents`) — a backgrounded delegated browser OAuth can
  *     pend longer than the idle timeout, so the agent is shielded for the flow's
- *     duration (a one-shot touch wouldn't outlast `IDLE_EVICT_MS`).
+ *     duration (a one-shot touch wouldn't outlast `IDLE_EVICT_MS`);
+ *   - running a **Routine** (`routineAgents`, #468/ADR-0028) — a headless turn has
+ *     nobody watching it, so nothing else would notice the agent being trimmed
+ *     out from under it.
  */
 export interface ProtectionState {
   /** The agentId of the currently selected (on-screen) Workspace, or null. */
@@ -22,11 +25,23 @@ export interface ProtectionState {
   inFlightTurns: ReadonlyMap<string, number>
   /** Agents with a sign-in flow in progress. */
   signingInAgents: ReadonlySet<string>
+  /**
+   * Agents running a Routine's headless turn (#468, ADR-0028).
+   *
+   * A SEPARATE signal from `inFlightTurns` because it covers a WIDER window: the
+   * whole run, from the acquire through `start()`, the `session/load` resume and
+   * the persona re-select, not just the streaming `session/prompt`. That pre-prompt
+   * stretch is exactly where the minute-ly cap sweep could bite — a Bot Thread long
+   * enough to be worth a Routine is a Bot Thread whose resume is slow — and it is
+   * the window `inFlightTurns` does not cover.
+   */
+  routineAgents: ReadonlySet<string>
 }
 
 export function isProtected(agentId: string, state: ProtectionState): boolean {
   if (agentId === state.activeAgentId) return true
   if ((state.inFlightTurns.get(agentId) ?? 0) > 0) return true
   if (state.signingInAgents.has(agentId)) return true
+  if (state.routineAgents.has(agentId)) return true
   return false
 }

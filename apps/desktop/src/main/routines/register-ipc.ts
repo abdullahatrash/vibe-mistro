@@ -19,29 +19,55 @@ import {
   updateRoutine,
   type RoutineLifecycleDeps,
 } from './routine-lifecycle'
+import {
+  runRoutineTurn,
+  type RoutineTurnDeps,
+  type RoutineTurnResult,
+} from './run-routine-turn'
 
 /**
  * The Routine CRUD handlers (#467, ADR-0028), registered beside their modules
  * like the bots / git / files registrars. Thin wrappers: every decision lives in
  * `routine-lifecycle.ts` and the pure validator under it.
  *
- * Nothing here fires anything. The scheduler, the headless turn and the
- * missed-run detector are later slices; this registrar only lets a Routine be
- * written down.
+ * Nothing here FIRES anything, and no handler runs a turn. What this registrar
+ * also does since #468 is ASSEMBLE the headless turn from the main-side seams the
+ * caller passes in, and hand the assembled entry point back — so the scheduler
+ * (#470) has exactly one thing to reach for, and everything the run needs stays
+ * injected rather than reached for through module state.
  */
 
 export interface RoutinesIpcDeps {
   routines: RoutineStoreApi
   /** Read-only Bot access: a Routine can only ever be attached to a Bot. */
   bots: Pick<BotStoreApi, 'get'>
+  /**
+   * The main-side half of a headless turn (#468) — the pool, the busy claim, the
+   * eviction protection and the turn itself. Only `index.ts` holds these, which is
+   * why they arrive as seams; `run-routine-turn.ts` documents each one.
+   */
+  turn: Omit<RoutineTurnDeps, 'routines' | 'bots'>
 }
 
-export function registerRoutinesIpc(deps: RoutinesIpcDeps): void {
+/** What the registrar hands back: the ONE way to run a Routine's turn. */
+export interface RoutinesRegistration {
+  /**
+   * Run this Routine's prompt into its Bot's conversation NOW, with nobody
+   * watching, and record how it went. Resolves with the outcome; never rejects.
+   *
+   * The scheduler (#470) is the intended caller — deciding WHEN a Routine is due
+   * is deliberately not this slice's business, so nothing calls this yet.
+   */
+  runRoutineNow(routineId: string): Promise<RoutineTurnResult>
+}
+
+export function registerRoutinesIpc(deps: RoutinesIpcDeps): RoutinesRegistration {
   const lifecycle: RoutineLifecycleDeps = {
     routines: deps.routines,
     bots: deps.bots,
     mintRoutineId: () => randomUUID(),
   }
+  const turn: RoutineTurnDeps = { ...deps.turn, routines: deps.routines, bots: deps.bots }
 
   ipcMain.handle(
     IPC.routinesList,
@@ -64,4 +90,6 @@ export function registerRoutinesIpc(deps: RoutinesIpcDeps): void {
     IPC.routinesDelete,
     (_event, args: RoutinesDeleteArgs): RoutinesDeleteResult => deleteRoutine(lifecycle, args),
   )
+
+  return { runRoutineNow: (routineId) => runRoutineTurn(turn, routineId) }
 }
