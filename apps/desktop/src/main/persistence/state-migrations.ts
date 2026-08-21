@@ -172,4 +172,46 @@ export const STATE_MIGRATIONS: readonly Migration[] = [
       `)
     },
   },
+  {
+    id: 6,
+    name: 'routines',
+    up: (db) => {
+      // A Routine (#467, ADR-0028): a named schedule attached to a Mistro Bot.
+      //
+      // `thread_id` references `bots`, NOT `threads`, and that is the load-bearing
+      // choice here: a Routine belongs to a BOT (ADR-0028 part 1), so the row must
+      // go when the Bot does — and `bots:delete` keeps the Thread (it archives the
+      // conversation), so a `threads` reference would leave Routines behind for a
+      // teammate that no longer exists. The cascade still reaches all the way out,
+      // because `bots` itself cascades from `threads` and from `workspaces`.
+      //
+      // `schedule` and `allowed_commands` are JSON: the schedule is a structured
+      // value whose `kind` discriminator must admit a future `cron` variant with
+      // NO migration (ADR-0028 part 2), and the allowed commands are a list. Both
+      // are read and written whole, never queried into, so a column each would buy
+      // nothing and cost a migration per variant.
+      //
+      // There is NO `next_run_at` column, deliberately: a stored next-fire is a
+      // value somebody must remember to rewrite, which is the exact failure mode
+      // the derivation in `shared/schedule` exists to remove (ADR-0028 part 6).
+      db.exec(`
+        CREATE TABLE routines (
+          id               TEXT PRIMARY KEY,
+          thread_id        TEXT NOT NULL REFERENCES bots(thread_id) ON DELETE CASCADE,
+          name             TEXT NOT NULL,
+          prompt           TEXT NOT NULL,
+          schedule         TEXT NOT NULL,
+          allowed_commands TEXT NOT NULL,
+          active           INTEGER NOT NULL,
+          last_run_at      INTEGER,
+          last_outcome     TEXT,
+          last_error       TEXT,
+          created_at       INTEGER NOT NULL,
+          updated_at       INTEGER NOT NULL
+        );
+
+        CREATE INDEX idx_routines_thread ON routines(thread_id, created_at);
+      `)
+    },
+  },
 ]
