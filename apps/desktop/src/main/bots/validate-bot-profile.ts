@@ -3,6 +3,7 @@ import {
   BOT_DESCRIPTION_MAX_LENGTH,
   BOT_INSTRUCTIONS_MAX_LENGTH,
   BOT_NAME_MAX_LENGTH,
+  hasBotControlCharacter,
 } from '../../shared/bot-limits'
 import type { BotProfileFiles, BotProfileSource } from './bot-profile'
 import { isMistroBotProfileId } from './profile-id'
@@ -59,17 +60,9 @@ const PROFILE_OVERRIDE_KEYS = new Set(['system_prompt_id'])
 /** `AgentSafety` (vibe/agents.py). Anything else raises on load and drops the profile. */
 const PROFILE_SAFETY_VALUES = new Set(['safe', 'neutral', 'destructive', 'yolo'])
 
-/**
- * The field bounds moved to `shared/bot-limits` in #447 so the renderer's Bot form
- * enforces the SAME numbers this validator does; re-exported here because this is
- * still where they are ENFORCED, and every existing reader imports them from here.
- */
-export {
-  BOT_COLOUR_MAX_LENGTH,
-  BOT_DESCRIPTION_MAX_LENGTH,
-  BOT_INSTRUCTIONS_MAX_LENGTH,
-  BOT_NAME_MAX_LENGTH,
-}
+// The bounds and the control-character rule live in `shared/bot-limits` (#447) so
+// the renderer's Bot form applies exactly what this validator enforces. Read them
+// from there — deliberately NOT re-exported here, so there is one import path.
 
 /** `#abc` … `#aabbccdd`. */
 const BOT_COLOUR_HEX = /^#[0-9a-fA-F]{3,8}$/
@@ -139,7 +132,7 @@ export function validateBotProfileSource(source: BotProfileSource): BotProfileVa
       field: 'name',
       message: `A name can be at most ${BOT_NAME_MAX_LENGTH} characters.`,
     })
-  } else if (hasControlCharacter(name)) {
+  } else if (hasBotControlCharacter(name)) {
     problems.push({ field: 'name', message: 'A name cannot contain line breaks or control characters.' })
   }
 
@@ -149,7 +142,7 @@ export function validateBotProfileSource(source: BotProfileSource): BotProfileVa
       field: 'description',
       message: `A description can be at most ${BOT_DESCRIPTION_MAX_LENGTH} characters.`,
     })
-  } else if (hasControlCharacter(description)) {
+  } else if (hasBotControlCharacter(description)) {
     // It becomes the mode's one-line `description` over ACP; a newline there
     // would break the line the picker renders.
     problems.push({
@@ -292,11 +285,3 @@ function unquote(value: string): string {
   return inner.replace(/\\(["\\])/g, '$1')
 }
 
-/** C0 controls (line breaks included) and DEL. */
-function hasControlCharacter(value: string): boolean {
-  for (const char of value) {
-    const code = char.codePointAt(0) ?? 0
-    if (code < 0x20 || code === 0x7f) return true
-  }
-  return false
-}

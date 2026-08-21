@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { findSelectedThread, initialNavState, navReducer, type NavState } from './nav-reducer'
+import {
+  findSelectedThread,
+  initialNavState,
+  navReducer,
+  type NavAction,
+  type NavState,
+} from './nav-reducer'
 import type { ListMetadataResult, ThreadMeta } from '../../../shared/ipc'
 
 /**
@@ -123,27 +129,61 @@ describe('navReducer', () => {
   })
 
   describe('Bot form view (#447)', () => {
+    const editRex: NavAction = { type: 'open-bot-form', target: { mode: 'edit', threadId: 't-rex' } }
+
     it('open-bot-form / close-bot-form mirror the Settings contract, preserving the selection', () => {
       // The selection MUST survive: the form is opened from a Bot's own
       // conversation ("Edit"), and Cancel has to land back on it.
       const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'conversation' }
-      const open = navReducer(start, { type: 'open-bot-form' })
-      expect(open).toEqual({ selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'bot-form' })
-      expect(navReducer(open, { type: 'open-bot-form' })).toBe(open) // referential no-op
+      const open = navReducer(start, editRex)
+      expect(open).toEqual({
+        selectedWorkspaceId: 'w1',
+        selectedThreadId: 't1',
+        view: 'bot-form',
+        botForm: { mode: 'edit', threadId: 't-rex' },
+      })
+      expect(navReducer(open, editRex)).toBe(open) // referential no-op: same form
+      // Closing DROPS the payload: a stale target must not travel with a view that
+      // is not showing a form.
       expect(navReducer(open, { type: 'close-bot-form' })).toEqual(start)
     })
 
-    it('selecting a Bot from the sidebar leaves the form', () => {
-      const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: null, view: 'bot-form' }
-      const next = navReducer(start, { type: 'select-thread', workspaceId: 'w1', threadId: 't-rex' })
-      expect(next).toEqual({ selectedWorkspaceId: 'w1', selectedThreadId: 't-rex', view: 'conversation' })
+    it('carries WHICH form it is, so two edits are two different places (#447 D1)', () => {
+      // Without the payload in nav, Back from "Edit Ada" would restore the view with
+      // whatever target was set last — showing Ada's form under Rex's history entry.
+      const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 't1', view: 'conversation' }
+      const rex = navReducer(start, editRex)
+      const ada = navReducer(rex, { type: 'open-bot-form', target: { mode: 'edit', threadId: 't-ada' } })
+      expect(ada).not.toBe(rex)
+      expect(ada.botForm).toEqual({ mode: 'edit', threadId: 't-ada' })
+    })
+
+    it('drops the target on every route back to a conversation', () => {
+      // A stale target must never travel into a history entry that shows no form.
+      const start: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: null, view: 'conversation' }
+      const open = navReducer(start, editRex)
+      expect(navReducer(open, { type: 'select-thread', workspaceId: 'w1', threadId: 't-rex' })).toEqual({
+        selectedWorkspaceId: 'w1',
+        selectedThreadId: 't-rex',
+        view: 'conversation',
+      })
+      for (const action of [
+        { type: 'select-workspace', workspaceId: 'w2' },
+        { type: 'select-workspace', workspaceId: 'w1' },
+        { type: 'open-settings' },
+        { type: 'open-skills' },
+        { type: 'close-bot-form' },
+      ] satisfies NavAction[]) {
+        expect(navReducer(open, action).botForm ?? null).toBeNull()
+      }
     })
 
     it('the ＋ works from Settings or Skills — the form swaps in directly', () => {
+      const create: NavAction = { type: 'open-bot-form', target: { mode: 'create', workspaceId: 'w1' } }
       const fromSkills: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: null, view: 'skills' }
-      expect(navReducer(fromSkills, { type: 'open-bot-form' }).view).toBe('bot-form')
+      expect(navReducer(fromSkills, create).view).toBe('bot-form')
       const fromSettings: NavState = { ...fromSkills, view: 'settings' }
-      expect(navReducer(fromSettings, { type: 'open-bot-form' }).view).toBe('bot-form')
+      expect(navReducer(fromSettings, create).view).toBe('bot-form')
     })
   })
 })

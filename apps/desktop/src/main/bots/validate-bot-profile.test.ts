@@ -5,6 +5,8 @@ import {
   BOT_DESCRIPTION_MAX_LENGTH,
   BOT_INSTRUCTIONS_MAX_LENGTH,
   BOT_NAME_MAX_LENGTH,
+} from '../../shared/bot-limits'
+import {
   collectProblems,
   describeProblems,
   validateBotColour,

@@ -1,5 +1,5 @@
 import { useState, type JSX } from 'react'
-import { Pencil, RotateCcw } from 'lucide-react'
+import { Pencil, RotateCcw, X } from 'lucide-react'
 import { BotMark } from './BotMark'
 import { Button } from '../ui/button'
 import {
@@ -41,6 +41,15 @@ export interface BotHeaderActions {
    * button says so before the click rather than after it.
    */
   busy: boolean
+  /**
+   * The last refusal, or null. This is the channel `shared/ipc/bots.ts` promises:
+   * the confirm dialog closes on click, so without it a refused Start over looks
+   * exactly like a successful one while the Bot keeps the session the user asked
+   * to leave behind (#447 review, D2).
+   */
+  error: string | null
+  /** Dismiss the message above — it is not an error state, just something to read. */
+  onDismissError: () => void
 }
 
 /**
@@ -61,34 +70,56 @@ export function BotHeader({
 }): JSX.Element {
   const [confirmStartOverOpen, setConfirmStartOverOpen] = useState(false)
   return (
-    <div className="flex items-center gap-3 border-b border-border pb-3">
-      <BotMark name={bot.name} colour={bot.colour} size={28} />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[14px] font-semibold text-foreground">{bot.name}</div>
-        <div className="truncate text-[12px] text-muted-foreground">
-          {bot.description ? `${bot.description} · ${bot.projectName}` : bot.projectName}
+    <div className="flex flex-col gap-2 border-b border-border pb-3">
+      <div className="flex items-center gap-3">
+        <BotMark name={bot.name} colour={bot.colour} size={28} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[14px] font-semibold text-foreground">{bot.name}</div>
+          <div className="truncate text-[12px] text-muted-foreground">
+            {bot.description ? `${bot.description} · ${bot.projectName}` : bot.projectName}
+          </div>
         </div>
+        {actions && (
+          <div className="flex flex-none items-center gap-1">
+            <Button variant="ghost" size="sm" onClick={actions.onEdit}>
+              <Pencil className="size-3.5" aria-hidden />
+              Edit
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={actions.busy}
+              title={
+                actions.busy
+                  ? `Wait for ${bot.name} to finish this turn`
+                  : `Keeps ${bot.name}'s name and instructions. The conversation above stays readable.`
+              }
+              onClick={() => setConfirmStartOverOpen(true)}
+            >
+              <RotateCcw className="size-3.5" aria-hidden />
+              Start over
+            </Button>
+          </div>
+        )}
       </div>
-      {actions && (
-        <div className="flex flex-none items-center gap-1">
-          <Button variant="ghost" size="sm" onClick={actions.onEdit}>
-            <Pencil className="size-3.5" aria-hidden />
-            Edit
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={actions.busy}
-            title={
-              actions.busy
-                ? `Wait for ${bot.name} to finish this turn`
-                : `Keeps ${bot.name}'s name and instructions. The conversation above stays readable.`
-            }
-            onClick={() => setConfirmStartOverOpen(true)}
+
+      {/* A refused action, said out loud. The confirm dialog has already closed by
+          the time main answers, so this is the only place the user can learn that
+          the Bot is still on the session they asked to leave behind. */}
+      {actions?.error && (
+        <div
+          role="status"
+          className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[13px] text-destructive"
+        >
+          <span className="flex-1">{actions.error}</span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            className="flex-none rounded-sm px-1 text-destructive/70 outline-none hover:text-destructive focus-visible:text-destructive"
+            onClick={actions.onDismissError}
           >
-            <RotateCcw className="size-3.5" aria-hidden />
-            Start over
-          </Button>
+            <X className="size-3.5" aria-hidden />
+          </button>
         </div>
       )}
 

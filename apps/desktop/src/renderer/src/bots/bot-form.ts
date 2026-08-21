@@ -4,6 +4,7 @@ import {
   BOT_DESCRIPTION_MAX_LENGTH,
   BOT_INSTRUCTIONS_MAX_LENGTH,
   BOT_NAME_MAX_LENGTH,
+  hasBotControlCharacter,
 } from '../../../shared/bot-limits'
 
 /**
@@ -13,9 +14,12 @@ import {
  *
  * The division of labour with main is deliberate. Main is the validator: it refuses
  * a record that would project a profile Vibe silently ignores, and its `problems`
- * are shown verbatim. This module is the SAME bounds one step earlier, so the two
- * can never disagree and so the user learns about a 61-character name while typing
- * it instead of after a round trip.
+ * are shown verbatim. This module applies the rules BOTH sides share
+ * (`shared/bot-limits` — the four bounds and the control-character rule) one step
+ * earlier, so the user learns about a 61-character name while typing it instead of
+ * after a round trip. Main still checks more than this does — `validateBotColour`'s
+ * hex/token pattern has no counterpart here, because the form only ever emits
+ * palette entries — so a refusal it alone catches lands in the `problems` strip.
  *
  * Two things it will not do:
  * - **Move a Bot between Projects.** `BotsUpdateArgs` has no `workspaceId` and that
@@ -88,9 +92,11 @@ export function initialBotFormValues(args: {
 }
 
 /**
- * The colour a new Bot gets: the first palette entry no existing Bot is using, or
- * — once every colour is taken — the one belonging to the oldest Bot, so the cycle
- * repeats in a stable order instead of at random.
+ * The colour a new Bot gets: the first palette entry no existing Bot is using, so
+ * two Bots made in a row never look alike. Once every colour is taken it falls back
+ * to the default and colours simply repeat — a duplicate is a cosmetic collision
+ * between teammates you can already tell apart by name, and the user can pick any
+ * other swatch in the form.
  */
 export function nextBotColour(bots: readonly BotRecord[]): string {
   const taken = new Set(bots.map((bot) => bot.colour))
@@ -112,7 +118,7 @@ export function validateBotForm(values: BotFormValues): BotFormErrors {
   if (!name) errors.name = 'A Bot needs a name.'
   else if (name.length > BOT_NAME_MAX_LENGTH) {
     errors.name = `A name can be at most ${BOT_NAME_MAX_LENGTH} characters.`
-  } else if (hasControlCharacter(name)) {
+  } else if (hasBotControlCharacter(name)) {
     errors.name = 'A name cannot contain line breaks.'
   }
 
@@ -126,7 +132,7 @@ export function validateBotForm(values: BotFormValues): BotFormErrors {
   const description = values.description.trim()
   if (description.length > BOT_DESCRIPTION_MAX_LENGTH) {
     errors.description = `A description can be at most ${BOT_DESCRIPTION_MAX_LENGTH} characters.`
-  } else if (hasControlCharacter(description)) {
+  } else if (hasBotControlCharacter(description)) {
     // It becomes the mode's one-line `description` over ACP.
     errors.description = 'A description is one line — no line breaks.'
   }
@@ -191,13 +197,4 @@ function emptyValues(workspaceId: string): BotFormValues {
     description: '',
     instructions: '',
   }
-}
-
-/** C0 controls (line breaks included) and DEL — the same rule main applies. */
-function hasControlCharacter(value: string): boolean {
-  for (const char of value) {
-    const code = char.codePointAt(0) ?? 0
-    if (code < 0x20 || code === 0x7f) return true
-  }
-  return false
 }

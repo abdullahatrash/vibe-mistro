@@ -35,8 +35,9 @@ import {
 import { cn } from '../lib/utils'
 
 /**
- * Creating and editing a **Mistro Bot**, in the OUTLET (#447, ADR-0027 decision 4;
- * prototyped as variant D on `proto/422-bots-view`).
+ * Creating and editing a **Mistro Bot**, in the OUTLET (#447; ADR-0027 decision 4
+ * as amended — no Bots BROWSING view, and create/edit is a transient outlet view
+ * with no list; prototyped as variant D on `proto/422-bots-view`).
  *
  * Not a dialog, and the reason is the instructions field: it is the whole
  * personality, and a three-line box in a modal quietly contradicts its own helper
@@ -67,8 +68,13 @@ export function BotFormView({
   onCreate: (args: BotsCreateArgs) => Promise<BotWriteResult>
   /** Save an edit. Same contract; never carries a Project or a profile id. */
   onSave: (args: BotsUpdateArgs) => Promise<BotWriteResult>
-  /** Delete this Bot (edit only): the identity goes, the conversation is archived. */
-  onDelete: (bot: BotRecord) => Promise<void>
+  /**
+   * Delete this Bot (edit only): the identity goes, the conversation is archived.
+   * Resolves with the problems to SHOW — empty on success. A failed delete leaves
+   * the form open saying so, rather than closing the confirm over a Bot that is
+   * still there (#447 review, D2).
+   */
+  onDelete: (bot: BotRecord) => Promise<string[]>
   /** Leave the form — App returns the outlet to whatever was on screen. */
   onClose: () => void
 }): JSX.Element {
@@ -304,7 +310,7 @@ export function BotFormView({
                 variant="destructive"
                 onClick={() => {
                   setConfirmDeleteOpen(false)
-                  void onDelete(editing)
+                  void onDelete(editing).then(setProblems)
                 }}
               >
                 Delete Bot

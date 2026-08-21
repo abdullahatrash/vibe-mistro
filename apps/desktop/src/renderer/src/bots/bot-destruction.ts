@@ -15,7 +15,13 @@ import type { UnifiedThreadRow } from '../shell/unified-threads'
  * SENTENCE — one Bot reads differently from four, and "and 1 more" is a bug.
  */
 
-/** Cap the names actually spelled out; beyond it the rest are counted. */
+/**
+ * Cap the names actually spelled out; beyond it the rest are counted.
+ *
+ * The +1 in {@link formatBotNames} is the point: with a cap of three, FOUR Bots
+ * would read "Rex, Ada, Kim and 1 more" — a sentence that spends more characters
+ * hiding a name than printing it. So the cap only bites when it saves at least two.
+ */
 const NAMED_BOT_LIMIT = 3
 
 /**
@@ -38,9 +44,11 @@ export function botNamesInThreads(threads: readonly ThreadMeta[]): string[] {
  * The sentence the confirm dialog adds when a project has Bots — or null when it
  * has none, so the existing copy is untouched in the common case.
  *
- * It states the destruction in the terms ADR-0027 uses: the identity goes (the
- * teammate and its generated profile files), the conversation survives. Naming
- * beyond three would turn a confirm into a list, so the rest are counted.
+ * This is the **Remove project** copy, and it is deliberately harsher than the
+ * delete-a-Bot copy: deleting a Bot keeps its conversation as an archived Thread,
+ * but removing the project removes every Thread under it, so the conversations go
+ * too. The sentence has to say the thing that is actually true here, because this
+ * is the path where something irreplaceable is lost.
  */
 export function describeBotDestruction(names: readonly string[]): string | null {
   if (names.length === 0) return null
@@ -52,9 +60,15 @@ export function describeBotDestruction(names: readonly string[]): string | null 
   )
 }
 
-/** `Rex`, `Rex and Ada`, `Rex, Ada and Kim`, `Rex, Ada, Kim and 2 more`. */
+/**
+ * `Rex`, `Rex and Ada`, `Rex, Ada and Kim`, `Rex, Ada, Kim and Lou`,
+ * `Rex, Ada, Kim and 2 more`.
+ *
+ * Four names are all printed: a remainder of one is worth less than the name it
+ * replaces. Five or more fall back to the count.
+ */
 export function formatBotNames(names: readonly string[]): string {
-  if (names.length <= NAMED_BOT_LIMIT) {
+  if (names.length <= NAMED_BOT_LIMIT + 1) {
     if (names.length <= 1) return names[0] ?? ''
     return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
   }
