@@ -23,6 +23,16 @@ Thread list contains only prompted Threads. Applies equally to both entry points
 button and opening a Workspace.
 _Avoid_: unsaved / temporary / phantom / ephemeral thread.
 
+**Mistro Bot**:
+A named, continuing teammate: ONE durable Thread inside a Workspace, whose persona is a Vibe agent
+profile we generate and own (`~/.vibe/agents/` + `~/.vibe/prompts/`). You return to a Bot for weeks
+rather than starting a new conversation. Lives in the sidebar's **Bots** section above Projects;
+selecting one swaps the outlet to its conversation exactly as a Thread does. Cannot exist without a
+Project. Its behaviour — Model, Mode, reasoning effort — comes from its profile and is changed by
+editing the Bot, never by a per-Thread control (ADR-0027).
+_Avoid_: bot mode (**Mode** is the approval posture), agent (that's the `vibe-acp` child process),
+assistant, persona (a Bot is the conversation, not a reusable configuration — see #379 for presets).
+
 **ACP session**:
 The protocol-level handle returned by `session/new` and addressed by `session/*` methods. Lives only
 at the main-process / protocol layer; never surfaced in the UI. One `vibe-acp` process hosts many.
