@@ -92,6 +92,10 @@ import { useBots } from './bots/use-bots'
 import type { BotHeaderActions, BotIdentity } from './bots/BotHeader'
 import { BotFormView } from './bots/BotFormView'
 import type { BotFormTarget } from './bots/bot-form'
+import { RoutineFormView } from './routines/RoutineFormView'
+import { RoutinesSection } from './routines/RoutinesSection'
+import { useRoutines } from './routines/use-routines'
+import type { RoutineFormTarget } from './routines/routine-form'
 import { useBotLifecycle } from './bots/use-bot-lifecycle'
 import { conversationViewKey, initialConversationEpochs } from './bots/conversation-reset'
 import { EmptyState } from './shell/EmptyState'
@@ -212,6 +216,11 @@ export function App(): JSX.Element {
   // a conversation moves on a turn, and the sidebar answers "who did I speak to
   // most recently" (PRD story 5).
   const { bots, refreshBots } = useBots()
+  // The **Routine** records (#471, ADR-0028): the Bot form lists them and the
+  // routine editor writes them. Read once and re-read on every write — nothing
+  // about a record moves on its own (see `use-routines.ts` on the one thing that
+  // does, and why it is not polled).
+  const routines = useRoutines()
   // When each Bot was last OPENED — renderer-only UI state (localStorage), the one
   // input the unread dot needs that nothing else in the app tracks.
   const [botsSeen, setBotsSeen] = useState(() => getBotsSeen(window.localStorage))
@@ -1046,7 +1055,13 @@ export function App(): JSX.Element {
   // conversation on screen, which is where Delete already landed the user.
   const botFormTarget = resolveBotFormTarget(nav.botForm ?? null, bots)
   const inBotForm = nav.view === 'bot-form' && botFormTarget !== null
-  const overlayView = inSettings || inSkills || inBotForm
+  // The Routine editor (#471) — a fourth routed outlet view under the same
+  // keep-mounted contract, opened from the Bot form's list and closing back onto
+  // it. A target whose Bot is gone is not an editor at all, for the reason an edit
+  // target whose Bot was deleted is not a Bot form (#447 review, D1).
+  const routineFormTarget = resolveRoutineFormTarget(nav.routineForm ?? null, bots)
+  const inRoutineForm = nav.view === 'routine-form' && routineFormTarget !== null
+  const overlayView = inSettings || inSkills || inBotForm || inRoutineForm
   // Persistent missing-CLI banner (visibility is the pure `installBannerMessage`):
   // spans the shell under the window chrome so a selected Workspace / open Thread
   // still surfaces the missing toolchain; suppressed where the fuller guidance is
@@ -1122,6 +1137,72 @@ export function App(): JSX.Element {
             onSave={botLifecycle.saveBot}
             onDelete={botLifecycle.deleteBot}
             onClose={() => navDispatch({ type: 'close-bot-form' })}
+            routines={(bot) => (
+              <RoutinesSection
+                threadId={bot.threadId}
+                routines={routines.routines}
+                onAdd={() =>
+                  navDispatch({
+                    type: 'open-routine-form',
+                    target: { mode: 'create', threadId: bot.threadId },
+                  })
+                }
+                onEdit={(routineId) =>
+                  navDispatch({
+                    type: 'open-routine-form',
+                    target: { mode: 'edit', threadId: bot.threadId, routineId },
+                  })
+                }
+                // Pause / resume and the repair are one-field writes, so they happen
+                // from the row rather than costing a trip through the editor. Each
+                // resolves with the problems to SHOW (#447 review, D2) — a refused
+                // write must never be a console line alone.
+                onSetActive={async (routine, active) => {
+                  const result = await routines.updateRoutine({ id: routine.id, active })
+                  return result.ok ? [] : result.problems
+                }}
+                onAllowCommand={async (routine, command) => {
+                  const result = await routines.updateRoutine({
+                    id: routine.id,
+                    // The exact invocation the gate refused, appended to what the
+                    // user already listed. Never seeded, never rewritten (ADR-0028
+                    // part 4): this is the one explicit action that widens the list.
+                    allowedCommands: [...routine.allowedCommands, command],
+                  })
+                  return result.ok ? [] : result.problems
+                }}
+                onDelete={async (routine) =>
+                  (await routines.deleteRoutine(routine.id))
+                    ? []
+                    : ['That routine could not be deleted.']
+                }
+              />
+            )}
+          />
+        </div>
+      ) : inRoutineForm && routineFormTarget ? (
+        <div className="p-6">
+          <RoutineFormView
+            // Keyed by the WHOLE target, like the Bot form: switching between two
+            // routines starts a fresh editor rather than re-seeding a mounted one.
+            key={
+              routineFormTarget.mode === 'edit'
+                ? `edit:${routineFormTarget.routineId}`
+                : `create:${routineFormTarget.threadId}`
+            }
+            target={routineFormTarget}
+            routines={routines.routines}
+            botName={bots.find((b) => b.threadId === routineFormTarget.threadId)?.name ?? 'This Bot'}
+            onCreate={routines.createRoutine}
+            onSave={routines.updateRoutine}
+            onDelete={async (routine) =>
+              (await routines.deleteRoutine(routine.id))
+                ? // A delete leaves nothing to edit, so the editor closes onto the
+                  // Bot form the routine was listed in.
+                  (navDispatch({ type: 'close-routine-form' }), [])
+                : ['That routine could not be deleted.']
+            }
+            onClose={() => navDispatch({ type: 'close-routine-form' })}
           />
         </div>
       ) : inSkills ? (
@@ -1366,6 +1447,20 @@ function liveMetasFor(
   // and an unmarked Bot is one `partitionBots` cannot drop from the Thread list
   // (#447 — see `markBotMeta`). A cold meta is returned untouched.
   return metas.map((meta) => markBotMeta(meta, bots))
+}
+
+/**
+ * The Routine editor target to actually RENDER, or null (#471) — the same rule as
+ * the Bot form's, one level down: nav history can carry an editor for a routine on
+ * a Bot that has since been deleted, and a form pointing at a Bot that is gone can
+ * only write a routine nothing will ever run.
+ */
+function resolveRoutineFormTarget(
+  target: RoutineFormTarget | null,
+  bots: readonly BotRecord[],
+): RoutineFormTarget | null {
+  if (!target) return null
+  return bots.some((bot) => bot.threadId === target.threadId) ? target : null
 }
 
 /**

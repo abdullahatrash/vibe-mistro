@@ -18,8 +18,11 @@ interface Recorded {
   entry: TranscriptEntry
 }
 
-/** A fake bridge + the two main-side callbacks, recording everything the tee does. */
-function makeDeps(threadId: string | null = 't1'): {
+/** A fake bridge + the main-side callbacks, recording everything the tee does. */
+function makeDeps(
+  threadId: string | null = 't1',
+  routineThreads: string[] = [],
+): {
   deps: AgentEventDeps
   teed: Recorded[]
   titles: Array<{ sessionId: string | null; title: string }>
@@ -40,6 +43,7 @@ function makeDeps(threadId: string | null = 't1'): {
       recordTitle: (sessionId, title) => void titles.push({ sessionId, title }),
       notePermission: (agentId, thread, requestId) =>
         void permissions.push({ agentId, threadId: thread, requestId }),
+      isRoutineThread: (thread) => routineThreads.includes(thread),
     },
   }
 }
@@ -120,5 +124,55 @@ describe('wireAgentEvents (tee first, forward second)', () => {
     agent.emit('event', chunk('s1'))
 
     expect(order).toEqual(['tee', 'forward'])
+  })
+})
+
+/**
+ * A **Routine**'s permission request is main's to answer (#471, #469) — so it is
+ * dropped whole rather than shown to somebody whose click cannot change it.
+ */
+describe('a Routine turn permission request', () => {
+  const request = (sessionId: string): unknown => ({
+    id: 4,
+    method: 'session/request_permission',
+    params: { sessionId, toolCall: { toolCallId: 'tc1' } },
+  })
+
+  it('is neither teed, noted nor forwarded while the Routine runs', () => {
+    const { deps, teed, permissions } = makeDeps('bot-thread', ['bot-thread'])
+    const agent = new EventEmitter()
+    const forwarded: unknown[] = []
+    wireAgentEvents(deps, 'a1', agent, (_id, payload) => void forwarded.push(payload))
+
+    agent.emit('event', request('s1'))
+
+    expect(teed).toEqual([])
+    expect(permissions).toEqual([])
+    expect(forwarded).toEqual([])
+  })
+
+  it('leaves the rest of the Routine turn alone — only the request is dropped', () => {
+    const { deps, teed } = makeDeps('bot-thread', ['bot-thread'])
+    const agent = new EventEmitter()
+    const forwarded: unknown[] = []
+    wireAgentEvents(deps, 'a1', agent, (_id, payload) => void forwarded.push(payload))
+
+    agent.emit('event', chunk('s1'))
+
+    expect(teed).toHaveLength(1)
+    expect(forwarded).toHaveLength(1)
+  })
+
+  it('does not suppress a genuine request on a Thread no Routine is running', () => {
+    const { deps, teed, permissions } = makeDeps('user-thread', ['bot-thread'])
+    const agent = new EventEmitter()
+    const forwarded: unknown[] = []
+    wireAgentEvents(deps, 'a1', agent, (_id, payload) => void forwarded.push(payload))
+
+    agent.emit('event', request('s1'))
+
+    expect(teed).toHaveLength(1)
+    expect(permissions).toEqual([{ agentId: 'a1', threadId: 'user-thread', requestId: 4 }])
+    expect(forwarded).toHaveLength(1)
   })
 })

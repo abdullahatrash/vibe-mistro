@@ -1,5 +1,6 @@
 import type { ListMetadataResult, ThreadMeta } from '../../../shared/ipc'
 import type { BotFormTarget } from '../bots/bot-form'
+import type { RoutineFormTarget } from '../routines/routine-form'
 
 /**
  * Shell navigation state (ADR-0006 decision 2): WHICH Workspace and Thread the
@@ -26,8 +27,14 @@ export interface NavState {
    * amended by #447): there is no list column, no nav row, and no way to browse Bots
    * in it — it is a transient form the sidebar's ＋ (or a Bot's Edit) opens and
    * Cancel/Save closes.
+   *
+   * `'routine-form'` is the **Routine** editor (#471, ADR-0028 part 7), opened FROM
+   * the Bot form's routines list and closing back onto it. Its own view rather than
+   * a modal for the reason the Bot form is one: a routine has as many fields as a
+   * Bot does — name, schedule, time, zone, prompt, allowed commands — and nesting
+   * that inside a five-field form makes a page nobody can scan.
    */
-  view: 'conversation' | 'settings' | 'skills' | 'bot-form'
+  view: 'conversation' | 'settings' | 'skills' | 'bot-form' | 'routine-form'
   /**
    * WHICH Bot the form is for, when `view === 'bot-form'`; null otherwise.
    *
@@ -41,6 +48,17 @@ export interface NavState {
    * tests) stay literal: absent means the same as null — no form.
    */
   botForm?: BotFormTarget | null
+  /**
+   * WHICH Routine the editor is for, when `view === 'routine-form'`; absent
+   * otherwise. Travels through nav history for the same reason `botForm` does — a
+   * back arrow that restored the editor pointing at whatever was edited last would
+   * describe a routine nobody navigated to.
+   *
+   * A routine-form state deliberately KEEPS its `botForm`, because that is where
+   * closing the editor returns to: you opened the routine from the Bot you were
+   * editing, and landing anywhere else would lose that place.
+   */
+  routineForm?: RoutineFormTarget | null
 }
 
 export type NavAction =
@@ -52,6 +70,8 @@ export type NavAction =
   | { type: 'close-skills' }
   | { type: 'open-bot-form'; target: BotFormTarget }
   | { type: 'close-bot-form' }
+  | { type: 'open-routine-form'; target: RoutineFormTarget }
+  | { type: 'close-routine-form' }
   | { type: 'clear' }
 
 export const initialNavState: NavState = {
@@ -104,7 +124,22 @@ export function navReducer(state: NavState, action: NavAction): NavState {
       // SAME form is a referential no-op, so the ＋ pressed twice records one move.
       return state.view === 'bot-form' && sameBotFormTarget(state.botForm ?? null, action.target)
         ? state
-        : { ...state, view: 'bot-form', botForm: action.target }
+        : { ...withoutRoutineForm(state), view: 'bot-form', botForm: action.target }
+    case 'open-routine-form':
+      // The Routine editor (#471), opened from the Bot form's list. It KEEPS the
+      // `botForm` payload — closing the editor returns to the Bot you opened it
+      // from, not to the conversation behind it. Re-opening the same editor is a
+      // referential no-op, uniform with the others.
+      return state.view === 'routine-form' &&
+        sameRoutineFormTarget(state.routineForm ?? null, action.target)
+        ? state
+        : { ...state, view: 'routine-form', routineForm: action.target }
+    case 'close-routine-form':
+      // Back to the Bot form that opened it when there is one; otherwise the
+      // conversation, so a routine editor reached any other way still has a way out.
+      return state.botForm
+        ? { ...withoutRoutineForm(state), view: 'bot-form' }
+        : toConversation(state)
     case 'close-settings':
     case 'close-skills':
     case 'close-bot-form':
@@ -126,9 +161,9 @@ function toConversation(state: NavState): NavState {
   return { ...withoutBotForm(state), view: 'conversation' }
 }
 
-/** The state minus its form payload (same ref when it has none). */
+/** The state minus BOTH form payloads (same ref when it carries neither). */
 function withoutBotForm(state: NavState): NavState {
-  if (state.botForm === undefined) return state
+  if (state.botForm === undefined && state.routineForm === undefined) return state
   return {
     selectedWorkspaceId: state.selectedWorkspaceId,
     selectedThreadId: state.selectedThreadId,
@@ -141,6 +176,33 @@ export function sameBotFormTarget(a: BotFormTarget | null, b: BotFormTarget | nu
   if (a === null || b === null) return a === b
   if (a.mode === 'edit') return b.mode === 'edit' && a.threadId === b.threadId
   return b.mode === 'create' && a.workspaceId === b.workspaceId
+}
+
+/**
+ * The state minus its ROUTINE payload, keeping the Bot form's (same ref when it
+ * has none). The key is removed rather than nulled: absent is the canonical "no
+ * editor", so a state that never had one and a state that left one are the same
+ * value.
+ */
+function withoutRoutineForm(state: NavState): NavState {
+  if (state.routineForm === undefined) return state
+  const next: NavState = {
+    selectedWorkspaceId: state.selectedWorkspaceId,
+    selectedThreadId: state.selectedThreadId,
+    view: state.view,
+  }
+  if (state.botForm !== undefined) next.botForm = state.botForm
+  return next
+}
+
+/** Whether two routine targets address the same routine (value equality, for no-ops). */
+export function sameRoutineFormTarget(
+  a: RoutineFormTarget | null,
+  b: RoutineFormTarget | null,
+): boolean {
+  if (a === null || b === null) return a === b
+  if (a.mode === 'edit') return b.mode === 'edit' && a.routineId === b.routineId
+  return b.mode === 'create' && a.threadId === b.threadId
 }
 
 /**

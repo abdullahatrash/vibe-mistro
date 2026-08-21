@@ -9,6 +9,7 @@ import {
   type ThreadAgentControls,
   type ThreadConfigAxis,
   type ThreadInfo,
+  type TranscriptEntry,
   type TranscriptImageRef,
   type TranscriptRoutineRef,
 } from '../shared/ipc'
@@ -106,6 +107,19 @@ export type PromptTurnDelivery =
        * prompt because the scheduler sent it, not because someone said so.
        */
       routine?: TranscriptRoutineRef
+      /**
+       * TEE this turn's own entries **and** push them to whatever windows exist
+       * (#471) — it replaces the plain tee, it does not run beside it.
+       *
+       * Without it a Bot open while its Routine fires shows the reply streaming in
+       * with nothing above it: the prompt, its chip and the "late" notice are
+       * written durably and reach a live view only on the next reopen.
+       *
+       * Optional, and absent means "tee only": every entry still lands in the log,
+       * which is what the run's correctness rests on. See `routine-echo.ts` for
+       * which entries are pushed and why the streamed ones must not be.
+       */
+      echo?: (threadId: string, entry: TranscriptEntry) => void
     }
 
 /** The agent surface one turn drives — structural, so tests never spawn `vibe-acp`. */
@@ -296,7 +310,7 @@ export async function runPromptTurn(
     // The pre-bind hole (#456, ADR-0028 part 5): with a renderer this returns and
     // the composer renders it; headless, the return value has no reader, so the
     // Bot's own conversation is where it has to land.
-    if (delivery.kind === 'headless') reportPreBindFailure(deps, args, message, delivery.routine)
+    if (delivery.kind === 'headless') reportPreBindFailure(deps, delivery, args, message)
     if (err instanceof WorkspaceAgentError && err.authState === 'not-signed-in') {
       return { ok: false, kind: 'not-signed-in', agentId: args.agentId, authMethods: agent.authMethods }
     }
@@ -327,20 +341,22 @@ export async function runPromptTurn(
     imageRefs = await deps.attachments.saveAll(args.threadId, args.images)
     if (imageRefs.length === 0) imageRefs = undefined
   }
-  deps.bridge.tee(
+  teeEntry(
+    deps,
+    delivery,
     args.threadId,
     userPromptEntry(randomUUID(), args.text, imageRefs, routineRefOf(delivery)),
   )
   // On a re-bind (TB4 #33), persist the "context reset" notice right AFTER the
   // user's prompt and BEFORE the turn's events — so a later reopen replays it
   // in the same position the live view rendered it (`thread:bound` -> notice).
-  if (rebound) deps.bridge.tee(args.threadId, agentReboundEntry())
+  if (rebound) teeEntry(deps, delivery, args.threadId, agentReboundEntry())
   try {
     const result = await agent.prompt(sessionId, args.text, args.images)
     // Tee the clean turn end: this signal lives ONLY in this IPC response
     // (never an `acp:event`), so without it a replay leaves `isProcessing`
     // stuck true. Serialized after the turn's events (TranscriptStore chain).
-    deps.bridge.tee(args.threadId, turnCompleteEntry())
+    teeEntry(deps, delivery, args.threadId, turnCompleteEntry())
     return { ok: true, result, sessionId }
   } catch (err) {
     // Mid-session expiry (-32000): keep the agent alive so the renderer can
@@ -348,11 +364,11 @@ export async function runPromptTurn(
     // flow, NOT a conversation error — tee `turn-complete` (the renderer
     // synthesizes no ErrorItem here either), so replay isn't left processing.
     if (err instanceof WorkspaceAgentError && err.authState === 'not-signed-in') {
-      deps.bridge.tee(args.threadId, turnCompleteEntry())
+      teeEntry(deps, delivery, args.threadId, turnCompleteEntry())
       return { ok: false, kind: 'not-signed-in', agentId: args.agentId, authMethods: agent.authMethods }
     }
     const message = err instanceof Error ? err.message : String(err)
-    deps.bridge.tee(args.threadId, turnErrorEntry(message))
+    teeEntry(deps, delivery, args.threadId, turnErrorEntry(message))
     // Carry the JSON-RPC/app code (e.g. -31008 for an unsupported/oversized image,
     // #100) so the renderer can special-case it rather than show a generic error.
     return {
@@ -378,13 +394,36 @@ export async function runPromptTurn(
  */
 function reportPreBindFailure(
   deps: PromptTurnDeps,
+  delivery: PromptTurnDelivery,
   args: SendPromptArgs,
   message: string,
-  routine?: TranscriptRoutineRef,
 ): void {
-  deps.bridge.tee(args.threadId, userPromptEntry(randomUUID(), args.text, undefined, routine))
-  deps.bridge.tee(args.threadId, turnErrorEntry(message))
+  const prompt = userPromptEntry(randomUUID(), args.text, undefined, routineRefOf(delivery))
+  teeEntry(deps, delivery, args.threadId, prompt)
+  teeEntry(deps, delivery, args.threadId, turnErrorEntry(message))
   touchThread(deps, args.threadId)
+}
+
+/**
+ * Write one of THIS TURN's entries to the Thread's log — and, for a headless turn
+ * that was given an echo, push it to any live view as well (#471).
+ *
+ * Every tee in this module goes through here, so the two cannot drift: a headless
+ * turn's live view sees exactly what its log records, in the order the log records
+ * it. The echo is strictly additive — a renderer turn takes the tee it always took,
+ * and a headless turn with no echo still writes everything it always wrote.
+ */
+function teeEntry(
+  deps: PromptTurnDeps,
+  delivery: PromptTurnDelivery,
+  threadId: string,
+  entry: TranscriptEntry,
+): void {
+  if (delivery.kind === 'headless' && delivery.echo) {
+    delivery.echo(threadId, entry)
+    return
+  }
+  deps.bridge.tee(threadId, entry)
 }
 
 /** The Routine marker to stamp on the teed prompt — never set for a renderer turn. */

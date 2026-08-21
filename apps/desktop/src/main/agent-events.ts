@@ -45,6 +45,34 @@ export interface AgentEventDeps {
    * it must be tracked whether or not any window sees the request.
    */
   notePermission(agentId: string, threadId: string, requestId: number | string): void
+  /**
+   * Is a **Routine**'s turn in flight on this Thread (#471)? The one question that
+   * decides whether a permission request is anybody's to answer — see
+   * {@link isRoutinePermission}.
+   */
+  isRoutineThread(threadId: string): boolean
+}
+
+/**
+ * Is this payload a permission request raised by a **Routine**'s turn?
+ *
+ * For a scheduled turn MAIN answers, from the Routine's allowed commands, with no
+ * renderer in the loop (#469, the ADR-0001 amendment). So the request is not a
+ * question anybody is being asked: by the time a window could paint it, it has
+ * already been answered, and clicking either button changes nothing that happened.
+ *
+ * The Thread is resolved exactly as the tee resolves it — the event's OWN
+ * `sessionId`, falling back to the agent's active Thread — so a Routine on one Bot
+ * cannot suppress a genuine request on a sibling Thread sharing the same agent.
+ */
+export function isRoutinePermission(
+  deps: Pick<AgentEventDeps, 'bridge' | 'isRoutineThread'>,
+  agentId: string,
+  payload: unknown,
+): boolean {
+  if (permissionRequestIdOf(payload) === null) return false
+  const threadId = deps.bridge.threadIdFor(agentId, sessionIdFromPayload(payload))
+  return threadId !== null && deps.isRoutineThread(threadId)
 }
 
 /**
@@ -88,6 +116,22 @@ export function wireAgentEvents(
   forward: (agentId: string, payload: unknown) => void,
 ): void {
   agent.on('event', (payload: unknown) => {
+    // A Routine's permission request is dropped WHOLE (#471) — not teed, not noted,
+    // not forwarded — because all three would describe a decision nobody made:
+    //
+    //  - forwarded, it paints Allow / Deny buttons over a request main has already
+    //    answered from the allowed commands;
+    //  - teed, the same dead buttons come back on every later reopen, since main's
+    //    in-process answer never crosses the renderer chokepoint that would have
+    //    teed a `resolve-permission` beside it;
+    //  - noted, it raises `needsAttention`, which ADR-0028 part 5 explicitly refuses
+    //    as a Routine's notifier: it is a live count of requests waiting on a
+    //    PERSON, and this one never was.
+    //
+    // Nothing legible is lost. An allowed command still renders as its tool call,
+    // and a refused one is reported by name — the refusal message is written into
+    // the Bot's own conversation.
+    if (isRoutinePermission(deps, agentId, payload)) return
     teeAgentEvent(deps, agentId, payload)
     forward(agentId, payload)
   })

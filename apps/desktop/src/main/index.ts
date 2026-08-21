@@ -50,6 +50,7 @@ import {
   type ThreadConnection,
   type ThreadStatusEvent,
   type ThreadTitleEvent,
+  type TranscriptEntryEvent,
   type AppUpdateStatusEvent,
   isThemePreference,
   type SetThemeArgs,
@@ -110,6 +111,8 @@ import type { ModeDiscovery } from './acp/agent-controls'
 import { SqliteBotStore } from './persistence/sqlite-bot-store'
 import type { BotStoreApi } from './persistence/bot-store-api'
 import { registerRoutinesIpc } from './routines/register-ipc'
+import { createTranscriptEcho } from './routines/routine-echo'
+import { createRoutineThreads } from './routines/routine-threads'
 import { createRoutineScheduler, type RoutineScheduler } from './routines/scheduler'
 import { ensureRoutineGate } from './routines/write-routine-profile'
 import { nodeRoutineProfileFs } from './routines/node-routine-profile-fs'
@@ -223,6 +226,15 @@ const isAgentProtected = (agentId: string): boolean => activity.isProtected(agen
 const threadStatus = new ThreadStatusTracker()
 
 /**
+ * Which Threads a **Routine**'s turn currently holds (#471). Read by the agent
+ * event wiring to drop that turn's permission requests: main answers them from the
+ * Routine's allowed commands, so painting Allow / Deny for them offers a choice
+ * nobody has. Bracketed by the same claim / release the busy check uses, so the
+ * window is exactly the run.
+ */
+const routineThreads = createRoutineThreads()
+
+/**
  * The transcript bridge, held module-level like the pool itself so the
  * window-close teardown (`window-all-closed`) can clear the routing entries of the
  * agents it disposes (#468). Assigned once at ready; null before that, when there
@@ -242,6 +254,22 @@ function emitThreadStatus(changes: ThreadStatusChange | ThreadStatusChange[] | n
   for (const win of BrowserWindow.getAllWindows()) {
     if (win.webContents.isDestroyed()) continue
     for (const change of list) win.webContents.send(IPC.threadStatus, change satisfies ThreadStatusEvent)
+  }
+}
+
+/**
+ * Push ONE entry main teed into a Thread's log to every renderer (#471) — the
+ * live half of a **Routine**'s turn.
+ *
+ * Broadcast like every other main->renderer push, and to possibly nobody: a
+ * Routine fires whether or not a window is open, and the tee beside this is what
+ * makes that fine. Only the entries a live view cannot derive travel here
+ * (`routine-echo.ts`); the agent's streamed output is already on `acp:event`.
+ */
+function emitTranscriptEntry(event: TranscriptEntryEvent): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.webContents.isDestroyed()) continue
+    win.webContents.send(IPC.transcriptEntry, event)
   }
 }
 
@@ -694,6 +722,9 @@ function wireAgentEvents(deps: MainDeps, agentId: string, agent: WorkspaceAgent)
       recordTitle: (sessionId, title) => void recordThreadTitle(deps, sessionId, title),
       notePermission: (id, threadId, requestId) =>
         emitThreadStatus(threadStatus.addPermission(id, threadId, requestId)),
+      // A Routine answers its own permission requests (#469), so they are neither
+      // teed, noted nor forwarded (#471) — see `agent-events.ts`.
+      isRoutineThread: (threadId) => routineThreads.has(threadId),
     },
     agentId,
     agent,
@@ -828,6 +859,10 @@ function registerIpc(deps: MainDeps): void {
   // deciding WHEN is the scheduler's job and nothing else's. Everything the run
   // needs that only main has (the pool, the busy claim, eviction protection, the
   // turn) is passed in here rather than reached for, so the run stays testable.
+  //
+  // Every entry a routine turn writes goes through ONE tee-and-echo (#471), so the
+  // Bot's live view sees what its log records, in the order the log records it.
+  const routineEcho = createTranscriptEcho({ bridge: deps.bridge, send: emitTranscriptEntry })
   const routinesRegistration = registerRoutinesIpc({
     routines: deps.routines,
     bots: deps.bots,
@@ -840,9 +875,15 @@ function registerIpc(deps: MainDeps): void {
       claimThread: (agentId, threadId) => {
         const claim = threadStatus.tryBeginTurn(agentId, threadId)
         emitThreadStatus(claim.change)
+        // The claim is also what marks this Thread mid-Routine (#471), so the
+        // permission requests of the turn it opens are dropped rather than shown
+        // as buttons over an answer main has already given. Bracketed by the
+        // release below, which runs however the turn ends.
+        if (claim.claimed) routineThreads.begin(threadId)
         return claim.claimed
       },
       releaseThread: (agentId, threadId) => {
+        routineThreads.end(threadId)
         emitThreadStatus(threadStatus.endTurn(agentId, threadId))
         // Sweep any permission left unanswered when the turn settled, exactly as
         // the `sendPrompt` handler does — nothing is blocking any more.
@@ -868,9 +909,9 @@ function registerIpc(deps: MainDeps): void {
       // other failed turn uses, and moves `lastActiveAt` so the unread dot appears.
       reportFailure: ({ threadId, message, prompt, routine }) => {
         if (prompt !== undefined) {
-          deps.bridge.tee(threadId, userPromptEntry(randomUUID(), prompt, undefined, routine))
+          routineEcho(threadId, userPromptEntry(randomUUID(), prompt, undefined, routine))
         }
-        deps.bridge.tee(threadId, turnErrorEntry(message))
+        routineEcho(threadId, turnErrorEntry(message))
         void deps.store.touchThread(threadId).catch((err) => {
           console.error(`[vibe-mistro:routines] touchThread failed (${threadId}): ${String(err)}`)
         })
@@ -881,12 +922,17 @@ function registerIpc(deps: MainDeps): void {
       // other half is inside the prompt, because only the agent can act on the
       // period the report has to cover.
       reportLate: ({ threadId, dueAt, lastRunAt }) => {
-        deps.bridge.tee(threadId, routineLateEntry(dueAt, lastRunAt))
+        routineEcho(threadId, routineLateEntry(dueAt, lastRunAt))
       },
       // The Routine's name rides the DELIVERY, not the args: a prompt is a routine
       // prompt because the scheduler sent it, so the renderer can never claim it.
       runTurn: (agent, args, gate) =>
-        runPromptTurn(deps, { kind: 'headless', gate, routine: args.routine }, agent, args),
+        runPromptTurn(
+          deps,
+          { kind: 'headless', gate, routine: args.routine, echo: routineEcho },
+          agent,
+          args,
+        ),
       now: () => Date.now(),
     },
   })
