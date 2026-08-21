@@ -11,7 +11,7 @@
  * version that does without one.
  */
 import { useState, type JSX } from 'react'
-import { Plus, Search } from 'lucide-react'
+import { ChevronRight, Plus, Search } from 'lucide-react'
 import type { ProtoBot } from './fixtures'
 import { BotConversation, BotForm, BotMark, ComposerStub, StartOverButton } from './shared'
 import { Button } from '../ui/button'
@@ -306,24 +306,59 @@ function EmptyPane({ onCreate }: { onCreate: () => void }): JSX.Element {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Variant C's sidebar section — injected into the REAL sidebar via Shell's slot. */
+/**
+ * The Bots section of the REAL sidebar. Three styles (#442 q3/q4) — what a row
+ * carries, and what the section does when there are twenty of them:
+ *
+ *   minimal     — mark + name. The #422 baseline. Uncapped: at 20 it pushes
+ *                 Projects entirely off-screen (captured, D-scale-20.png).
+ *   bounded     — adds a right-aligned last-active; the SECTION gets its own
+ *                 max-height and scrollbar, so Projects is always reachable.
+ *   collapsible — a counted, foldable header (`BOTS 20 ▾`). Collapsed, the
+ *                 section costs one row no matter how many Bots exist.
+ */
+export type BotSidebarStyle = 'minimal' | 'bounded' | 'collapsible'
+
 export function VariantCSidebar({
   bots,
   selected,
   onSelect,
   onCreate,
+  style = 'minimal',
 }: {
   bots: ProtoBot[]
   selected: string | null
   onSelect: (id: string) => void
   /** The ONLY way to add a Bot once one is open — the capture caught this hole. */
   onCreate?: () => void
+  style?: BotSidebarStyle
 }): JSX.Element {
+  const [folded, setFolded] = useState(false)
+  const collapsible = style === 'collapsible'
+  const showRows = !collapsible || !folded
+
   return (
     <div className="flex flex-none flex-col gap-0.5">
       <div className="flex items-center justify-between px-2 pb-1 pt-1">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <button
+          type="button"
+          onClick={() => collapsible && setFolded((v) => !v)}
+          className={cn(
+            'flex items-center gap-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground',
+            collapsible && 'transition-colors hover:text-foreground',
+          )}
+        >
+          {collapsible && (
+            <ChevronRight
+              className={cn('size-3 transition-transform', !folded && 'rotate-90')}
+              aria-hidden
+            />
+          )}
           Bots
-        </span>
+          {collapsible && bots.length > 0 && (
+            <span className="ml-1 font-normal tabular-nums opacity-70">{bots.length}</span>
+          )}
+        </button>
         <button
           type="button"
           aria-label="New Bot"
@@ -333,26 +368,43 @@ export function VariantCSidebar({
           <Plus className="size-3.5" aria-hidden />
         </button>
       </div>
+
       {bots.length === 0 ? (
         <p className="px-2 pb-2 text-[12px] text-muted-foreground">
           No Bots yet — add one to keep a running conversation about a project.
         </p>
       ) : (
-        bots.map((b) => (
-          <button
-            key={b.id}
-            type="button"
-            onClick={() => onSelect(b.id)}
+        showRows && (
+          <div
             className={cn(
-              'flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-muted',
-              b.id === selected && 'bg-muted font-medium',
+              'flex flex-col gap-0.5',
+              // `bounded` is the whole point of that style: the SECTION scrolls,
+              // so Projects below it can never be pushed out of reach.
+              style === 'bounded' && 'max-h-[240px] overflow-y-auto',
             )}
           >
-            <BotMark bot={b} size={20} />
-            <span className="min-w-0 flex-1 truncate text-foreground">{b.name}</span>
-            {b.unread && <span className="size-1.5 flex-none rounded-full bg-primary" />}
-          </button>
-        ))
+            {bots.map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => onSelect(b.id)}
+                className={cn(
+                  'flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-[13px] transition-colors hover:bg-muted',
+                  b.id === selected && 'bg-muted font-medium',
+                )}
+              >
+                <BotMark bot={b} size={20} />
+                <span className="min-w-0 flex-1 truncate text-foreground">{b.name}</span>
+                {style !== 'minimal' && (
+                  <span className="flex-none text-[11px] tabular-nums text-muted-foreground/70">
+                    {b.lastActive}
+                  </span>
+                )}
+                {b.unread && <span className="size-1.5 flex-none rounded-full bg-primary" />}
+              </button>
+            ))}
+          </div>
+        )
       )}
     </div>
   )

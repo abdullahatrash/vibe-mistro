@@ -59,9 +59,11 @@ import {
   protoBots,
   readProtoEmpty,
   readProtoMany,
+  readProtoSidebarStyle,
   readProtoVariant,
   type ProtoVariant,
 } from './bots-prototype/BotsPrototype'
+import type { BotSidebarStyle } from './bots-prototype/variants'
 import { VariantCSidebar } from './bots-prototype/variants'
 import { SkillsView } from './skills/SkillsView'
 import { Shell, type WorkspaceFlags } from './shell/Shell'
@@ -912,6 +914,7 @@ export function App(): JSX.Element {
   const [protoVariant, setProtoVariant] = useState<ProtoVariant>(readProtoVariant)
   const [protoEmpty, setProtoEmpty] = useState(readProtoEmpty)
   const [protoMany, setProtoMany] = useState(readProtoMany)
+  const [protoSidebarStyle, setProtoSidebarStyle] = useState<BotSidebarStyle>(readProtoSidebarStyle)
   const [protoCSelected, setProtoCSelected] = useState<string | null>(null)
   const [protoCreating, setProtoCreating] = useState(false)
   const inSettings = nav.view === 'settings'
@@ -988,6 +991,8 @@ export function App(): JSX.Element {
           onEmpty={setProtoEmpty}
           many={protoMany}
           onMany={setProtoMany}
+          sidebarStyle={protoSidebarStyle}
+          onSidebarStyle={setProtoSidebarStyle}
           cSelected={protoCSelected}
           creating={protoCreating}
           onCreating={setProtoCreating}
@@ -1195,6 +1200,7 @@ export function App(): JSX.Element {
                 setProtoCreating(false)
               }}
               onCreate={() => setProtoCreating(true)}
+              style={protoSidebarStyle}
             />
           ) : null
         }

@@ -15,6 +15,7 @@
 import { useCallback, useEffect, type JSX } from 'react'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { PROTO_BOTS, manyBots, type ProtoBot } from './fixtures'
+import type { BotSidebarStyle } from './variants'
 import { VariantA, VariantB, VariantCOutlet, VariantDOutlet } from './variants'
 import { IconButton } from '../ui/icon-button'
 
@@ -31,6 +32,7 @@ const NAMES: Record<ProtoVariant, string> = {
 const VARIANT_KEY = 'proto:422:variant'
 const EMPTY_KEY = 'proto:422:empty'
 const MANY_KEY = 'proto:422:many'
+const STYLE_KEY = 'proto:442:sidebar'
 
 export function readProtoVariant(): ProtoVariant {
   const stored = localStorage.getItem(VARIANT_KEY)
@@ -39,6 +41,13 @@ export function readProtoVariant(): ProtoVariant {
 
 export function readProtoEmpty(): boolean {
   return localStorage.getItem(EMPTY_KEY) === '1'
+}
+
+export const SIDEBAR_STYLES: BotSidebarStyle[] = ['minimal', 'bounded', 'collapsible']
+
+export function readProtoSidebarStyle(): BotSidebarStyle {
+  const v = localStorage.getItem(STYLE_KEY) as BotSidebarStyle | null
+  return v && SIDEBAR_STYLES.includes(v) ? v : 'minimal'
 }
 
 export function readProtoMany(): boolean {
@@ -58,6 +67,8 @@ export function BotsPrototype({
   onEmpty,
   many,
   onMany,
+  sidebarStyle,
+  onSidebarStyle,
   cSelected,
   creating,
   onCreating,
@@ -69,6 +80,8 @@ export function BotsPrototype({
   onEmpty: (v: boolean) => void
   many: boolean
   onMany: (v: boolean) => void
+  sidebarStyle: BotSidebarStyle
+  onSidebarStyle: (v: BotSidebarStyle) => void
   /** C/D's selection — owned by App, since their list is in the sidebar. */
   cSelected: string | null
   /** D's create flow — also App-owned: the sidebar's + is one of its triggers. */
@@ -153,6 +166,17 @@ export function BotsPrototype({
             className="rounded-full px-2.5 py-1 text-[12px] hover:bg-white/10"
           >
             {many ? '20 bots' : '4 bots'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const next = SIDEBAR_STYLES[(SIDEBAR_STYLES.indexOf(sidebarStyle) + 1) % SIDEBAR_STYLES.length]
+              localStorage.setItem(STYLE_KEY, next)
+              onSidebarStyle(next)
+            }}
+            className="rounded-full px-2.5 py-1 text-[12px] hover:bg-white/10"
+          >
+            sidebar: {sidebarStyle}
           </button>
           <span className="mx-1 h-4 w-px bg-white/20" />
           <IconButton aria-label="Close prototype" onClick={onClose}>
