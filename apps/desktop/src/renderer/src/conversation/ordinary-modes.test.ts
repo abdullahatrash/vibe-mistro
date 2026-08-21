@@ -35,6 +35,10 @@ describe('modesWithoutBotProfiles', () => {
     expect(modesWithoutBotProfiles(original)).toBe(original)
   })
 
+  it('reports NO axis when every advertised mode is a Bot — never an empty menu', () => {
+    expect(modesWithoutBotProfiles(modes(BOT_A, [BOT_A, BOT_B]))).toBeNull()
+  })
+
   it('passes null through — an agent that advertises no modes still shows no picker', () => {
     expect(modesWithoutBotProfiles(null)).toBeNull()
   })

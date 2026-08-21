@@ -14,9 +14,12 @@ import type { BotProfileHealth } from './use-bot-profile-health'
  * plain agent. It names the profile id (not just "something is wrong") because
  * the file it is about is the user's to inspect, under `~/.vibe/agents/`.
  *
- * The confirmation is deliberately unexcited about what a rebuild achieves: the
- * files are back, but a running session resolved its profile when it opened
- * (acp-capture §14.6), so the persona returns when the conversation next binds.
+ * Both halves of the copy are pinned to acp-capture §14.6, which says a session
+ * ALREADY RUNNING is unaffected by the profile files either way — it resolved the
+ * persona when it opened. So the warning does not claim the Bot is answering
+ * without its persona right now (it may well not be), and the confirmation does
+ * not claim a rebuild put one back into a session that is already under way.
+ * Both speak about the next session this conversation opens.
  */
 export function BotProfileBanner({
   botName,
@@ -34,9 +37,10 @@ export function BotProfileBanner({
       >
         <TriangleAlert className="size-4 flex-none text-destructive" aria-hidden />
         <span className="min-w-0 flex-1">
-          {botName} has lost its persona: <CodeText text={health.missing.profileId} />{' '}
-          {health.missing.reason} Until it is rebuilt, {botName} answers with Vibe&rsquo;s default
-          instructions.
+          {botName}&rsquo;s persona is no longer available:{' '}
+          <CodeText text={health.missing.profileId} /> {health.missing.reason} A conversation
+          already under way keeps the persona it started with; from its next session onwards,{' '}
+          {botName} answers with Vibe&rsquo;s default instructions.
           {health.rebuildError && <> Rebuild failed: {health.rebuildError}</>}
         </span>
         <Button
@@ -59,8 +63,9 @@ export function BotProfileBanner({
       >
         <CircleCheck className="size-4 flex-none text-muted-foreground" aria-hidden />
         <span className="min-w-0 flex-1">
-          {botName}&rsquo;s persona was rebuilt from its Bot record. It takes effect the next time
-          this conversation resumes.
+          {botName}&rsquo;s persona was rebuilt from its Bot record. It is selected again the next
+          time this conversation opens a session with Vibe — your next message, unless one is
+          already running, in which case when the app next starts.
         </span>
       </div>
     )

@@ -24,9 +24,14 @@ import type { ThreadModes } from '../../../shared/ipc'
 export function modesWithoutBotProfiles(modes: ThreadModes | null): ThreadModes | null {
   if (!modes) return null
   const availableModes = modes.availableModes.filter((mode) => !isMistroBotProfileId(mode.id))
-  // Same-length: return the SAME object, so a picker that memoizes on identity
-  // (the overwhelmingly common case — a user with no Bots) re-renders no more
-  // than it did before this filter existed.
+  // Nothing was filtered — the overwhelmingly common case, a user with no Bots.
+  // Hand back the SAME object rather than a copy: a cheap fast path, not a
+  // memoization guarantee (a user WITH Bots does get a fresh object per call).
   if (availableModes.length === modes.availableModes.length) return modes
+  // Everything was filtered: a picker with nothing to pick is not a control, so
+  // report the axis as unadvertised rather than rendering an empty menu. Only
+  // reachable if an agent ever advertises no builtins at all — the function is
+  // total either way.
+  if (availableModes.length === 0) return null
   return { ...modes, availableModes }
 }

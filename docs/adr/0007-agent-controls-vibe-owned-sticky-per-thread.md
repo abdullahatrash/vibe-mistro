@@ -84,10 +84,17 @@ Two related consequences of the same design, for the reader who arrives here fro
   picking it would silently switch the Bot off while it kept its name, row and history.
 - The re-assert-after-resume choreography above is **in-memory by design**, which is right for a
   Thread and not enough for a Bot: a cold restart has no cache. A Bot's `profile_id` is therefore
-  durable in our store and re-asserted on every bind through the **validating** config setter
-  (`src/main/bots/select-bot-profile.ts`), never `session/set_mode`, whose silent no-op would leave a
-  nameless agent wearing a teammate's name. When the profile is absent from the session's advertised
-  modes, the app says so (banner + rebuild) instead of quietly proceeding.
+  durable in our store and re-asserted on **every bind that produces a fresh session result** — a
+  mint, a re-bind, or a `session/load` resume (`src/main/bots/select-bot-profile.ts`). A plain reuse
+  of a session already bound this run is skipped, which is only safe because a Bot never binds to a
+  session that could not host its persona in the first place (it declines the eager primary session
+  unless that session advertises the profile). The re-assertion goes through `WorkspaceAgent.setMode`,
+  which prefers the **validating** `session/set_config_option` wherever the session advertises the
+  `mode` config option — every 2.24.x binary does, and 2.24 is our floor. The qualifier matters: the
+  same method falls back to `session/set_mode` for a session that advertises no such option, and that
+  method's silent no-op on an unknown id would leave a nameless agent wearing a teammate's name. When
+  the profile is absent from the session's advertised modes, the app says so (banner + rebuild)
+  instead of quietly proceeding.
 
 ## Considered alternatives
 

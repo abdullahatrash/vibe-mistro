@@ -39,21 +39,35 @@ import { removeBotProfile, writeBotProfile, type BotProfileFs } from './write-bo
  * sees, so the profiles land where Vibe will look for them.
  */
 
+/**
+ * What the Bot LIFECYCLE needs — no agent, so main's Workspace/Thread cleanup
+ * paths can build the same profile-file seam without one.
+ */
 export interface BotsIpcDeps {
   bots: BotStoreApi
   /** The Thread half: a Bot's conversation is an ordinary Thread record. */
   threads: BotLifecycleDeps['threads']
   /** Overridable for tests; production uses the real `node:fs` binding. */
   fs?: BotProfileFs
+}
+
+/**
+ * What REGISTERING the handlers additionally needs. `discoverModes` is required
+ * rather than optional on purpose (#448): it is the only evidence the loud-failure
+ * check has, so wiring that could be forgotten would turn the whole feature into a
+ * permanent `unknown` — the app failing silently about failing silently. A missing
+ * source must be a type error at the call site, not a shrug at runtime.
+ */
+export interface BotsRegistrarDeps extends BotsIpcDeps {
   /**
-   * The Workspace agent's latest agent-profile registry reading (#448), by
-   * `agentId` — the wire evidence the open-path persona check diffs against.
-   * Injected because the pool lives in `index.ts`; it awaits the Workspace's
-   * eager primary session (ADR-0012) so a Bot opened the instant its Project
-   * connects gets a real answer rather than a shrug. Null when the agent is gone
-   * or never opened a session.
+   * The Workspace agent's latest agent-profile registry reading, by `agentId` —
+   * the wire evidence the open-path persona check diffs against. Injected because
+   * the pool lives in `index.ts`; it awaits the Workspace's eager primary session
+   * (ADR-0012) so a Bot opened the instant its Project connects gets a real answer
+   * rather than a shrug. Null when the agent is gone or never opened a session —
+   * the one legitimate "nothing to report".
    */
-  discoverModes?: (agentId: string) => Promise<ModeDiscovery | null>
+  discoverModes: (agentId: string) => Promise<ModeDiscovery | null>
 }
 
 /**
@@ -76,7 +90,7 @@ export function createBotLifecycleDeps(deps: BotsIpcDeps): BotLifecycleDeps {
   }
 }
 
-export function registerBotsIpc(deps: BotsIpcDeps): void {
+export function registerBotsIpc(deps: BotsRegistrarDeps): void {
   const lifecycle = createBotLifecycleDeps(deps)
 
   ipcMain.handle(IPC.botsList, (): BotsListResult => ({ bots: listBots(lifecycle) }))
@@ -105,7 +119,7 @@ export function registerBotsIpc(deps: BotsIpcDeps): void {
     async (_event, args: BotsProfileStatusArgs): Promise<BotProfileStatus> => {
       const bot = deps.bots.get(args.threadId)
       if (!bot) return { kind: 'unknown' } // an ordinary Thread, or a deleted Bot
-      const discovery = deps.discoverModes ? await deps.discoverModes(args.agentId) : null
+      const discovery = await deps.discoverModes(args.agentId)
       const status = assessBotProfile({
         profileId: bot.profileId,
         profileWrittenAt: bot.updatedAt,

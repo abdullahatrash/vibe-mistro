@@ -1,6 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
 import type { ThreadAgentControls } from '../../shared/ipc'
-import { applyBotProfile, planBotProfileSelection } from './select-bot-profile'
+import {
+  applyBotProfile,
+  mayClaimPreopenedSession,
+  planBotProfileSelection,
+} from './select-bot-profile'
 
 const PROFILE = 'mistro-bot-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 
@@ -14,6 +18,32 @@ function controls(currentModeId: string, ids: string[]): ThreadAgentControls {
     reasoningEffort: null,
   }
 }
+
+describe('mayClaimPreopenedSession', () => {
+  it('lets an ordinary Thread take the eager primary session, always', () => {
+    expect(mayClaimPreopenedSession(null, controls('ask', ['ask']))).toBe(true)
+    expect(mayClaimPreopenedSession(null, null)).toBe(true)
+  })
+
+  it('lets a Bot take it when that session advertises the persona', () => {
+    expect(mayClaimPreopenedSession(PROFILE, controls('ask', ['ask', PROFILE]))).toBe(true)
+  })
+
+  it('makes a Bot MINT instead when the primary session predates its profile', () => {
+    // The silent-failure sequence this exists to break: connect a Project, create
+    // a Bot, prompt it. The primary session was scanned before the profile file
+    // existed, so binding to it would leave the Bot unable to wear its persona for
+    // the whole run — every later turn reuses that session and skips re-selection.
+    expect(mayClaimPreopenedSession(PROFILE, controls('ask', ['ask', 'plan']))).toBe(false)
+  })
+
+  it('makes a Bot mint when there is no primary session to judge', () => {
+    expect(mayClaimPreopenedSession(PROFILE, null)).toBe(false)
+    expect(
+      mayClaimPreopenedSession(PROFILE, { modes: null, models: null, reasoningEffort: null }),
+    ).toBe(false)
+  })
+})
 
 describe('planBotProfileSelection', () => {
   it('does nothing for an ordinary Thread', () => {

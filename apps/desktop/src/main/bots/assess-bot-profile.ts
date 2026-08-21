@@ -20,6 +20,18 @@ import type { ModeDiscovery } from '../acp/agent-controls'
  * test rather than against a live binary.
  */
 
+/**
+ * Why a profile the agent does not list is absent — ONE wording for both paths.
+ *
+ * The bind-time check (`select-bot-profile.ts`) and this open-time one answer the
+ * same question about the same file, and the notice one raises now also raises the
+ * other's banner. Two descriptions of one broken profile would read as two
+ * different problems.
+ */
+export const BOT_PROFILE_ABSENT_REASON =
+  'Vibe does not list it as an agent profile — the file under ~/.vibe/agents/ is ' +
+  'missing, unreadable, or malformed.'
+
 export interface BotProfileAssessment {
   /** The `mistro-bot-<uuid>` the Bot record names. */
   profileId: string
@@ -50,14 +62,14 @@ export interface BotProfileAssessment {
  */
 export function assessBotProfile(input: BotProfileAssessment): BotProfileStatus {
   const { profileId, profileWrittenAt, discovery } = input
+  // An agent that has advertised no modes at all arrives here as a null reading and
+  // reads as `unknown` — DELIBERATELY unlike the bind-time check, which calls the
+  // same condition `missing`. The asymmetry is what each side holds: a bind has a
+  // session result in hand and is about to prompt it, while this may be asking
+  // before any session ever reported anything. Both comments point at each other so
+  // a later edit to one is not read as a bug against the other.
   if (!discovery) return { kind: 'unknown' }
   if (discovery.observedAt <= profileWrittenAt) return { kind: 'unknown' }
   if (discovery.modeIds.includes(profileId)) return { kind: 'healthy' }
-  return {
-    kind: 'missing',
-    profileId,
-    reason:
-      'Vibe no longer lists it as an agent profile — the file under ~/.vibe/agents/ ' +
-      'is missing, unreadable, or malformed.',
-  }
+  return { kind: 'missing', profileId, reason: BOT_PROFILE_ABSENT_REASON }
 }
