@@ -172,6 +172,30 @@ describe('AgentPool — explicit dispose (the TB5 eviction seam)', () => {
     expect(b.stops).toBe(1)
     expect(pool.agents()).toHaveLength(0)
   })
+
+  it('disposeUnprotected spares a protected agent (window close, NOT quit — #468)', () => {
+    const { pool } = makePool()
+    const a = pool.acquire('/proj/a') // mid-Routine
+    const b = pool.acquire('/proj/b') // idle
+
+    const disposed = pool.disposeUnprotected((agentId) => agentId === a.agentId)
+
+    expect(disposed).toEqual([b.agentId])
+    expect(a.agent.stops).toBe(0)
+    expect(b.agent.stops).toBe(1)
+    // The survivor keeps its Workspace slot, so a reopened window re-attaches.
+    expect(pool.getByWorkspace('/proj/a')).toEqual({ agentId: a.agentId, agent: a.agent })
+    expect(pool.getByWorkspace('/proj/b')).toBeNull()
+  })
+
+  it('disposeUnprotected with nothing protected empties the pool', () => {
+    const { pool } = makePool()
+    pool.acquire('/proj/a')
+    pool.acquire('/proj/b')
+
+    expect(pool.disposeUnprotected(() => false)).toHaveLength(2)
+    expect(pool.agents()).toHaveLength(0)
+  })
 })
 
 /**

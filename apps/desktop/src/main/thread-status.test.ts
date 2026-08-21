@@ -40,6 +40,46 @@ describe('ThreadStatusTracker — streaming (a turn in flight)', () => {
   })
 })
 
+describe('ThreadStatusTracker — tryBeginTurn (the headless busy claim, #468)', () => {
+  it('claims an idle Thread and reports the change', () => {
+    const t = new ThreadStatusTracker()
+    expect(t.tryBeginTurn('a1', 't1')).toEqual({
+      claimed: true,
+      change: { threadId: 't1', streaming: true, needsAttention: false },
+    })
+    expect(t.statusFor('t1').streaming).toBe(true)
+  })
+
+  it('refuses a Thread already streaming, and does NOT bump its count', () => {
+    const t = new ThreadStatusTracker()
+    t.beginTurn('a1', 't1') // a user-initiated turn is already running
+    expect(t.tryBeginTurn('a1', 't1')).toEqual({ claimed: false, change: null })
+    // The refusal left the count alone: the user's own endTurn still clears it.
+    expect(t.endTurn('a1', 't1')).toEqual({ threadId: 't1', streaming: false, needsAttention: false })
+  })
+
+  it('lets exactly ONE of two concurrent claims through (the atomicity #456 asked for)', () => {
+    const t = new ThreadStatusTracker()
+    const claims = [t.tryBeginTurn('a1', 't1'), t.tryBeginTurn('a1', 't1')]
+    expect(claims.filter((c) => c.claimed)).toHaveLength(1)
+    expect(claims.filter((c) => !c.claimed)).toHaveLength(1)
+  })
+
+  it('does not defer across Threads — one agent may host concurrent turns (#456)', () => {
+    const t = new ThreadStatusTracker()
+    expect(t.tryBeginTurn('a1', 't1').claimed).toBe(true)
+    // Same agent, DIFFERENT Thread: allowed, because the busy signal is per-Thread.
+    expect(t.tryBeginTurn('a1', 't2').claimed).toBe(true)
+  })
+
+  it('claims again once the previous turn ended', () => {
+    const t = new ThreadStatusTracker()
+    t.tryBeginTurn('a1', 't1')
+    t.endTurn('a1', 't1')
+    expect(t.tryBeginTurn('a1', 't1').claimed).toBe(true)
+  })
+})
+
 describe('ThreadStatusTracker — needsAttention (a pending permission)', () => {
   it('sets needsAttention when a permission request is outstanding', () => {
     const t = new ThreadStatusTracker()

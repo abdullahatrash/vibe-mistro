@@ -14,6 +14,7 @@ function state(over: Partial<ProtectionState> = {}): ProtectionState {
     activeAgentId: null,
     inFlightTurns: new Map(),
     signingInAgents: new Set(),
+    routineAgents: new Set(),
     ...over,
   }
 }
@@ -33,11 +34,19 @@ describe('isProtected (TB5 #50)', () => {
     expect(isProtected('a1', state({ signingInAgents: new Set(['a1']) }))).toBe(true)
   })
 
+  it('protects an agent running a Routine (#468, ADR-0028)', () => {
+    // The whole run — acquire, start, bind, prompt — not just the streaming half:
+    // `session/load` on a long Bot Thread is slow, and the minute-ly cap sweep
+    // would otherwise trim an agent that is mid-bind for a turn nobody is watching.
+    expect(isProtected('a1', state({ routineAgents: new Set(['a1']) }))).toBe(true)
+  })
+
   it('does NOT protect an agent that is idle, not selected, and not signing in', () => {
     const s = state({
       activeAgentId: 'other',
       inFlightTurns: new Map([['other', 1]]),
       signingInAgents: new Set(['another']),
+      routineAgents: new Set(['yet-another']),
     })
     expect(isProtected('a1', s)).toBe(false)
   })

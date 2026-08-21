@@ -33,9 +33,24 @@ describe('AgentActivity', () => {
     expect(a.isProtected('a1')).toBe(false)
   })
 
-  it('evict clears the turn count so a disposed agent leaves no stale protection', () => {
+  it('protects an agent for the whole Routine run, counting overlapping runs (#468)', () => {
+    const a = new AgentActivity()
+    a.beginRoutine('a1')
+    a.beginRoutine('a1') // two Bots in one Workspace, both due
+    expect(a.isProtected('a1')).toBe(true)
+    a.endRoutine('a1')
+    expect(a.isProtected('a1')).toBe(true) // one run still open
+    a.endRoutine('a1')
+    expect(a.isProtected('a1')).toBe(false)
+    a.endRoutine('a1') // unbalanced end must not corrupt the count
+    a.beginRoutine('a1')
+    expect(a.isProtected('a1')).toBe(true)
+  })
+
+  it('evict clears the turn AND Routine counts so a disposed agent leaves no stale protection', () => {
     const a = new AgentActivity()
     a.beginTurn('a1')
+    a.beginRoutine('a1')
     a.evict('a1')
     expect(a.isProtected('a1')).toBe(false)
   })

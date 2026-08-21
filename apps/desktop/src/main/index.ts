@@ -7,7 +7,6 @@ import {
   nativeImage,
   nativeTheme,
   shell,
-  type WebContents,
 } from 'electron'
 import electronUpdater, { type UpdateInfo } from 'electron-updater'
 import { mkdir } from 'node:fs/promises'
@@ -25,7 +24,6 @@ import {
   type ReadTranscriptResult,
   type ThreadSnapshotPutArgs,
   type ReadThreadAttachmentsResult,
-  type TranscriptImageRef,
   type RemoveWorkspaceResult,
   type RespondPermissionArgs,
   type SearchQueryArgs,
@@ -49,7 +47,6 @@ import {
   type StartThreadArgs,
   type StartThreadResult,
   type ThreadConnection,
-  type ThreadConfigAxis,
   type ThreadStatusEvent,
   type ThreadTitleEvent,
   type AppUpdateStatusEvent,
@@ -79,16 +76,7 @@ import type { MetadataStoreApi } from './persistence/metadata-store-api'
 import { createMetadataStore } from './persistence/create-metadata-store'
 import { maybeBackupStateDb } from './persistence/state-backup'
 import type { StateDb } from './persistence/sqlite-db'
-import {
-  acpEventEntry,
-  agentReboundEntry,
-  resolvePermissionEntry,
-  sessionIdFromPayload,
-  titleFromSessionInfoUpdate,
-  turnCompleteEntry,
-  turnErrorEntry,
-  userPromptEntry,
-} from './persistence/transcript'
+import { resolvePermissionEntry } from './persistence/transcript'
 import type { TranscriptStoreApi } from './persistence/transcript-store-api'
 import { createTranscriptStore } from './persistence/create-transcript-store'
 import { TranscriptBridge } from './persistence/transcript-bridge'
@@ -97,10 +85,12 @@ import { AttachmentStore } from './persistence/attachment-store'
 import { WorkspaceAgent, WorkspaceAgentError } from './workspace-agent'
 import { AgentPool } from './agent-pool'
 import { AgentActivity } from './agent-activity'
-import { ensureBoundSession, resolveContinueTarget } from './thread-binding'
+import { wireAgentEvents as wireEvents } from './agent-events'
+import { runPromptTurn } from './prompt-turn'
+import { resolveContinueTarget } from './thread-binding'
 import { deleteThread } from './persistence/delete-thread'
 import { removeWorkspace } from './persistence/remove-workspace'
-import { permissionRequestIdOf, ThreadStatusTracker, type ThreadStatusChange } from './thread-status'
+import { ThreadStatusTracker, type ThreadStatusChange } from './thread-status'
 import { gitFetch, readGitStatus } from './git/status'
 import { GitStatusManager } from './git/status-stream'
 import { chokidarWatchFactory, realClock } from './git/runtime'
@@ -110,11 +100,6 @@ import { registerSkillsIpc } from './skills/register-ipc'
 import { createBotLifecycleDeps, registerBotsIpc } from './bots/register-ipc'
 import { cleanRemovedBots } from './bots/clean-removed-bots'
 import { botNamesByThread, markBotThreads } from './bots/mark-bot-threads'
-import {
-  applyBotProfile,
-  mayClaimPreopenedSession,
-  planBotProfileSelection,
-} from './bots/select-bot-profile'
 import type { ModeDiscovery } from './acp/agent-controls'
 import { SqliteBotStore } from './persistence/sqlite-bot-store'
 import type { BotStoreApi } from './persistence/bot-store-api'
@@ -129,8 +114,6 @@ import { FilesListCache, shouldInvalidateFilesCacheOnGitStatus } from './files/c
 import { clampWebviewAttachment } from './browser/webview-clamp'
 import { safeExternalUrl } from './files/safe-external-url'
 import { APP_DISPLAY_NAME, buildMenuTemplate } from './app-menu'
-import { applyPendingThreadControls } from './pending-thread-controls'
-import { controlsWithCurrentValue } from '../shared/thread-control-intent'
 import { resolveTheme, THEME_BACKGROUND } from './theme/resolve-theme'
 import {
   DEFAULT_THEME_PREFERENCE,
@@ -228,6 +211,14 @@ const isAgentProtected = (agentId: string): boolean => activity.isProtected(agen
  * the renderer (`emitThreadStatus`) on every change.
  */
 const threadStatus = new ThreadStatusTracker()
+
+/**
+ * The transcript bridge, held module-level like the pool itself so the
+ * window-close teardown (`window-all-closed`) can clear the routing entries of the
+ * agents it disposes (#468). Assigned once at ready; null before that, when there
+ * is nothing warm to tear down anyway.
+ */
+let bridgeGlobal: TranscriptBridge | null = null
 
 /**
  * Push one or more per-Thread status changes to every renderer (#53). A null /
@@ -665,234 +656,41 @@ function threadFailureResult(agentId: string, agent: WorkspaceAgent, err: unknow
 }
 
 /**
- * Wire a freshly-spawned pool agent's `event` tee — called exactly ONCE per spawn
- * (a reused warm agent already has its listener). Each streamed payload is teed to
- * ITS Thread's JSONL, routed by the event's OWN sessionId so that with several
- * warm agents an event always lands in the right Thread regardless of which
- * Workspace is focused, then forwarded to the renderer tagged by `agentId`.
- * Best-effort: the tee never gates the live forward.
+ * Wire a freshly-spawned pool agent's `event` listener — called exactly ONCE per
+ * spawn (a reused warm agent already has one). The tee/forward split itself lives
+ * in `agent-events.ts` (#468); this supplies the two main-side callbacks it needs
+ * and the FORWARD, which is a broadcast to whatever windows exist right now —
+ * possibly none, which is precisely the Routine case. The tee is unaffected either
+ * way, and that independence is what makes a headless turn replay correctly.
  */
-function wireAgentEvents(deps: MainDeps, agentId: string, agent: WorkspaceAgent, sender: WebContents): void {
-  agent.on('event', (payload: unknown) => {
-    const sessionId = sessionIdFromPayload(payload)
-    deps.bridge.tee(deps.bridge.threadIdFor(agentId, sessionId), acpEventEntry(payload))
-    // vibe-acp pushes the session's auto-title lazily after the first prompt via a
-    // `session_info_update` (never in `session/new`) — capture it so the Thread stops
-    // showing "Untitled". Persist + push by the event's OWN sessionId; best-effort.
-    const title = titleFromSessionInfoUpdate(payload)
-    if (title !== null) void recordThreadTitle(deps, sessionId, title)
-    // A forwarded `session/request_permission` blocks the turn until the renderer
-    // answers — surface it as the Thread's `needsAttention` (#53). Resolve its
-    // Thread the same way the tee does (the event's OWN sessionId via the store,
-    // falling back to the agent's active Thread); skip when unattributable.
-    const requestId = permissionRequestIdOf(payload)
-    if (requestId !== null) {
-      const threadId = deps.bridge.threadIdFor(agentId, sessionId)
-      if (threadId) emitThreadStatus(threadStatus.addPermission(agentId, threadId, requestId))
-    }
-    if (!sender.isDestroyed()) {
-      sender.send(IPC.acpEvent, { agentId, payload })
-    }
-  })
+function wireAgentEvents(deps: MainDeps, agentId: string, agent: WorkspaceAgent): void {
+  wireEvents(
+    {
+      bridge: deps.bridge,
+      recordTitle: (sessionId, title) => void recordThreadTitle(deps, sessionId, title),
+      notePermission: (id, threadId, requestId) =>
+        emitThreadStatus(threadStatus.addPermission(id, threadId, requestId)),
+    },
+    agentId,
+    agent,
+    (id, payload) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.webContents.isDestroyed()) win.webContents.send(IPC.acpEvent, { agentId: id, payload })
+      }
+    },
+  )
 }
 
 /**
- * Run one prompt turn: bind-on-first-prompt, tee the input, send `session/prompt`,
- * and map the outcome to a `SendPromptResult`. Extracted from the IPC handler so
- * the handler stays a thin eviction-protection wrapper (TB5 #50). `sender` is the
- * request's webContents (for the up-front `thread:bound` signal).
+ * Acquire a Workspace's warm agent AND wire its events when this call spawned it —
+ * the one door onto the pool for every caller that will drive a turn (#468). A
+ * Routine warms a Workspace nobody selected, so the wiring can no longer live in
+ * the `startThread` handler alone.
  */
-async function runPromptTurn(
-  deps: MainDeps,
-  sender: WebContents,
-  agent: WorkspaceAgent,
-  args: SendPromptArgs,
-): Promise<SendPromptResult> {
-  // Bind on first prompt (ADR-0005, TB5): a draft (sessionId null) mints its
-  // session via `session/new` NOW and binds it onto this Thread id; a reopened
-  // Thread whose stored session isn't hosted resumes via `session/load` (re-binding
-  // fresh on a resume failure); an already-bound Thread reuses its session — no
-  // second `session/new`. A binding failure surfaces WITHOUT teeing: nothing was
-  // logged yet, so a failed first prompt leaves no transcript residue — and the
-  // draft's mint RESERVES its `threads` row before the `session/new` round-trip
-  // (#417), releasing it again if the mint fails, so the bridge below is never
-  // pointed at a Thread whose row doesn't exist yet.
-  let sessionId: string
-  let rebound: boolean
-  try {
-    // Point the bridge at the Thread being prompted, so a session-less lifecycle
-    // event tees to the ACTIVE Thread when several share an agent — refreshed every
-    // prompt (last-write-wins, and only the active Thread prompts at a time).
-    deps.bridge.bind(args.agentId, args.threadId)
-    // Is this Thread a Mistro Bot, and which persona does it own? Resolved BEFORE
-    // the bind, because it decides which session the bind may use (#448).
-    const botProfileId = deps.bots.get(args.threadId)?.profileId ?? null
-    // A draft's first prompt (sessionId null) claims the Workspace's eager primary
-    // session (ADR-0012), so it binds to that instead of minting a SECOND
-    // `session/new`; consumed once, so a second concurrent draft mints its own.
-    // Never claimed for a reopened/already-bound Thread (those aren't case (i)).
-    //
-    // A Bot declines that session unless it ADVERTISES the Bot's persona (#448): a
-    // Bot created after the Workspace connected is absent from the primary
-    // session's registry scan, so binding to it would give the Bot a session that
-    // can never wear its persona — silently, for the rest of the run (every later
-    // turn reuses that session and re-selection is skipped). Minting a fresh
-    // `session/new` re-scans and costs one extra session in that case alone.
-    const preopened =
-      args.sessionId === null && mayClaimPreopenedSession(botProfileId, agent.primarySessionControls)
-        ? (agent.consumePrimarySession() ?? undefined)
-        : undefined
-    const bound = await ensureBoundSession({
-      agent,
-      store: deps.store,
-      threadId: args.threadId,
-      workspaceId: args.workspaceId,
-      sessionId: args.sessionId,
-      preopened,
-    })
-    sessionId = bound.sessionId
-    rebound = bound.rebound
-    const reportedControls = bound.controls
-    let actualControls = reportedControls
-    let controlFailures: ThreadConfigAxis[] = []
-    /** A Bot whose persona could not be selected on this session (#446) — surfaced below. */
-    let botProfileError: string | undefined
-    if (reportedControls && args.controlIntent) {
-      const applied = await applyPendingThreadControls(
-        agent,
-        sessionId,
-        args.controlIntent,
-        reportedControls,
-        (axis, error) => {
-          console.error(
-            `[vibe-mistro:controls] pre-prompt ${axis} apply failed (${args.threadId}): ` +
-              `${error instanceof Error ? error.message : String(error)}`,
-          )
-        },
-      )
-      actualControls = applied.controls
-      controlFailures = applied.failedAxes
-    }
-    // A Mistro Bot's persona is a Vibe agent profile selected on the MODE axis
-    // (#446, ADR-0027), and it must be re-selected on EVERY bind: Mode does not
-    // survive `session/load` and ADR-0007's re-assert cache is in-memory, so a Bot
-    // reopened after a restart would otherwise answer as a nameless agent. It runs
-    // AFTER any pending control intent so the Bot's profile always wins the axis.
-    //
-    // `setMode` routes through the VALIDATING `session/set_config_option` (a bogus
-    // id is rejected with -32602), never `session/set_mode`, which answers a bad id
-    // with `{}` — a silent no-op indistinguishable from success (#427) — on every
-    // 2.24.x binary, all of which advertise the `mode` config option. A failure is
-    // reported, never swallowed: a Bot that quietly answers with no persona is the
-    // one failure ADR-0027 forbids.
-    const profileOutcome = await applyBotProfile(
-      agent,
-      sessionId,
-      planBotProfileSelection(botProfileId, reportedControls),
-    )
-    if (profileOutcome.ok) {
-      if (profileOutcome.selected && actualControls) {
-        actualControls = controlsWithCurrentValue(actualControls, 'mode', profileOutcome.selected)
-      }
-    } else {
-      botProfileError = profileOutcome.message
-      console.error(`[vibe-mistro:bots] ${args.threadId}: ${profileOutcome.message}`)
-    }
-    // Tell the renderer this Thread is now bound after any validated pending Side
-    // Draft controls have been awaited, and BEFORE `agent.prompt` streams below
-    // (same webContents, so ordered ahead of those `acp:event`s). This binds the
-    // Thread's live view to its OWN session up front, so it never infers a
-    // session from an arbitrary (possibly sibling) event. `rebound` (TB4 #33)
-    // carries a NEW session for a reopened Thread whose resume failed — the
-    // renderer rebinds its live view to it AND renders the "context reset" notice.
-    //
-    // We emit whenever the bind produced a fresh result with `controls` (#70) — a
-    // mint, a re-bind, OR a successful resume — so the Thread's picker sources its
-    // OWN Mode/Model/effort from THIS session (the #66 single-Thread limitation this
-    // removes). A plain reuse of an already-hosted session brings null controls and
-    // no re-emit (the renderer keeps what it holds). We hand the renderer the
-    // session's REPORTED controls only; the renderer caches the user's prior
-    // non-default selection and RE-ASSERTS it after a `session/load` resume (#72,
-    // ADR-0007). For a Side Draft's first bind, `actualControls` instead reflects
-    // only successfully applied ids that this newly bound session advertised.
-    if (actualControls && !sender.isDestroyed()) {
-      sender.send(IPC.threadBound, {
-        threadId: args.threadId,
-        sessionId,
-        rebound,
-        controls: actualControls,
-        controlFailures: controlFailures.length > 0 ? controlFailures : undefined,
-        botProfileError,
-      })
-    }
-  } catch (err) {
-    if (err instanceof WorkspaceAgentError && err.authState === 'not-signed-in') {
-      return { ok: false, kind: 'not-signed-in', agentId: args.agentId, authMethods: agent.authMethods }
-    }
-    return { ok: false, kind: 'error', error: err instanceof Error ? err.message : String(err) }
-  }
-
-  // A prompt is Thread ACTIVITY: bump the persisted `lastActiveAt` so the sidebar's
-  // timestamp + order reflect the last prompt, not the first bind. Without this a
-  // continued Thread (successful resume) or any later prompt on an already-hosted
-  // session never re-wrote the store — the record kept its bind-time timestamp
-  // forever. Best-effort + fire-and-forget (ADR-0005): a persist failure logs and
-  // never gates the turn.
-  void deps.store.touchThread(args.threadId).catch((err) => {
-    console.error(
-      `[vibe-mistro:metadata] touchThread failed (${args.threadId}): ` +
-        `${err instanceof Error ? err.message : String(err)}`,
-    )
-  })
-
-  // Tee the user's prompt (the conversation INPUT) to THIS Thread's log before
-  // sending it, so it precedes the streamed events it triggers. We hold the
-  // Thread id, so no bridge lookup — a draft's first prompt can't misroute to
-  // another Thread. Main has no renderer item id, so mint an opaque replay key.
-  //
-  // Image attachments persist FIRST (awaited: the refs must exist when the entry
-  // is appended, and the entry must precede the turn's `acp-event` tees — the
-  // TranscriptStore chain serializes in CALL order). `saveAll` never rejects; a
-  // failed/oversized image drops out of the refs and the prompt replays
-  // text-only. Skipped for a tombstoned Thread so a removeWorkspace racing this
-  // in-flight prompt can't re-create the attachments dir after its delete.
-  let imageRefs: TranscriptImageRef[] | undefined
-  if (deps.attachments && args.images?.length && !deps.bridge.isTombstoned(args.threadId)) {
-    imageRefs = await deps.attachments.saveAll(args.threadId, args.images)
-    if (imageRefs.length === 0) imageRefs = undefined
-  }
-  deps.bridge.tee(args.threadId, userPromptEntry(randomUUID(), args.text, imageRefs))
-  // On a re-bind (TB4 #33), persist the "context reset" notice right AFTER the
-  // user's prompt and BEFORE the turn's events — so a later reopen replays it
-  // in the same position the live view rendered it (`thread:bound` -> notice).
-  if (rebound) deps.bridge.tee(args.threadId, agentReboundEntry())
-  try {
-    const result = await agent.prompt(sessionId, args.text, args.images)
-    // Tee the clean turn end: this signal lives ONLY in this IPC response
-    // (never an `acp:event`), so without it a replay leaves `isProcessing`
-    // stuck true. Serialized after the turn's events (TranscriptStore chain).
-    deps.bridge.tee(args.threadId, turnCompleteEntry())
-    return { ok: true, result, sessionId }
-  } catch (err) {
-    // Mid-session expiry (-32000): keep the agent alive so the renderer can
-    // re-auth in place on the same agent; don't stop it. This is a re-auth
-    // flow, NOT a conversation error — tee `turn-complete` (the renderer
-    // synthesizes no ErrorItem here either), so replay isn't left processing.
-    if (err instanceof WorkspaceAgentError && err.authState === 'not-signed-in') {
-      deps.bridge.tee(args.threadId, turnCompleteEntry())
-      return { ok: false, kind: 'not-signed-in', agentId: args.agentId, authMethods: agent.authMethods }
-    }
-    const message = err instanceof Error ? err.message : String(err)
-    deps.bridge.tee(args.threadId, turnErrorEntry(message))
-    // Carry the JSON-RPC/app code (e.g. -31008 for an unsupported/oversized image,
-    // #100) so the renderer can special-case it rather than show a generic error.
-    return {
-      ok: false,
-      kind: 'error',
-      error: message,
-      code: err instanceof WorkspaceAgentError ? err.code ?? undefined : undefined,
-    }
-  }
+function acquireWiredAgent(deps: MainDeps, workspaceDir: string): { agentId: string; agent: WorkspaceAgent } {
+  const { agentId, agent, created } = pool.acquire(workspaceDir)
+  if (created) wireAgentEvents(deps, agentId, agent)
+  return { agentId, agent }
 }
 
 // The brand icon (resources/, generated by scripts/generate-app-icon.mjs from the
@@ -998,9 +796,43 @@ function registerIpc(deps: MainDeps): void {
     isStreaming: (threadId) => threadStatus.statusFor(threadId).streaming,
     closeThreadSession: (threadId) => bestEffortCloseFor(deps, threadId),
   })
-  // Routine CRUD (#467). Read-only on the Bot store: a Routine can only ever be
-  // attached to a Bot, and nothing in this slice fires one.
-  registerRoutinesIpc({ routines: deps.routines, bots: deps.bots })
+  // Routine CRUD (#467) plus the headless turn's assembly (#468). Read-only on the
+  // Bot store: a Routine can only ever be attached to a Bot.
+  //
+  // The returned `runRoutineNow` is the ONE entry point a Routine's turn goes
+  // through, and NOTHING calls it in this slice — deciding when a Routine is due is
+  // the scheduler's job (#470), which will hold this handle. Everything the run
+  // needs that only main has (the pool, the busy claim, eviction protection, the
+  // turn) is passed in here rather than reached for, so the run stays testable.
+  registerRoutinesIpc({
+    routines: deps.routines,
+    bots: deps.bots,
+    turn: {
+      threads: deps.store,
+      // Synchronous, and paired with the claim below so two ticks cannot both take
+      // one Bot. Wires the event tee when this call spawned the agent — a Routine
+      // warms a Workspace nobody selected, so nothing else would have.
+      acquireAgent: (workspaceDir) => acquireWiredAgent(deps, workspaceDir),
+      claimThread: (agentId, threadId) => {
+        const claim = threadStatus.tryBeginTurn(agentId, threadId)
+        emitThreadStatus(claim.change)
+        return claim.claimed
+      },
+      releaseThread: (agentId, threadId) => {
+        emitThreadStatus(threadStatus.endTurn(agentId, threadId))
+        // Sweep any permission left unanswered when the turn settled, exactly as
+        // the `sendPrompt` handler does — nothing is blocking any more.
+        emitThreadStatus(threadStatus.clearThread(threadId))
+      },
+      beginProtection: (agentId) => {
+        pool.touch(agentId) // a Routine's run is real activity, so it outranks idle peers
+        activity.beginRoutine(agentId)
+      },
+      endProtection: (agentId) => activity.endRoutine(agentId),
+      runTurn: (agent, args) => runPromptTurn(deps, { kind: 'headless' }, agent, args),
+      now: () => Date.now(),
+    },
+  })
   // The same profile-file seam the Bot CRUD uses, reused by the Thread- and
   // Workspace-removal cleanup below so both paths refuse a foreign profile id
   // through exactly one gate (#445).
@@ -1049,13 +881,12 @@ function registerIpc(deps: MainDeps): void {
     return result.filePaths[0]
   })
 
-  ipcMain.handle(IPC.startThread, async (event, args: StartThreadArgs): Promise<StartThreadResult> => {
+  ipcMain.handle(IPC.startThread, async (_event, args: StartThreadArgs): Promise<StartThreadResult> => {
     // Warm pool (ADR-0006 decision 3): lazily spawn this Workspace's agent on its
     // first select and REUSE it thereafter — no dispose-then-respawn. A reused warm
     // agent skips the handshake (start() early-returns below) and its event tee is
     // already wired, so a re-select / continue never re-handshakes.
-    const { agentId, agent, created } = pool.acquire(args.workspaceDir)
-    if (created) wireAgentEvents(deps, agentId, agent, event.sender)
+    const { agentId, agent } = acquireWiredAgent(deps, args.workspaceDir)
 
     // Enforce the warm-count cap right after warming this Workspace (TB5 #50): if
     // we're now over MAX_WARM_AGENTS, trim the least-recently-active UNPROTECTED
@@ -1149,7 +980,7 @@ function registerIpc(deps: MainDeps): void {
       // the sidebar. Cleared in the same `finally` as the per-agent protection.
       emitThreadStatus(threadStatus.beginTurn(args.agentId, args.threadId))
       try {
-        return await runPromptTurn(deps, event.sender, agent, args)
+        return await runPromptTurn(deps, { kind: 'renderer', sender: event.sender }, agent, args)
       } finally {
         activity.endTurn(args.agentId)
         // Clear streaming, then sweep any permission left unanswered when the turn
@@ -1612,6 +1443,7 @@ app.whenReady().then(async () => {
     sink: transcript,
     resolveBySession: (sessionId) => store.findThreadIdBySessionId(sessionId),
   })
+  bridgeGlobal = bridge
   // The Mistro Bot records (#445, ADR-0027) ride the same `state.sqlite` as the
   // metadata and transcript stores — a Bot IS a Thread, so its row cascades
   // with the Thread and the Workspace and can never be left dangling.
@@ -1698,7 +1530,17 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   // The pool is process-global, which is fine for single-window TB1/TB2.
   // A future multi-window slice should scope the pool per window.
-  pool.disposeAll()
+  //
+  // PROTECTION IS CONSULTED HERE (#468, ADR-0028). This used to be an
+  // unconditional `disposeAll()`, which was harmless while every turn had a window
+  // watching it: with the last window gone, nothing in flight had anyone left to
+  // want it. A Routine breaks that assumption — on macOS the app survives window
+  // close, so closing the window mid-routine would kill the child and the turn with
+  // it. The on-screen signal is cleared first, because with no window there is
+  // nothing on screen; what survives is work that is genuinely still running.
+  activity.setActive(null)
+  const disposed = pool.disposeUnprotected(isAgentProtected)
+  if (bridgeGlobal) notifyAgentsEvicted(bridgeGlobal, disposed)
   // Shell sessions die with the windows too (ADR-0014): with no window to ever
   // reattach from, a surviving PTY would just be an orphaned process — mirror
   // the pool's teardown rather than the warm-across-reopen behaviour.
@@ -1724,8 +1566,14 @@ app.on('will-quit', () => {
     stateDbGlobal.close()
     stateDbGlobal = null
   }
-  // Stop the idle-evict sweep so no timer outlives the app (TB5 #50). The pool's
-  // own teardown is `window-all-closed`'s `disposeAll`; this just clears the timer.
+  // Quitting IS unconditional: protection defers a teardown, it never outlives the
+  // app. Since #468 `window-all-closed` spares a mid-Routine agent, so the pool
+  // needs a real teardown here — otherwise that child would outlive the process on
+  // every quit path (non-macOS quits straight after window-all-closed, and macOS
+  // can quit from the dock with no window-all-closed at all). Idempotent.
+  pool.disposeAll()
+  // Stop the idle-evict sweep so no timer outlives the app (TB5 #50); the pool is
+  // already torn down above.
   if (sweepTimer) {
     clearInterval(sweepTimer)
     sweepTimer = null

@@ -252,4 +252,30 @@ export class AgentPool<A extends PoolAgent = WorkspaceAgent> {
     this.byId.clear()
     this.byWorkspace.clear()
   }
+
+  /**
+   * Stop + drop every warm agent EXCEPT the protected ones, returning the disposed
+   * agentIds (#468) — window-close, which is not a quit.
+   *
+   * `disposeAll` above ignores protection entirely, which was harmless while every
+   * turn had a window watching it: closing the last window meant nothing was in
+   * flight that anybody could still want. A Routine breaks that assumption — on
+   * macOS the app survives window close, so an unconditional teardown would kill a
+   * headless turn's child mid-stream. Each survivor keeps its Workspace slot, so a
+   * reopened window re-attaches to it rather than re-warming.
+   *
+   * Tears down the way `disposeAll` does — a straight `stop()`, not the injected
+   * graceful disposer — because on every platform but macOS this teardown is
+   * immediately followed by `app.quit()`, and an awaited `session/close` racing the
+   * exit is how a child gets orphaned.
+   */
+  disposeUnprotected(isProtected: (agentId: string) => boolean): string[] {
+    const doomed = [...this.byId.values()].filter((entry) => !isProtected(entry.agentId))
+    for (const entry of doomed) {
+      this.byId.delete(entry.agentId)
+      this.byWorkspace.delete(entry.workspaceDir)
+      entry.agent.stop()
+    }
+    return doomed.map((entry) => entry.agentId)
+  }
 }

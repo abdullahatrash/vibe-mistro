@@ -17,11 +17,16 @@ import { isProtected } from './agent-protection'
  * - AUTH: agents with a sign-in flow IN PROGRESS. A delegated browser OAuth can pend
  *   longer than `IDLE_EVICT_MS` while the user is on another Workspace, so the agent
  *   is shielded for the flow's whole duration (a one-shot `touch` wouldn't suffice).
+ * - ROUTINES (#468): agents running a Routine's headless turn, by agentId -> open-run
+ *   count. A count, not a flag, because one Workspace agent legitimately hosts several
+ *   Bots and two of their Routines can run at once. Held across the WHOLE run (acquire
+ *   -> start -> bind -> prompt), which is wider than the turn count above.
  */
 export class AgentActivity {
   private active: string | null = null
   private readonly inFlightTurns = new Map<string, number>()
   private readonly signingIn = new Set<string>()
+  private readonly routineRuns = new Map<string, number>()
 
   setActive(agentId: string | null): void {
     this.active = agentId
@@ -45,17 +50,38 @@ export class AgentActivity {
     this.signingIn.delete(agentId)
   }
 
+  /** Mark an agent as running a Routine (#468) — held for the WHOLE headless run. */
+  beginRoutine(agentId: string): void {
+    this.routineRuns.set(agentId, (this.routineRuns.get(agentId) ?? 0) + 1)
+  }
+
+  /** The Routine run ended (any outcome) — drop the entry at zero so it can't leak. */
+  endRoutine(agentId: string): void {
+    const next = (this.routineRuns.get(agentId) ?? 0) - 1
+    if (next > 0) this.routineRuns.set(agentId, next)
+    else this.routineRuns.delete(agentId)
+  }
+
   /** An evicted/stopped agent holds no turn count (mirrors the eviction cleanup). */
   evict(agentId: string): void {
     this.inFlightTurns.delete(agentId)
+    this.routineRuns.delete(agentId)
   }
 
-  /** The pool's eviction-protection predicate: NEVER evict on-screen / mid-turn / mid-sign-in. */
+  /**
+   * The pool's eviction-protection predicate: NEVER evict on-screen / mid-turn /
+   * mid-sign-in / mid-Routine.
+   *
+   * The routine map is projected to the SET the pure predicate takes: a count is
+   * bookkeeping (overlapping runs on one agent), while the protection question is
+   * only "is any run open".
+   */
   isProtected(agentId: string): boolean {
     return isProtected(agentId, {
       activeAgentId: this.active,
       inFlightTurns: this.inFlightTurns,
       signingInAgents: this.signingIn,
+      routineAgents: new Set(this.routineRuns.keys()),
     })
   }
 }
