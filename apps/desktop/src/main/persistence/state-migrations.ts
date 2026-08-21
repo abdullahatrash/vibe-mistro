@@ -5,8 +5,15 @@ import { isTranscriptEntry } from './transcript'
 /**
  * The state database's forward-only migration history (ADR-0019). Statically
  * registered — append new migrations to the END with the next id; never edit or
- * reorder an applied one. `user_version` tracks the last applied id; a database
- * ahead of this list fails closed in `openStateDb`.
+ * reorder an applied one, and never reuse a `name`. A database ahead of this list
+ * fails closed in `openStateDb`.
+ *
+ * Applied migrations are recorded BY NAME in `schema_migrations` (#475), so a
+ * long-lived branch that appends its own migration no longer consumes an `id`
+ * that `main` needs — the two lists can disagree about numbers without either
+ * silently skipping the other's work. `creates` is REQUIRED on every entry and
+ * must list every object `up` makes, spelled as `sqlite_master.name` spells it:
+ * it is what lets a ledger row be tested against the schema it claims.
  *
  * Schema conventions (ADR-0019): timestamps are epoch-millisecond INTEGERs
  * (matching the `shared/ipc` wire types), booleans are 0/1 INTEGERs — except
@@ -17,6 +24,7 @@ export const STATE_MIGRATIONS: readonly Migration[] = [
   {
     id: 1,
     name: 'metadata-tables',
+    creates: ['workspaces', 'threads', 'idx_threads_workspace_active', 'idx_threads_session'],
     up: (db) => {
       db.exec(`
         CREATE TABLE workspaces (
@@ -45,6 +53,7 @@ export const STATE_MIGRATIONS: readonly Migration[] = [
   {
     id: 2,
     name: 'transcript-entries',
+    creates: ['transcript_entries', 'idx_transcript_entries_thread'],
     up: (db) => {
       // The transcript event log (ADR-0019): the source of truth the projections
       // derive from. `seq` is the global total order (replacing per-file append
@@ -66,6 +75,15 @@ export const STATE_MIGRATIONS: readonly Migration[] = [
   {
     id: 3,
     name: 'prose-fts',
+    creates: [
+      'prose_items',
+      'idx_prose_items_thread_item',
+      'idx_prose_items_thread',
+      'prose_fts',
+      'prose_items_ai',
+      'prose_items_ad',
+      'prose_items_au',
+    ],
     up: (db) => {
       // The search projection (ADR-0019, #296): one prose row per conversation
       // item (see prose-projection.ts) + an FTS5 external-content index kept in
@@ -123,6 +141,7 @@ export const STATE_MIGRATIONS: readonly Migration[] = [
   {
     id: 4,
     name: 'thread-snapshots',
+    creates: ['thread_snapshots'],
     up: (db) => {
       // The fold-snapshot projection (ADR-0019, #297): the renderer's folded
       // ConversationState as an OPAQUE blob (main never parses it — ADR-0001),
@@ -144,6 +163,7 @@ export const STATE_MIGRATIONS: readonly Migration[] = [
   {
     id: 5,
     name: 'bots',
+    creates: ['bots', 'idx_bots_workspace'],
     up: (db) => {
       // The Mistro Bot record (#445, ADR-0027): a Bot IS one continuing Thread,
       // so `thread_id` is BOTH the primary key and the identity — there is no
@@ -175,6 +195,7 @@ export const STATE_MIGRATIONS: readonly Migration[] = [
   {
     id: 6,
     name: 'routines',
+    creates: ['routines', 'idx_routines_thread'],
     up: (db) => {
       // A Routine (#467, ADR-0028): a named schedule attached to a Mistro Bot.
       //
