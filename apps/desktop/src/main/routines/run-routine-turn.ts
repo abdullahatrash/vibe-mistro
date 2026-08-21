@@ -230,7 +230,7 @@ export async function runRoutineTurn(
   const { agentId, agent } = deps.acquireAgent(workspace.dir)
   if (!deps.claimThread(agentId, routine.threadId)) {
     // Recorded on the Routine, NOT written into the conversation (ADR-0028 part 5).
-    return record({ outcome: 'deferred', error: 'The Bot was busy, so this run was skipped.' })
+    return record({ outcome: 'deferred', error: 'The Bot was busy when this run came due, so it was deferred.' })
   }
   deps.beginProtection(agentId)
 

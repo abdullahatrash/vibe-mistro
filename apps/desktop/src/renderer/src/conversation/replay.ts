@@ -59,7 +59,7 @@ export function foldTranscriptTail(
 ): ConversationState {
   let state = base
   for (const entry of entries) {
-    state = conversationReducer(state, toAction(entry, state, attachments))
+    state = conversationReducer(state, transcriptEntryAction(entry, state, attachments))
   }
   return state.isProcessing ? { ...state, isProcessing: false } : state
 }
@@ -111,8 +111,15 @@ export function shouldPutSnapshot(args: {
   return !args.usedSnapshot || args.tailLength > 0
 }
 
-/** Map one logged entry to its reducer action (using `state` to recover names). */
-function toAction(
+/**
+ * Map one logged entry to its reducer action (using `state` to recover names).
+ *
+ * Exported because the LIVE push of a **Routine**'s own entries (#471,
+ * `transcript:entry`) has to read them exactly as the reopen replay does. A
+ * routine turn watched as it happens and the same turn found later are then the
+ * same conversation, by construction rather than by two matching implementations.
+ */
+export function transcriptEntryAction(
   entry: TranscriptEntry,
   state: ConversationState,
   attachments?: AttachmentMap,

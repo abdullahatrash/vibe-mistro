@@ -21,6 +21,11 @@ export const threadChannels = {
   threadStatus: 'thread:status',
   /** Main -> renderer: a Thread's TITLE changed — see {@link ThreadTitleEvent}. */
   threadTitle: 'thread:title',
+  /**
+   * Main -> renderer: an entry main teed into a Thread's log that NO renderer
+   * could otherwise learn about — see {@link TranscriptEntryEvent}.
+   */
+  transcriptEntry: 'transcript:entry',
   /** List persisted Workspaces + their Threads for the cold launch list (ADR-0005). */
   listMetadata: 'metadata:list',
   /** Read a Thread's transcript for a process-free reopen (TB3): the stored fold
@@ -124,6 +129,31 @@ export interface ThreadStatusEvent {
 export interface ThreadTitleEvent {
   threadId: string
   title: string
+}
+
+/**
+ * Main -> renderer: ONE entry main just teed into a Thread's log which no live
+ * view could otherwise learn about (#471, ADR-0028 part 5).
+ *
+ * Every ordinary turn already reaches a mounted conversation twice over — the
+ * composer echoes the prompt it sent, and the agent's own output arrives as
+ * `acp:event`. A **Routine**'s turn has neither: main writes the prompt bubble,
+ * its routine chip and the "late" notice into the durable log with nobody in the
+ * loop, so a Bot open while its Routine fires used to show the reply streaming in
+ * with NOTHING above it — the agent appearing to answer a question it was never
+ * asked. Nothing durable was wrong (a reopen replayed it correctly); the live view
+ * was simply missing half the conversation.
+ *
+ * So this channel carries the entries that a live view cannot derive, and ONLY
+ * those: the prompt, the "late" notice, and the turn's end. Streamed agent output
+ * never travels here — it is already on `acp:event`, and a second copy would
+ * double every message. The renderer maps the entry through the SAME
+ * entry -> action map the reopen replay uses, so a Routine's turn reads identically
+ * whether you watched it happen or found it later.
+ */
+export interface TranscriptEntryEvent {
+  threadId: string
+  entry: TranscriptEntry
 }
 
 /** Token usage for a completed turn (`session/prompt` response). */

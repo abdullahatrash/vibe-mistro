@@ -186,6 +186,69 @@ describe('navReducer', () => {
       expect(navReducer(fromSettings, create).view).toBe('bot-form')
     })
   })
+
+  describe('Routine editor view (#471)', () => {
+    const inBotForm: NavState = {
+      selectedWorkspaceId: 'w1',
+      selectedThreadId: 'bot-1',
+      view: 'bot-form',
+      botForm: { mode: 'edit', threadId: 'bot-1' },
+    }
+    const open: NavAction = {
+      type: 'open-routine-form',
+      target: { mode: 'create', threadId: 'bot-1' },
+    }
+
+    it('opens over the Bot form, KEEPING it so there is somewhere to close back to', () => {
+      const state = navReducer(inBotForm, open)
+      expect(state.view).toBe('routine-form')
+      expect(state.routineForm).toEqual({ mode: 'create', threadId: 'bot-1' })
+      expect(state.botForm).toEqual({ mode: 'edit', threadId: 'bot-1' })
+      expect(state.selectedThreadId).toBe('bot-1')
+    })
+
+    it('closes back onto the Bot form it was opened from', () => {
+      const state = navReducer(navReducer(inBotForm, open), { type: 'close-routine-form' })
+      expect(state.view).toBe('bot-form')
+      expect(state.botForm).toEqual({ mode: 'edit', threadId: 'bot-1' })
+      expect(state.routineForm).toBeUndefined()
+    })
+
+    it('closes to the conversation when there is no Bot form behind it', () => {
+      const orphan: NavState = { selectedWorkspaceId: 'w1', selectedThreadId: 'bot-1', view: 'routine-form' }
+      const state = navReducer(orphan, { type: 'close-routine-form' })
+      expect(state.view).toBe('conversation')
+      expect(state.selectedThreadId).toBe('bot-1')
+    })
+
+    it('carries WHICH routine it is, so two edits are two different places', () => {
+      const first = navReducer(inBotForm, {
+        type: 'open-routine-form',
+        target: { mode: 'edit', threadId: 'bot-1', routineId: 'r1' },
+      })
+      const second = navReducer(first, {
+        type: 'open-routine-form',
+        target: { mode: 'edit', threadId: 'bot-1', routineId: 'r2' },
+      })
+      expect(second.routineForm).toEqual({ mode: 'edit', threadId: 'bot-1', routineId: 'r2' })
+      // Re-opening the SAME editor records one move, not two.
+      expect(navReducer(second, { type: 'open-routine-form', target: { mode: 'edit', threadId: 'bot-1', routineId: 'r2' } })).toBe(second)
+    })
+
+    it('drops the routine target on every route back to a conversation', () => {
+      const inEditor = navReducer(inBotForm, open)
+      for (const action of [
+        { type: 'select-thread', workspaceId: 'w1', threadId: 't9' },
+        { type: 'select-workspace', workspaceId: 'w2' },
+        { type: 'clear' },
+      ] satisfies NavAction[]) {
+        const state = navReducer(inEditor, action)
+        expect(state.view).toBe('conversation')
+        expect(state.routineForm).toBeUndefined()
+        expect(state.botForm).toBeUndefined()
+      }
+    })
+  })
 })
 
 describe('findSelectedThread (cold-outlet derivation)', () => {

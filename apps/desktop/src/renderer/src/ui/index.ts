@@ -13,6 +13,7 @@ export { Button, buttonVariants } from './button'
 export { IconButton } from './icon-button'
 export { Input } from './input'
 export { Textarea } from './textarea'
+export { Field } from './field'
 export { Badge, badgeVariants } from './badge'
 export { Chip } from './chip'
 

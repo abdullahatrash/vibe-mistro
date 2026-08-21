@@ -346,3 +346,55 @@ describe('runPromptTurn — the routine gate (#469)', () => {
     expect(agent.prompts).toBe(1)
   })
 })
+
+/**
+ * The live echo of a headless turn (#471): the entries this turn writes reach a
+ * window that happens to be watching, instead of appearing only on the next reopen.
+ */
+describe('runPromptTurn — a headless turn that IS being watched', () => {
+  function echoing(h: Harness): { delivery: PromptTurnDelivery; echoed: Teed[] } {
+    const echoed: Teed[] = []
+    return {
+      delivery: {
+        kind: 'headless',
+        routine: { name: 'Morning triage' },
+        // Production hands `createTranscriptEcho`, which tees AND pushes; the fake
+        // does both too, so the ordering assertions below are the real ordering.
+        echo: (threadId, entry) => {
+          h.deps.bridge.tee(threadId, entry)
+          echoed.push({ threadId, entry })
+        },
+      },
+      echoed,
+    }
+  }
+
+  it('echoes the prompt (with its routine chip) and the turn end, in log order', async () => {
+    const h = harness()
+    const { delivery, echoed } = echoing(h)
+
+    await runPromptTurn(h.deps, delivery, fakeAgent(), args())
+
+    expect(echoed.map((e) => e.entry.t)).toEqual(['user-prompt', 'turn-complete'])
+    expect(echoed[0].entry).toMatchObject({ t: 'user-prompt', routine: { name: 'Morning triage' } })
+    // The echo REPLACES the tee rather than doubling it: one copy per entry.
+    expect(h.teed.map((e) => e.entry.t)).toEqual(['user-prompt', 'turn-complete'])
+  })
+
+  it('echoes a pre-bind failure, the case a watcher would otherwise see as silence', async () => {
+    const h = harness()
+    const { delivery, echoed } = echoing(h)
+
+    await runPromptTurn(h.deps, delivery, fakeAgent({ openError: new Error('no session') }), args())
+
+    expect(echoed.map((e) => e.entry.t)).toEqual(['user-prompt', 'turn-error'])
+  })
+
+  it('still writes everything when nobody is watching — the echo is additive', async () => {
+    const h = harness()
+
+    await runPromptTurn(h.deps, h.headless, fakeAgent(), args())
+
+    expect(h.teed.map((e) => e.entry.t)).toEqual(['user-prompt', 'turn-complete'])
+  })
+})

@@ -22,6 +22,7 @@ import { BotMark } from './BotMark'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Textarea } from '../ui/textarea'
+import { Field } from '../ui/field'
 import { Menu, MenuContent, MenuRadioGroup, MenuRadioItem, MenuTrigger } from '../ui/menu'
 import {
   Dialog,
@@ -58,6 +59,7 @@ export function BotFormView({
   onSave,
   onDelete,
   onClose,
+  routines,
 }: {
   target: BotFormTarget
   /** Every Bot record — the edit target is looked up here, and seeds the colour. */
@@ -77,6 +79,17 @@ export function BotFormView({
   onDelete: (bot: BotRecord) => Promise<string[]>
   /** Leave the form — App returns the outlet to whatever was on screen. */
   onClose: () => void
+  /**
+   * This Bot's **Routines** (#471), rendered as a section of this form — the Bot
+   * form is where you go to change what a Bot IS, and what it does every morning is
+   * part of that answer (ADR-0028 part 7).
+   *
+   * A render prop rather than props threaded through: the list needs the routine
+   * records and four write paths, none of which this form has any other use for, and
+   * a Bot form that had to know about routines to render one would be the nesting
+   * the ADR rejected. Absent on a CREATE — there is no Bot to hang a routine on yet.
+   */
+  routines?: (bot: BotRecord) => ReactNode
 }): JSX.Element {
   const editing = target.mode === 'edit' ? (bots.find((b) => b.threadId === target.threadId) ?? null) : null
   // Seeded ONCE per form open: the view is keyed by its target in App, so a switch
@@ -260,6 +273,10 @@ export function BotFormView({
         />
       </Field>
 
+      {/* Routines (#471) — only for a Bot that exists: a routine is attached to a
+          Bot's Thread, and a create has none until it is saved. */}
+      {editing && routines?.(editing)}
+
       {problems.length > 0 && (
         // Main refused the write. Its messages are field-prefixed and specific —
         // shown verbatim rather than collapsed into "something went wrong".
@@ -319,46 +336,6 @@ export function BotFormView({
           </DialogContent>
         </Dialog>
       )}
-    </div>
-  )
-}
-
-/**
- * One labelled row of the form: label, control, then hint or error (never both).
- *
- * The label never WRAPS its control: two of these rows hold buttons (the colour
- * swatches and the Project menu), and a wrapping label makes every click on the
- * row fire the first one.
- */
-function Field({
-  label,
-  controlId,
-  hint,
-  error,
-  children,
-}: {
-  label: string
-  /** The id of the field's single input, when it has one — associates the label. */
-  controlId?: string
-  hint?: string
-  error?: string
-  children: ReactNode
-}): JSX.Element {
-  return (
-    <div className="flex flex-col gap-1.5">
-      {controlId ? (
-        <label htmlFor={controlId} className="text-[13px] font-medium text-foreground">
-          {label}
-        </label>
-      ) : (
-        <span className="text-[13px] font-medium text-foreground">{label}</span>
-      )}
-      {children}
-      {error ? (
-        <span className="text-[12px] text-destructive">{error}</span>
-      ) : hint ? (
-        <span className="text-[12px] leading-relaxed text-muted-foreground">{hint}</span>
-      ) : null}
     </div>
   )
 }

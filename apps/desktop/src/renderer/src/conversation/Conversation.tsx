@@ -35,6 +35,7 @@ import {
   foldTranscriptTail,
   parseSnapshotState,
   shouldPutSnapshot,
+  transcriptEntryAction,
   transcriptHasImages,
 } from './replay'
 import { replayCache } from './replay-cache'
@@ -361,6 +362,23 @@ export function Conversation({
       dispatch({ type: 'acp-event', payload: event.payload })
     })
   }, [thread.agentId, thread.workspaceId])
+
+  // A **Routine**'s turn, as it happens (#471). Main writes the prompt bubble, its
+  // routine chip and the "late" notice straight into the log with no renderer in
+  // the loop, so before this a Bot open while its Routine fired showed the reply
+  // streaming in with NOTHING above it — an agent answering a question nobody
+  // asked. The pushed entries go through the SAME entry -> action map the reopen
+  // replay uses, so watching a routine turn and finding it later agree.
+  //
+  // Only entries a live view cannot derive are pushed (main's `routine-echo.ts`),
+  // so nothing here can double what `acp:event` already delivered.
+  useEffect(() => {
+    return window.api.onTranscriptEntry((event) => {
+      if (event.threadId !== thread.threadId) return
+      liveSeen.current = true
+      dispatch(transcriptEntryAction(event.entry, stateRef.current))
+    })
+  }, [thread.threadId])
 
   // The actual send of ONE message as a fresh `session/prompt` (#105). Owns the
   // whole turn lifecycle — echo dispatch, IPC, result handling, and (in `finally`)
